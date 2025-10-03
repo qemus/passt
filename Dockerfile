@@ -12,13 +12,14 @@ ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 RUN set -eu && \
     apt-get update && \
     apt-get --no-install-recommends -y install \
-        build-essential && \
+        git build-essential && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 COPY . /src
 WORKDIR /src
 
+RUN git tag "$VERSION_ARG"
 RUN make
 
 FROM scratch
