@@ -1,9 +1,5 @@
 .dockerignore
-.git
 .github
-.gitignore
-.gitlab-ci.yml
-.gitmodules
 Dockerfile
 Dockerfile.archive
 compose.yml
