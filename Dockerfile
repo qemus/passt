@@ -3,6 +3,7 @@
 FROM debian:trixie-slim AS builder
 
 ARG VERSION_ARG="0.0"
+ARG BRANCH_ARG="master"
 ARG TARGETOS TARGETARCH
 
 ARG DEBCONF_NOWARNINGS="yes"
@@ -16,10 +17,8 @@ RUN set -eu && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-COPY . /src
-WORKDIR /src
-
-RUN git tag "$VERSION_ARG"
+RUN cd / && git clone --depth 1 --branch  "$BRANCH_ARG"  https://passt.top/passt
+WORKDIR /passt
 RUN make
 
 FROM scratch
