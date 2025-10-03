@@ -20,7 +20,9 @@ RUN set -eu && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 RUN mkdir /src && git clone --depth 1 --branch "$BRANCH_ARG"  https://passt.top/passt /src
+COPY ./isolation.c /src/
 WORKDIR /src
+
 RUN make
 RUN ./passt
 
