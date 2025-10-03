@@ -1,3 +1,18 @@
+<div align="center">
+<a href="https://github.com/qemus/passt"><img src="https://raw.githubusercontent.com/qemus/passt/master/.github/logo.png" title="Logo" style="max-width:100%;" width="128" /></a>
+</div>
+<div align="center">
+  
+[![Build]][build_url]
+[![Version]][tag_url]
+[![Size]][tag_url]
+[![Package]][pkg_url]
+[![Pulls]][hub_url]
+
+</div>
+
+Docker image of [Passt](https://passt.top), a tool that provides user-mode networking for virtual machines.
+
 # passt: Plug A Simple Socket Transport
 
 _passt_ implements a translation layer between a Layer-2 network interface and
@@ -317,91 +332,16 @@ With default options, _pasta_ scans for bound ports on init and non-init
 namespaces, and automatically forwards them from the other side. Port forwarding
 is fully configurable with command line options.
 
-## Try it
+## Stars 🌟
+[![Stars](https://starchart.cc/qemus/passt.svg?variant=adaptive)](https://starchart.cc/qemus/passt)
 
-### passt
+[build_url]: https://github.com/qemus/passt/
+[hub_url]: https://hub.docker.com/r/qemux/passt/
+[tag_url]: https://hub.docker.com/r/qemux/passt/tags
+[pkg_url]: https://github.com/qemus/passt/pkgs/container/passt
 
-* build from source:
-
-        git clone https://passt.top/passt
-        cd passt
-        make
-
-    * alternatively, install one of the [available packages](#availability)
-
-        Static binaries and packages are simply built with:
-
-            make pkgs
-
-* have a look at the _man_ page for synopsis and options:
-
-        man ./passt.1
-
-* run the demo script, that detaches user and network namespaces, configures the
-  new network namespace using `pasta`, starts `passt` and, optionally, `qemu`:
-
-        doc/demo.sh
-
-* alternatively, you can use
-  [libvirt](https://libvirt.org/formatdomain.html#userspace-slirp-or-passt-connection)
-  to start QEMU
-
-* and that's it, you should now have TCP connections, UDP, and ICMP/ICMPv6
-  echo working from/to the guest for IPv4 and IPv6
-
-* to connect to a service on the VM, just connect to the same port directly
-  with the address of the current network namespace
-
-### pasta
-
-* build from source:
-
-        git clone https://passt.top/passt
-        cd passt
-        make
-
-    * alternatively, install one of the [available packages](#availability)
-
-        Static binaries and packages are simply built with:
-
-            make pkgs
-
-* have a look at the _man_ page for synopsis and options:
-
-        man ./pasta.1
-
-* start pasta with:
-
-        ./pasta
-
-    * alternatively, use it directly with Podman (since Podman 4.3.2, or with
-      commit [`aa47e05ae4a0`](https://github.com/containers/podman/commit/aa47e05ae4a0d14a338cbe106b7eb9cdf098a529)):
-
-            podman run --net=pasta ...
-
-* you're now inside a new user and network namespace. For IPv6, SLAAC happens
-  right away as _pasta_ sets up the interface, but DHCPv6 support is available
-  as well. For IPv4, configure the interface with a DHCP client:
-
-        dhclient
-
-    and, optionally:
-
-        dhclient -6
-
-    * alternatively, start pasta as:
-
-            ./pasta --config-net
-
-        to let pasta configure networking in the namespace by itself, using
-        `netlink`
-
-    * ...or run the demo script:
-
-            doc/demo.sh
-
-* and that's it, you should now have TCP connections, UDP, and ICMP/ICMPv6
-  echo working from/to the namespace for IPv4 and IPv6
-
-* to connect to a service inside the namespace, just connect to the same port
-  using the loopback address.
+[Build]: https://github.com/qemus/passt/actions/workflows/build.yml/badge.svg
+[Size]: https://img.shields.io/docker/image-size/qemux/passt/latest?color=066da5&label=size
+[Pulls]: https://img.shields.io/docker/pulls/qemux/passt.svg?style=flat&label=pulls&logo=docker
+[Version]: https://img.shields.io/docker/v/qemux/passt/latest?arch=amd64&sort=semver&color=066da5
+[Package]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fipitio.github.io%2Fbackage%2Fqemus%2Fpasst%2Fpasst.json&query=%24.downloads&logo=github&style=flat&color=066da5&label=pulls
