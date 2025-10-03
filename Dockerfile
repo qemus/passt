@@ -42,6 +42,7 @@ COPY --from=builder /*.deb /passt.deb
 
 RUN set -eu && \
     dpkg -i /passt.deb && \
+    apt-get update && \
     apt-get --no-install-recommends -y install \
         iputils-ping && \
     apt-get clean && \
