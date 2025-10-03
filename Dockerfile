@@ -30,15 +30,15 @@ RUN set -eu && \
    make pkgs && \
   ./passt && \
    mv /src/*.deb /passt_${VERSION_ARG}_all.deb && \
-   mv /src/*.rpm /passt_${VERSION_ARG}.x86_64.rpm && \
-   ln -s /passt_${VERSION_ARG}_all.deb /passt.deb && \
-   ln -s /passt_${VERSION_ARG}.x86_64.rpm /passt.rpm
+   mv /src/*.rpm /passt_${VERSION_ARG}.x86_64.rpm
 
 FROM debian:trixie-slim
 
 ARG DEBCONF_NOWARNINGS="yes"
 ARG DEBIAN_FRONTEND="noninteractive"
 ARG DEBCONF_NONINTERACTIVE_SEEN="true"
+
+COPY --from=builder /*.deb /passt.deb
 
 RUN set -eu && \
     dpkg -i /passt.deb && \
