@@ -17,17 +17,28 @@ RUN set -eu && \
         ca-certificates \
         build-essential && \
     apt-get clean && \
+    git clone --depth 1 --branch "$BRANCH_ARG"  https://passt.top/passt /src && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN mkdir /src && git clone --depth 1 --branch "$BRANCH_ARG"  https://passt.top/passt /src
+# Override isolation code
 COPY ./isolation.c /src/
+
 WORKDIR /src
 
-RUN make pkgs
+RUN make
 RUN ./passt
 
 FROM scratch
 
-COPY --chmod=755 --from=builder /passt /passt
+COPY --chmod=755 --from=builder /src/passt /passt/
+COPY --chmod=755 --from=builder /src/passt.1 /passt/
+COPY --chmod=755 --from=builder /src/passt.avx2 /passt/
+COPY --chmod=755 --from=builder /src/pasta /passt/
+COPY --chmod=755 --from=builder /src/pasta.1 /passt/
+COPY --chmod=755 --from=builder /src/pasta.avx2 /passt/
+COPY --chmod=755 --from=builder /src/qrap /passt/
+COPY --chmod=755 --from=builder /src/qrap.1 /passt/
+COPY --chmod=755 --from=builder /src/passt-repair /passt/
+COPY --chmod=755 --from=builder /src/passt-repair.1 /passt/
 
-ENTRYPOINT ["/passt"]
+ENTRYPOINT ["/passt/passt"]
