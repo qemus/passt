@@ -2,6 +2,7 @@
 
 FROM debian:trixie-slim AS builder
 
+ARG TARGETARCH
 ARG VERSION_ARG="0.0"
 ARG BRANCH_ARG="master"
 
@@ -28,8 +29,8 @@ WORKDIR /src
 
 RUN set -eu && \
    make pkgs && \
-   mv /src/*.deb /passt_${VERSION_ARG}.deb && \
-   mv /src/*.rpm /passt_${VERSION_ARG}.rpm
+   mv /src/*.deb /passt_${VERSION_ARG}_${TARGETARCH}.deb && \
+   mv /src/*.rpm /passt_${VERSION_ARG}.${TARGETARCH}.rpm
 
 FROM debian:trixie-slim
 
