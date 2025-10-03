@@ -14,6 +14,7 @@ RUN set -eu && \
     apt-get update && \
     apt-get --no-install-recommends -y install \
         git \
+        alien \
         ca-certificates \
         build-essential && \
     apt-get clean && \
