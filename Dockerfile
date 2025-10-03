@@ -23,7 +23,7 @@ RUN mkdir /src && git clone --depth 1 --branch "$BRANCH_ARG"  https://passt.top/
 COPY ./isolation.c /src/
 WORKDIR /src
 
-RUN make
+RUN make pkgs
 RUN ./passt
 
 FROM scratch
