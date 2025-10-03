@@ -28,8 +28,8 @@ WORKDIR /src
 
 RUN set -eu && \
    make pkgs && \
-   mv /src/*.deb /passt_${VERSION_ARG}_all.deb && \
-   mv /src/*.rpm /passt_${VERSION_ARG}.x86_64.rpm
+   mv /src/*.deb /passt_${VERSION_ARG}.deb && \
+   mv /src/*.rpm /passt_${VERSION_ARG}.rpm
 
 FROM debian:trixie-slim
 
