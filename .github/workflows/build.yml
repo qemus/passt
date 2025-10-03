@@ -27,9 +27,8 @@ jobs:
           #!/bin/bash
           set -eu
           git ls-remote --tags https://passt.top/passt >/dev/null
-          latest_branch=$(git ls-remote --tags --sort="v:refname" https://passt.top/passt | tail -n1)
-          latest_tag=$(git ls-remote --tags --refs --sort="v:refname" https://passt.top/passt | tail -n1 | sed 's/.*\///' )
-          latest_tag="${latest_tag%%.*}"
+          latest_branch=$(git ls-remote --tags --refs --sort="v:refname" https://passt.top/passt | tail -n1 | sed 's/.*\///' )
+          latest_tag="${latest_branch%%.*}"
           echo "Found tag: \"${latest_tag}\"" 
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
           echo "latest_branch=$latest_branch" >> $GITHUB_ENV
