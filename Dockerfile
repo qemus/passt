@@ -22,6 +22,7 @@ RUN set -eu && \
 RUN mkdir /src && git clone --depth 1 --branch "$BRANCH_ARG"  https://passt.top/passt /src
 WORKDIR /src
 RUN make
+RUN ./passt
 
 FROM scratch
 
