@@ -1,0 +1,33 @@
+name: Sync
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Repo Sync
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      packages: write
+      contents: read
+    steps:
+    - uses: actions/checkout@v5
+    - uses: repo-sync/github-sync@v2
+      name: Sync repo to branch
+      with:
+        source_repo: "https://passt.top/passt"
+        source_branch: master
+        destination_branch: merge
+        github_token: ${{ secrets.TOKEN }}
+    - uses: repo-sync/pull-request@v2
+      name: Create pull request
+      with:
+        source_branch: merge
+        destination_branch: master
+        github_token: ${{ secrets.TOKEN }}
