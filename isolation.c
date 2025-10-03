@@ -246,48 +246,6 @@ void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
 
 	if (setuid(uid) != 0)
 		die_perror("Can't set UID to %u", uid);
-
-	if (*userns) { /* If given a userns, join it */
-		int ufd;
-
-		ufd = open(userns, O_RDONLY | O_CLOEXEC);
-		if (ufd < 0)
-			die_perror("Couldn't open user namespace %s", userns);
-
-		if (setns(ufd, CLONE_NEWUSER) != 0)
-			die_perror("Couldn't enter user namespace %s", userns);
-
-		close(ufd);
-
-	} else if (use_userns) { /* Create and join a new userns */
-		if (unshare(CLONE_NEWUSER) != 0)
-			die_perror("Couldn't create user namespace");
-	}
-
-	/* Joining a new userns gives us full capabilities; drop the
-	 * ones we don't need.  With --netns-only we haven't changed
-	 * userns but we can drop more capabilities now than at
-	 * isolate_initial()
-	 */
-	/* Keep CAP_SYS_ADMIN, so we can unshare() further in
-	 * isolate_prefork(), pasta also needs it to setns() into the
-	 * netns
-	 */
-	ns_caps |= BIT(CAP_SYS_ADMIN);
-	if (mode == MODE_PASTA) {
-		/* Keep CAP_NET_ADMIN, so we can configure the if */
-		ns_caps |= BIT(CAP_NET_ADMIN);
-		/* Keep CAP_NET_BIND_SERVICE, so we can splice
-		 * outbound connections to low port numbers
-		 */
-		ns_caps |= BIT(CAP_NET_BIND_SERVICE);
-		/* Keep CAP_SYS_PTRACE to join the netns of an
-		 * existing process */
-		if (*userns || !use_userns)
-			ns_caps |= BIT(CAP_SYS_PTRACE);
-	}
-
-	drop_caps_ep_except(ns_caps);
 }
 
 /**
