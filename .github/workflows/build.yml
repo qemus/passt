@@ -27,10 +27,12 @@ jobs:
           #!/bin/bash
           set -eu
           git ls-remote --tags https://passt.top/passt >/dev/null
+          latest_branch=$(git ls-remote --tags --sort="v:refname" https://passt.top/passt | tail -n1)
           latest_tag=$(git ls-remote --tags --refs --sort="v:refname" https://passt.top/passt | tail -n1 | sed 's/.*\///' )
           latest_tag="${latest_tag%%.*}"
           echo "Found tag: \"${latest_tag}\"" 
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+          echo "latest_branch=$latest_branch" >> $GITHUB_ENV
       - 
         name: Check if the tag exists locally
         uses: action-pack/tag-exists@v1
@@ -106,6 +108,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
+            BRANCH_ARG=${{ env.latest_branch }}
             VERSION_ARG=${{ steps.meta.outputs.version }}
       -
         name: Create a release
