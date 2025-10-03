@@ -26,7 +26,7 @@ COPY ./isolation.c /src/
 
 WORKDIR /src
 
-RUN make
+RUN make pkgs
 RUN ./passt
 
 FROM scratch
