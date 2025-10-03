@@ -109,6 +109,22 @@ jobs:
           build-args: |
             BRANCH_ARG=${{ env.latest_branch }}
             VERSION_ARG=${{ steps.meta.outputs.version }}
+      - 
+        name: Extract packages
+        if: env.exists == 'false'
+        uses: shrink/actions-docker-extract@v3
+        with:
+          image: ${{ secrets.DOCKERHUB_REPO }}:latest
+          path: "passt_${VERSION_ARG}_all.deb"
+          destination: "output"
+      - 
+        name: Extract packages
+        if: env.exists == 'false'
+        uses: shrink/actions-docker-extract@v3
+        with:
+          image: ${{ secrets.DOCKERHUB_REPO }}:latest
+          path: "passt_${VERSION_ARG}.x86_64.rpm"
+          destination: "output"
       -
         name: Create a release
         if: env.exists == 'false'
@@ -117,6 +133,14 @@ jobs:
           tag: "v${{ steps.meta.outputs.version }}"
           title: "v${{ steps.meta.outputs.version }}"
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
+      -
+        name: Update release
+        if: env.exists == 'false'
+        uses: AButler/upload-release-assets@v3.0
+        with:
+          files: 'output/passt_${VERSION_ARG}.x86_64.rpm'
+          release-tag: "v${{ steps.meta.outputs.version }}"
+          repo-token: ${{ secrets.REPO_ACCESS_TOKEN }}
       -
         name: Send mail
         if: env.exists == 'false'
