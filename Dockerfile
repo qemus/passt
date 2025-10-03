@@ -28,7 +28,6 @@ WORKDIR /src
 
 RUN set -eu && \
    make pkgs && \
-  ./passt && \
    mv /src/*.deb /passt_${VERSION_ARG}_all.deb && \
    mv /src/*.rpm /passt_${VERSION_ARG}.x86_64.rpm
 
@@ -46,7 +45,6 @@ RUN set -eu && \
     apt-get --no-install-recommends -y install \
         iputils-ping && \
     apt-get clean && \
-    passt && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ENTRYPOINT ["passt"]
