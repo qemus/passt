@@ -25,8 +25,8 @@ jobs:
         name: Parse tag from query output
         run: |
           #!/bin/bash
-          git ls-remote --tags --sort="v:refname" git://passt.top/passt.git | tail -n1
-          latest_tag=$(git ls-remote --tags --sort="v:refname" git://passt.top/passt.git | tail -n1)
+          git ls-remote --tags --sort="v:refname" https://passt.top/passt | tail -n1
+          latest_tag=$(git ls-remote --tags --sort="v:refname" https://passt.top/passt | tail -n1)
           echo "Found tag: \"${latest_tag}\"" 
           echo "latest_tag=$latest_tag" >> $GITHUB_ENV
       -
