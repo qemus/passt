@@ -1,147 +1,9 @@
-<!---
-SPDX-License-Identifier: GPL-2.0-or-later
-Copyright (c) 2021-2022 Red Hat GmbH
-Author: Stefano Brivio <sbrivio@redhat.com>
--->
-
-<style scoped>
-.mobile_hide {
-  visibility: hidden;
-  display: none;
-}
-img {
-  visibility: hidden;
-  display: none;
-}
-li {
-  margin: 10px;
-}
-
-@media only screen and (min-width: 768px) {
-  .mobile_hide {
-    visibility: visible;
-    display: inherit;
-  }
-  img {
-    visibility: visible;
-    display: inherit;
-  }
-  li {
-    margin: 0px;
-  }
-}
-
-.mobile_show {
-  visibility: visible;
-  display: inherit;
-}
-@media only screen and (min-width: 768px) {
-  .mobile_show {
-    visibility: hidden;
-    display: none;
-  }
-}
-</style>
-
 # passt: Plug A Simple Socket Transport
 
 _passt_ implements a translation layer between a Layer-2 network interface and
 native Layer-4 sockets (TCP, UDP, ICMP/ICMPv6 echo) on a host. It doesn't
 require any capabilities or privileges, and it can be used as a simple
 replacement for Slirp.
-
-<div class="mobile_hide">
-<picture>
-  <source type="image/webp" srcset="/builds/latest/web/passt_overview.webp">
-  <source type="image/png" srcset="/builds/latest/web/passt_overview.png">
-  <img src="/builds/latest/web/passt_overview.png" usemap="#image-map" class="bright" style="z-index: 20; position: relative;" alt="Overview diagram of passt">
-</picture>
-<map name="image-map" id="map_overview" class="mobile_hide">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/tcp.7.html" coords="229,275,246,320,306,294,287,249" shape="poly">
-    <area class="map_area" target="_blank" href="https://lwn.net/Articles/420799/" coords="230,201,243,246,297,232,289,186" shape="poly">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/udp.7.html" coords="234,129,236,175,297,169,293,126" shape="poly">
-    <area class="map_area" target="_blank" href="https://en.wiktionary.org/wiki/passen#German" coords="387,516,841,440,847,476,393,553" shape="poly">
-    <area class="map_area" target="_blank" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/udp.c" coords="398,123,520,157" shape="rect">
-    <area class="map_area" target="_blank" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/ping.c" coords="397,164,517,197" shape="rect">
-    <area class="map_area" target="_blank" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/tcp.c" coords="398,203,516,237" shape="rect">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/unix.7.html" coords="569,306,674,359" shape="rect">
-    <area class="map_area" target="_blank" href="/passt/tree/udp.c" coords="719,152,740,176,792,134,768,108" shape="poly">
-    <area class="map_area" target="_blank" href="/passt/tree/icmp.c" coords="727,206,827,120,854,150,754,238" shape="poly">
-    <area class="map_area" target="_blank" href="/passt/tree/tcp.c" coords="730,273,774,326,947,176,902,119" shape="poly">
-    <area class="map_area" target="_blank" href="/passt/tree/igmp.c" coords="865,273,912,295" shape="rect">
-    <area class="map_area" target="_blank" href="/passt/tree/arp.c" coords="854,300,897,320" shape="rect">
-    <area class="map_area" target="_blank" href="/passt/tree/ndp.c" coords="869,325,909,344" shape="rect">
-    <area class="map_area" target="_blank" href="/passt/tree/mld.c" coords="924,267,964,289" shape="rect">
-    <area class="map_area" target="_blank" href="/passt/tree/dhcpv6.c" coords="918,297,986,317" shape="rect">
-    <area class="map_area" target="_blank" href="/passt/tree/dhcp.c" coords="931,328,981,352" shape="rect">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/udp.7.html" coords="1073,115,1059,154,1120,176,1133,137" shape="poly">
-    <area class="map_area" target="_blank" href="https://lwn.net/Articles/420799/" coords="966,113,942,152,1000,175,1017,136" shape="poly">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/tcp.7.html" coords="1059,175,1039,213,1098,237,1116,197" shape="poly">
-    <area class="map_area" target="_blank" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/udp.c" coords="1203,154,1326,189" shape="rect">
-    <area class="map_area" target="_blank" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/ping.c" coords="1202,195,1327,228" shape="rect">
-    <area class="map_area" target="_blank" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/tcp.c" coords="1204,236,1327,269" shape="rect">
-    <area class="map_area" target="_blank" href="https://en.wikipedia.org/wiki/OSI_model#Layer_architecture" coords="1159,52,1325,147" shape="rect">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man4/veth.4.html" coords="1119,351,1157,339,1198,340,1236,345,1258,359,1229,377,1176,377,1139,375,1114,365" shape="poly">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man4/veth.4.html" coords="1044,471,1090,461,1126,462,1150,464,1176,479,1160,491,1121,500,1081,501,1044,491,1037,483" shape="poly">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/network_namespaces.7.html" coords="240,379,524,452" shape="rect">
-    <area class="map_area" target="_blank" href="https://man7.org/linux/man-pages/man7/netlink.7.html" coords="1119,278,1117,293,1165,304,1169,288" shape="poly">
-    <area class="map_area" target="_blank" href="/passt/tree/conf.c" coords="989,294,1040,264,1089,280,986,344" shape="poly">
-</map>
-<canvas id="map_highlight" style="border: 0px; z-index: 10; position: fixed; pointer-events: none"></canvas>
-</div>
-<script>
-function canvas_position(el) {
-	var rect = el.getBoundingClientRect();
-	var canvas = document.getElementById('map_highlight');
-
-	canvas.width = rect.right - rect.left;
-	canvas.height = rect.bottom - rect.top;
-	canvas.style.left = rect.left + 'px';
-	canvas.style.top = rect.top + 'px';
-}
-
-function map_hover() {
-	var coords = this.coords.split(',');
-	var canvas = document.getElementById('map_highlight');
-	var ctx = canvas.getContext('2d');
-
-	canvas_position(this);
-
-	ctx.fillStyle = 'rgba(255, 255, 255, .3)';
-	ctx.lineWidth = 1.5;
-	ctx.strokeStyle = 'rgba(255, 255, 100, 1)';
-
-	ctx.beginPath();
-	ctx.setLineDash([15, 15]);
-	if (this.shape == "poly") {
-		ctx.moveTo(coords[0], coords[1]);
-		for (item = 2; item < coords.length - 1; item += 2) {
-			ctx.lineTo(coords[item], coords[item + 1])
-		}
-	} else if (this.shape == "rect") {
-		ctx.rect(coords[0], coords[1],
-			 coords[2] - coords[0], coords[3] - coords[1]);
-	}
-
-	ctx.closePath();
-	ctx.stroke();
-	ctx.fill();
-}
-
-function map_out() {
-	var canvas = document.getElementById('map_highlight');
-	var ctx = canvas.getContext('2d');
-
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-var map_areas = document.getElementsByClassName("map_area");
-
-for (var i = 0; i < map_areas.length; i++) {
-	map_areas[i].onmouseover = map_hover;
-	map_areas[i].onmouseout = map_out;
-}
-</script>
 
 # pasta: Pack A Subtle Tap Abstraction
 
@@ -152,16 +14,8 @@ the host, hence not requiring any capabilities or privileges.
 
 It also implements a tap bypass path for local connections: packets with a local
 destination address are moved directly between Layer-4 sockets, avoiding Layer-2
-translations, using the _splice_(2) and _recvmmsg_(2)/_sendmmsg_(2) system calls
+translations, using the _splice_(2) and _recvmmsg_(2)/_sendmmsg_(2) sysm calls
 for TCP and UDP, respectively.
-
-<div class="mobile_hide">
-<picture>
-  <source type="image/webp" srcset="/builds/latest/web/pasta_overview.webp">
-  <source type="image/png" srcset="/builds/latest/web/pasta_overview.png">
-  <img src="/builds/latest/web/passt_overview.png" class="bright" style="z-index: 20; position: relative;" alt="Overview diagram of pasta">
-</picture>
-</div>
 
 - [Motivation](#motivation)
 - [Features](#features)
@@ -463,75 +317,6 @@ With default options, _pasta_ scans for bound ports on init and non-init
 namespaces, and automatically forwards them from the other side. Port forwarding
 is fully configurable with command line options.
 
-## Demo
-
-### pasta
-
-<link rel="stylesheet" type="text/css" href="/static/asciinema-player.css" />
-<script src="/static/asciinema-player.min.js"></script>
-
-<div class="mobile_hide" id="demo_pasta_div" style="display: grid; grid-template-columns: 1fr 1fr;">
-  <div id="demo_pasta" style="width: 99%;"></div>
-  <div id="demo_podman" style="width: 99%;"></div>
-</div>
-<script>
-if (getComputedStyle(document.getElementById('demo_pasta_div'))['visibility'] == "visible") {
-	demo_pasta_player = AsciinemaPlayer.create('/builds/latest/web/demo_pasta.cast',
-						   document.getElementById('demo_pasta'),
-						   { cols: 130, rows: 41,
-						     preload: true, poster: 'npt:0:4'
-						   });
-
-	demo_podman_player = AsciinemaPlayer.create('/builds/latest/web/demo_podman.cast',
-						    document.getElementById('demo_podman'),
-						   { cols: 130, rows: 41,
-						     preload: true, poster: 'npt:0:4'
-						   });
-}
-</script>
-<div class="mobile_show">
-  <p><a href="/builds/latest/web/demo_pasta.html">Overview of pasta functionality</a></p>
-  <p><a href="/builds/latest/web/demo_podman.html">Overview of Podman operation with pasta</a></p>
-</div>
-
-### passt
-
-<div class="mobile_hide" id="demo_passt" style="width: 70%; height: auto; max-height: 90%"></div>
-<script>
-if (getComputedStyle(document.getElementById('demo_passt'))['visibility'] == "visible") {
-	demo_passt_player = AsciinemaPlayer.create('/builds/latest/web/demo_passt.cast',
-						   document.getElementById('demo_passt'),
-						   { cols: 130, rows: 41,
-						     preload: true, poster: 'npt:0:4'
-						   });
-}
-</script>
-<div class="mobile_show">
-  <p><a href="/builds/latest/web/demo_passt.html">Overview of passt functionality</a></p>
-</div>
-
-## Continuous Integration
-
-<div class="mobile_hide" id="ci" style="width: 90%; height: auto; max-height: 90%"></div>
-<script>
-if (getComputedStyle(document.getElementById('ci'))['visibility'] == "visible") {
-	ci_player = AsciinemaPlayer.create('/builds/latest/web/ci.cast',
-					   document.getElementById('ci'),
-					   { cols: 240, rows: 51, poster: 'npt:999:0' }
-					  );
-}
-</script>
-<div class="mobile_hide"><script src="/builds/latest/web/ci.js"></script></div>
-<div class="mobile_show">
-  <p><a href="/builds/latest/web/ci.html">Continuous integration test run</a></p>
-</div>
-
-See also the [test logs](/builds/latest/test/).
-
-## Performance
-
-<script src="/builds/latest/web/perf.js"></script>
-
 ## Try it
 
 ### passt
@@ -620,33 +405,3 @@ See also the [test logs](/builds/latest/test/).
 
 * to connect to a service inside the namespace, just connect to the same port
   using the loopback address.
-
-## Contribute
-
-### [Mailing Lists](/passt/lists)
-* Submit, review patches, and discuss development ideas on
-  [`passt-dev`](https://lists.passt.top/postorius/lists/passt-dev.passt.top/).
-  Please refer to the [CONTRIBUTING.md](/passt/tree/CONTRIBUTING.md) file for
-  details.
-
-* Ask your questions and discuss usage needs on
-  [`passt-user`](https://lists.passt.top/postorius/lists/passt-user.passt.top/)
-
-### [Bug Reports and Feature Requests](/passt/bugs)
-* **Pick up an [open bug](https://bugs.passt.top/buglist.cgi?bug_severity=blocker&bug_severity=quite%20bad&bug_severity=normal&bug_severity=minor&columnlist=bug_status%2Ccomponent%2Cpriority%2Cbug_severity%2Cassigned_to%2Cshort_desc%2Cchangeddate&known_name=Open%20bugs%2C%20by%20priority&list_id=85&query_based_on=Open%20bugs%2C%20by%20priority&query_format=advanced&resolution=---)**
-* **Implement a [feature request](https://bugs.passt.top/buglist.cgi?bug_severity=enhancement&bug_severity=feature&columnlist=bug_status%2Ccomponent%2Cpriority%2Cbug_severity%2Cassigned_to%2Cshort_desc%2Cchangeddate&known_name=Features%2C%20by%20priority&list_id=81&order=priority%2Cbug_status%2Cassigned_to%2Cbug_id&query_based_on=Features%2C%20by%20priority&query_format=advanced&resolution=---)**
-* Browse all [open items](https://bugs.passt.top/buglist.cgi?columnlist=bug_status%2Ccomponent%2Cpriority%2Cbug_severity%2Cassigned_to%2Cshort_desc%2Cchangeddate&known_name=All%20items%2C%20by%20priority&list_id=83&query_based_on=All%20items%2C%20by%20priority&query_format=advanced&resolution=---)
-* ...or [file a bug](https://bugs.passt.top/enter_bug.cgi)
-
-### [Chat](/passt/chat)
-* Somebody might be available on [IRC](https://irc.passt.top) on `#passt` at
-  [Libera.Chat](https://libera.chat/)
-
-### Weekly development [meeting](https://pad.passt.top/p/weekly)
-* Open to everybody! Feel free to join and propose a different time directly on
-  the agenda.
-
-## Security and Vulnerability Reports
-
-* Please send an email to [passt-sec](mailto:passt-sec@passt.top), private list,
-  no subscription required
