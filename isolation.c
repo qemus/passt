@@ -179,39 +179,6 @@ static void clamp_caps(void)
  */
 void isolate_initial(int argc, char **argv)
 {
-	uint64_t keep;
-
-	/* We want to keep CAP_NET_BIND_SERVICE in the initial
-	 * namespace if we have it, so that we can forward low ports
-	 * into the guest/namespace
-	 *
-	 * We have to keep CAP_SETUID and CAP_SETGID at this stage, so
-	 * that we can switch user away from root.
-	 *
-	 * We have to keep some capabilities for the --netns-only case:
-	 *  - CAP_SYS_ADMIN, so that we can setns() to the netns.
-	 *  - Keep CAP_NET_ADMIN, so that we can configure interfaces
-	 *
-	 * It's debatable whether it's useful to drop caps when we
-	 * retain SETUID and SYS_ADMIN, but we might as well.  We drop
-	 * further capabilities in isolate_user() and
-	 * isolate_prefork().
-	 */
-	keep = BIT(CAP_NET_BIND_SERVICE) | BIT(CAP_SETUID) | BIT(CAP_SETGID) |
-	       BIT(CAP_SYS_ADMIN) | BIT(CAP_NET_ADMIN);
-
-	/* Since Linux 5.12, if we want to update /proc/self/uid_map to create
-	 * a mapping from UID 0, which only happens with pasta spawning a child
-	 * from a non-init user namespace (pasta can't run as root), we need to
-	 * retain CAP_SETFCAP too.
-	 * We also need to keep CAP_SYS_PTRACE in order to join an existing netns
-	 * path under /proc/$pid/ns/net which was created in the same userns.
-	 */
-	if (!ns_is_init() && !geteuid())
-		keep |= BIT(CAP_SETFCAP) | BIT(CAP_SYS_PTRACE);
-
-	drop_caps_ep_except(keep);
-
 	close_open_files(argc, argv);
 }
 
@@ -232,8 +199,6 @@ void isolate_initial(int argc, char **argv)
 void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
 		  enum passt_modes mode)
 {
-	uint64_t ns_caps = 0;
-
 	/* First set our UID & GID in the original namespace */
 	if (setgroups(0, NULL)) {
 		/* If we don't have CAP_SETGID, this will EPERM */
@@ -263,63 +228,6 @@ void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
  */
 int isolate_prefork(const struct ctx *c)
 {
-	int flags = CLONE_NEWIPC | CLONE_NEWNS | CLONE_NEWUTS;
-	uint64_t ns_caps = 0;
-
-	/* If we run in foreground, we have no chance to actually move to a new
-	 * PID namespace. For passt, use CLONE_NEWPID anyway, in case somebody
-	 * ever gets around seccomp profiles -- there's no harm in passing it.
-	 */
-	if (!c->foreground || c->mode != MODE_PASTA)
-		flags |= CLONE_NEWPID;
-
-	if (unshare(flags)) {
-		err_perror("Failed to detach isolating namespaces");
-		return -errno;
-	}
-
-	if (mount("", "/", "", MS_UNBINDABLE | MS_REC, NULL)) {
-		err_perror("Failed to remount /");
-		return -errno;
-	}
-
-	if (mount("", TMPDIR, "tmpfs",
-		  MS_NODEV | MS_NOEXEC | MS_NOSUID | MS_RDONLY,
-		  "nr_inodes=2,nr_blocks=0")) {
-		err_perror("Failed to mount empty tmpfs for pivot_root()");
-		return -errno;
-	}
-
-	if (chdir(TMPDIR)) {
-		err_perror("Failed to change directory into empty tmpfs");
-		return -errno;
-	}
-
-	if (syscall(SYS_pivot_root, ".", ".")) {
-		err_perror("Failed to pivot_root() into empty tmpfs");
-		return -errno;
-	}
-
-	if (umount2(".", MNT_DETACH | UMOUNT_NOFOLLOW)) {
-		err_perror("Failed to unmount original root filesystem");
-		return -errno;
-	}
-
-	/* Now that initialization is more-or-less complete, we can
-	 * drop further capabilities
-	 */
-	if (c->mode == MODE_PASTA) {
-		/* Keep CAP_SYS_ADMIN, so we can enter the netns */
-		ns_caps |= BIT(CAP_SYS_ADMIN);
-		/* Keep CAP_NET_BIND_SERVICE, so we can splice
-		 * outbound connections to low port numbers
-		 */
-		ns_caps |= BIT(CAP_NET_BIND_SERVICE);
-	}
-
-	clamp_caps();
-	drop_caps_ep_except(ns_caps);
-
 	return 0;
 }
 
@@ -333,28 +241,5 @@ int isolate_prefork(const struct ctx *c)
  */
 void isolate_postfork(const struct ctx *c)
 {
-	struct sock_fprog prog;
-
-	prctl(PR_SET_DUMPABLE, 0);
-
-	switch (c->mode) {
-	case MODE_PASST:
-		prog.len = (unsigned short)ARRAY_SIZE(filter_passt);
-		prog.filter = filter_passt;
-		break;
-	case MODE_PASTA:
-		prog.len = (unsigned short)ARRAY_SIZE(filter_pasta);
-		prog.filter = filter_pasta;
-		break;
-	case MODE_VU:
-		prog.len = (unsigned short)ARRAY_SIZE(filter_vu);
-		prog.filter = filter_vu;
-		break;
-	default:
-		ASSERT(0);
-	}
-
-	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||
-	    prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog))
-		die_perror("Failed to apply seccomp filter");
+    return;
 }
