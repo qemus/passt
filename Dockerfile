@@ -39,7 +39,7 @@ ARG DEBIAN_FRONTEND="noninteractive"
 ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 
 RUN set -eu && \
-    dpkg -i passt_${VERSION_ARG}_all.deb && \
+    dpkg -i /passt_${VERSION_ARG}_all.deb && \
     apt-get --no-install-recommends -y install \
         iputils-ping && \
     apt-get clean && \
