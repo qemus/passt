@@ -3,7 +3,7 @@
 FROM debian:trixie-slim AS builder
 
 ARG VERSION_ARG="0.0"
-ARG BRANCH_ARG="xxxmaster"
+ARG BRANCH_ARG="master"
 ARG TARGETOS TARGETARCH
 
 ARG DEBCONF_NOWARNINGS="yes"
@@ -13,7 +13,9 @@ ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 RUN set -eu && \
     apt-get update && \
     apt-get --no-install-recommends -y install \
-        git build-essential && \
+        git \
+        ca-certificates \
+        build-essential && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
