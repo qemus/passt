@@ -115,7 +115,7 @@ jobs:
         uses: shrink/actions-docker-extract@v3
         with:
           image: ${{ secrets.DOCKERHUB_REPO }}:latest
-          path: "passt_${VERSION_ARG}_all.deb"
+          path: "passt.deb"
           destination: "output"
       - 
         name: Extract packages
@@ -123,7 +123,7 @@ jobs:
         uses: shrink/actions-docker-extract@v3
         with:
           image: ${{ secrets.DOCKERHUB_REPO }}:latest
-          path: "passt_${VERSION_ARG}.x86_64.rpm"
+          path: "passt.rpm"
           destination: "output"
       -
         name: Create a release
