@@ -4,7 +4,6 @@ FROM debian:trixie-slim AS builder
 
 ARG VERSION_ARG="0.0"
 ARG BRANCH_ARG="master"
-ARG TARGETOS TARGETARCH
 
 ARG DEBCONF_NOWARNINGS="yes"
 ARG DEBIAN_FRONTEND="noninteractive"
@@ -29,18 +28,22 @@ WORKDIR /src
 
 RUN make pkgs
 RUN ./passt
+RUN mv /src/*.deb /passt_${VERSION_ARG}_all.deb
+RUN mv /src/*.rpm /passt_${VERSION_ARG}.x86_64.deb
 
-FROM scratch
+FROM debian:trixie-slim
 
-COPY --chmod=755 --from=builder /src/passt /passt/
-COPY --chmod=755 --from=builder /src/passt.1 /passt/
-COPY --chmod=755 --from=builder /src/passt.avx2 /passt/
-COPY --chmod=755 --from=builder /src/pasta /passt/
-COPY --chmod=755 --from=builder /src/pasta.1 /passt/
-COPY --chmod=755 --from=builder /src/pasta.avx2 /passt/
-COPY --chmod=755 --from=builder /src/qrap /passt/
-COPY --chmod=755 --from=builder /src/qrap.1 /passt/
-COPY --chmod=755 --from=builder /src/passt-repair /passt/
-COPY --chmod=755 --from=builder /src/passt-repair.1 /passt/
+ARG VERSION_ARG="0.0"
+ARG DEBCONF_NOWARNINGS="yes"
+ARG DEBIAN_FRONTEND="noninteractive"
+ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 
-ENTRYPOINT ["/passt/passt"]
+RUN set -eu && \
+    dpkg -i passt_${VERSION_ARG}_all.deb && \
+    apt-get --no-install-recommends -y install \
+        iputils-ping && \
+    apt-get clean && \
+    passt && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+ENTRYPOINT ["passt"]
