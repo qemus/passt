@@ -39,6 +39,7 @@ ARG DEBIAN_FRONTEND="noninteractive"
 ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 
 COPY --from=builder /*.deb /passt.deb
+COPY --from=builder /*.rpm /passt.rpm
 
 RUN set -eu && \
     dpkg -i /passt.deb && \
