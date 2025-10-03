@@ -15,6 +15,7 @@ RUN set -eu && \
     apt-get --no-install-recommends -y install \
         git \
         alien \
+        fakeroot \
         ca-certificates \
         build-essential && \
     apt-get clean && \
