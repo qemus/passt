@@ -93,34 +93,6 @@
 #define CAP_WORDS	_LINUX_CAPABILITY_U32S_3
 
 /**
- * drop_caps_ep_except() - Drop capabilities from effective & permitted sets
- * @keep:	Capabilities to keep
- */
-static void drop_caps_ep_except(uint64_t keep)
-{
-    return;
-}
-
-/**
- * clamp_caps() - Prevent any children from gaining caps
- *
- * This drops all capabilities from both the inheritable and the
- * bounding set.  This means that any exec()ed processes can't gain
- * capabilities, even if they have file capabilities which would grant
- * them.  We shouldn't ever exec() in any case, but this provides an
- * additional layer of protection.  Executing this requires
- * CAP_SETPCAP, which we will have within our userns.
- *
- * Note that dropping capabilities from the bounding set limits
- * exec()ed processes, but does not remove them from the effective or
- * permitted sets, so it doesn't reduce our own capabilities.
- */
-static void clamp_caps(void)
-{
-    return;
-}
-
-/**
  * isolate_initial() - Early, mostly config independent self isolation
  * @argc:	Argument count
  * @argv:	Command line options: only --fd (if present) is relevant here
