@@ -41,7 +41,8 @@ jobs:
       -
         name: Finish when found
         run: |
-          #!/bin/bash          
+          #!/bin/bash
+          set -eu
           val="${{ steps.checkTag.outputs.exists }}"
           echo "exists=${val}" >> $GITHUB_ENV
       -
@@ -134,11 +135,20 @@ jobs:
           title: "v${{ steps.meta.outputs.version }}"
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
       -
+        name: Rename packages
+        if: env.exists == 'false'
+        run: |
+          #!/bin/bash
+          set -eu
+          mv output/passt.deb output/passt_${VERSION_ARG}_all.deb
+          mv output/passt.rpm output/passt_${VERSION_ARG}.x86_64.rpm
+          echo "exists=${val}" >> $GITHUB_ENV
+      -
         name: Update release
         if: env.exists == 'false'
         uses: AButler/upload-release-assets@v3.0
         with:
-          files: 'output/passt_${VERSION_ARG}.x86_64.rpm'
+          files: 'output/*'
           release-tag: "v${{ steps.meta.outputs.version }}"
           repo-token: ${{ secrets.REPO_ACCESS_TOKEN }}
       -
