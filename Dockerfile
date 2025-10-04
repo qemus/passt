@@ -29,7 +29,7 @@ WORKDIR /src
 
 RUN set -eu && \
    make pkgs && \
-   mv /src/*.deb /passt_${VERSION_ARG}_${TARGETARCH}.deb
+   mv /src/*.deb /passt.deb
 
 FROM debian:trixie-slim
 
@@ -40,8 +40,6 @@ ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 COPY --from=builder /*.deb /
 
 RUN set -eu && \
-    pkg=$(find / -maxdepth 1 -type f -iname "passt_*.deb" -print -quit) && \
-    ln -s "$pkg" /passt.deb && \
     dpkg -i /passt.deb && \
     apt-get update && \
     apt-get --no-install-recommends -y install \
