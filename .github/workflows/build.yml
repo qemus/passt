@@ -103,6 +103,7 @@ jobs:
           context: .
           push: true
           provenance: false
+          outputs: "type=local,dest=output"
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -111,23 +112,12 @@ jobs:
             BRANCH_ARG=${{ env.latest_branch }}
             VERSION_ARG=${{ steps.meta.outputs.version }}
       - 
-        name: Extract AMD64 package
         if: env.exists == 'false'
-        uses: shrink/actions-docker-extract@v3
-        with:
-          image: ${{ secrets.DOCKERHUB_REPO }}:latest
-          path: "passt_${{ steps.meta.outputs.version }}_amd64.deb"
-          destination: "output"
-      -
-        name: Extract ARM64 package
-        if: env.exists == 'false'
-        uses: shrink/actions-docker-extract@v3
-        env:
-          DOCKER_DEFAULT_PLATFORM: "linux/arm64"
-        with:
-          image: ${{ secrets.DOCKERHUB_REPO }}:latest
-          path: "passt_${{ steps.meta.outputs.version }}_amd64.deb"
-          destination: "output"
+        run: |
+          #!/bin/bash
+          set -eu
+          ls output
+          exit 33
       -
         name: Create a release
         if: env.exists == 'false'
