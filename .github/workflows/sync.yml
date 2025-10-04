@@ -23,5 +23,5 @@ jobs:
       with:
         source_repo: "https://passt.top/passt"
         source_branch: master
-        destination_branch: merge
+        destination_branch: upstream
         github_token: ${{ secrets.TOKEN }}
