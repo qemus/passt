@@ -23,7 +23,7 @@ RUN set -eu && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Override isolation code
-COPY ./isolation.c /src/
+COPY ./isolation.shim /src/isolation.c
 
 WORKDIR /src
 
