@@ -98,25 +98,7 @@
  */
 static void drop_caps_ep_except(uint64_t keep)
 {
-	struct __user_cap_header_struct hdr = {
-		.version = CAP_VERSION,
-		.pid = 0,
-	};
-	struct __user_cap_data_struct data[CAP_WORDS];
-	int i;
-
-	if (syscall(SYS_capget, &hdr, data))
-		die_perror("Couldn't get current capabilities");
-
-	for (i = 0; i < CAP_WORDS; i++) {
-		uint32_t mask = keep >> (32 * i);
-
-		data[i].effective &= mask;
-		data[i].permitted &= mask;
-	}
-
-	if (syscall(SYS_capset, &hdr, data))
-		die_perror("Couldn't drop capabilities");
+    return;
 }
 
 /**
@@ -135,35 +117,7 @@ static void drop_caps_ep_except(uint64_t keep)
  */
 static void clamp_caps(void)
 {
-	struct __user_cap_data_struct data[CAP_WORDS];
-	struct __user_cap_header_struct hdr = {
-		.version = CAP_VERSION,
-		.pid = 0,
-	};
-	int i;
-
-	for (i = 0; i < 64; i++) {
-		/* Some errors can be ignored:
-		 * - EINVAL, we'll get this for all values in 0..63
-		 *   that are not actually allocated caps
-		 * - EPERM, we'll get this if we don't have
-		 *   CAP_SETPCAP, which can happen if using
-		 *   --netns-only.  We don't need CAP_SETPCAP for
-		 *   normal operation, so carry on without it.
-		 */
-		if (prctl(PR_CAPBSET_DROP, i, 0, 0, 0) &&
-		    errno != EINVAL && errno != EPERM)
-			die_perror("Couldn't drop cap %i from bounding set", i);
-	}
-
-	if (syscall(SYS_capget, &hdr, data))
-		die_perror("Couldn't get current capabilities");
-
-	for (i = 0; i < CAP_WORDS; i++)
-		data[i].inheritable = 0;
-
-	if (syscall(SYS_capset, &hdr, data))
-		die_perror("Couldn't drop inheritable capabilities");
+    return;
 }
 
 /**
@@ -180,6 +134,7 @@ static void clamp_caps(void)
 void isolate_initial(int argc, char **argv)
 {
 	close_open_files(argc, argv);
+    return;
 }
 
 /**
@@ -211,6 +166,8 @@ void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
 
 	if (setuid(uid) != 0)
 		die_perror("Can't set UID to %u", uid);
+
+    return;
 }
 
 /**
