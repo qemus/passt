@@ -140,8 +140,8 @@ jobs:
         run: |
           #!/bin/bash
           set -eu
-          mv output/passt.deb output/passt_${VERSION_ARG}_all.deb
-          mv output/passt.rpm output/passt_${VERSION_ARG}.x86_64.rpm
+          mv output/passt.deb output/passt_${VERSION_ARG}_x64.deb
+          mv output/passt.rpm output/passt_${VERSION_ARG}_x64.rpm
           echo "exists=${val}" >> $GITHUB_ENV
       -
         name: Update release
