@@ -112,12 +112,14 @@ jobs:
             BRANCH_ARG=${{ env.latest_branch }}
             VERSION_ARG=${{ steps.meta.outputs.version }}
       - 
+        name: Rename packages
         if: env.exists == 'false'
         run: |
           #!/bin/bash
           set -eu
-          ls output
-          exit 33
+          mv output/linux_amd64/passt.deb output/passt_${{ steps.meta.outputs.version }}_amd64.deb
+          mv output/linux_arm64/passt.deb output/passt_${{ steps.meta.outputs.version }}_arm64.deb
+          rm -rf output/linux_amd64 && rm -rf output/linux_arm64
       -
         name: Create a release
         if: env.exists == 'false'
