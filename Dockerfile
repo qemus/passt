@@ -29,8 +29,7 @@ WORKDIR /src
 
 RUN set -eu && \
    make pkgs && \
-   mv /src/*.deb /passt_${VERSION_ARG}_${TARGETARCH}.deb && \
-   mv /src/*.rpm /passt_${VERSION_ARG}.${TARGETARCH}.rpm
+   mv /src/*.deb /passt_${VERSION_ARG}_${TARGETARCH}.deb
 
 FROM debian:trixie-slim
 
@@ -38,11 +37,11 @@ ARG DEBCONF_NOWARNINGS="yes"
 ARG DEBIAN_FRONTEND="noninteractive"
 ARG DEBCONF_NONINTERACTIVE_SEEN="true"
 
-COPY --from=builder /*.deb /passt.deb
-COPY --from=builder /*.rpm /passt.rpm
+COPY --from=builder /*.deb /
 
 RUN set -eu && \
-    dpkg -i /passt.deb && \
+    pkg=$(find / -maxdepth 1 -type d -iname "*.deb" -print -quit)
+    dpkg -i "$pkg" && \
     apt-get update && \
     apt-get --no-install-recommends -y install \
         iputils-ping && \
