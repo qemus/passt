@@ -41,7 +41,8 @@ COPY --from=builder /*.deb /
 
 RUN set -eu && \
     pkg=$(find / -maxdepth 1 -type d -iname "*.deb" -print -quit)
-    dpkg -i "$pkg" && \
+    ln -s "$pkg" /passt.deb && \
+    dpkg -i /passt.deb && \
     apt-get update && \
     apt-get --no-install-recommends -y install \
         iputils-ping && \
