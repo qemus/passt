@@ -11,7 +11,9 @@
 
 </div>
 
-Docker image of [Passt](https://passt.top), a tool that provides user-mode networking for virtual machines. It uses a custom build of Passt where all isolation features are removed, because they are incompatible with Docker's default security policies.
+Docker image of [Passt](https://passt.top), a tool that provides user-mode networking for virtual machines.
+
+It is based on a custom build of Passt where all its isolation features are disabled, because they are incompatible with Docker's default security policies.
 
 # passt: Plug A Simple Socket Transport
 
