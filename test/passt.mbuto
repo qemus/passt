@@ -33,7 +33,7 @@ LINKS="${LINKS:-
 	 dhclient		/usr/sbin/dhclient
 	 sysctl			/usr/sbin/sysctl}"
 
-DIRS="${DIRS} /tmp /usr/sbin /usr/share /var/log /var/lib /etc/ssh /run/sshd /root/.ssh"
+DIRS="${DIRS} /tmp /usr/sbin /usr/bin /usr/share /var/log /var/lib /etc/ssh /run/sshd /root/.ssh"
 
 COPIES="${COPIES} small.bin,/root/small.bin medium.bin,/root/medium.bin big.bin,/root/big.bin rampstream,/bin/rampstream rampstream-check.sh,/bin/rampstream-check.sh"
 

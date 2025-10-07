@@ -12,7 +12,7 @@
 
 PROGS="${PROGS:-ash,dash,bash chmod ip mount insmod mkdir ln cat chmod modprobe
        grep mknod sed chown sleep bc ls ps mount unshare chroot cp kill diff
-       head tail sort tr tee cut nm which switch_root}"
+       head tail sort tr tee cut nm which switch_root mv rm}"
 
 KMODS="${KMODS:- dummy}"
 
@@ -22,12 +22,14 @@ LINKS="${LINKS:-
 	 ash,dash,bash		/init
 	 ash,dash,bash		/bin/sh}"
 
-DIRS="${DIRS} /tmp /sbin"
+DIRS="${DIRS} /tmp /sbin /usr/bin"
 
 COPIES="${COPIES} ../passt.avx2,/bin/passt.avx2"
 
 FIXUP="${FIXUP}"'
-ln -s /bin /usr/bin
+mv /bin/* /usr/bin || :
+rm -rf /bin
+ln -s /usr/bin /bin
 chmod 777 /tmp
 sh +m
 '
