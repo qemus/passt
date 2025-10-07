@@ -4,16 +4,14 @@
 <div align="center">
   
 [![Build]][build_url]
-[![Version]][tag_url]
-[![Size]][tag_url]
-[![Package]][pkg_url]
-[![Pulls]][hub_url]
+[![Version]][release_url]
+[![Size]][release_url]
 
 </div>
 
-Docker image of [Passt](https://passt.top), a tool that provides user-mode networking for virtual machines.
+Prebuilt packages of [Passt](https://passt.top), a tool that provides user-mode networking for virtual machines.
 
-It is based on a custom build of Passt where all its isolation features are disabled, because they are incompatible with Docker's default security policies.
+Unlike the the official distribution, these binaries have all their isolation features removed, as they are incompatible with Docker's default security policies.
 
 # passt: Plug A Simple Socket Transport
 
@@ -341,9 +339,10 @@ is fully configurable with command line options.
 [hub_url]: https://hub.docker.com/r/qemux/passt/
 [tag_url]: https://hub.docker.com/r/qemux/passt/tags
 [pkg_url]: https://github.com/qemus/passt/pkgs/container/passt
+[release_url]: https://github.com/qemus/passt/releases/
 
 [Build]: https://github.com/qemus/passt/actions/workflows/build.yml/badge.svg
-[Size]: https://img.shields.io/docker/image-size/qemux/passt/latest?color=066da5&label=size
+[Size]: https://img.shields.io/badge/size-712_KB-steelblue?style=flat&color=066da5
 [Pulls]: https://img.shields.io/docker/pulls/qemux/passt.svg?style=flat&label=pulls&logo=docker
 [Version]: https://img.shields.io/docker/v/qemux/passt/latest?arch=amd64&sort=semver&color=066da5
 [Package]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fipitio.github.io%2Fbackage%2Fqemus%2Fpasst%2Fpasst.json&query=%24.downloads&logo=github&style=flat&color=066da5&label=pulls
