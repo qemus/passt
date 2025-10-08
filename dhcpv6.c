@@ -550,10 +550,18 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 {
 	const struct opt_server_id *server_id = NULL;
 	const struct opt_hdr *client_id = NULL;
+	/* The _storage variables can't be local to the blocks they're used in,
+	 * because IOV_*_HEADER() may return pointers to them which are
+	 * dereferenced afterwards. Since we don't have Rust-like lifetime
+	 * tracking, cppcheck can't reasonably determine that, so we must
+	 * suppress its warnings. */
+	/* cppcheck-suppress [variableScope,unmatchedSuppression] */
 	struct opt_server_id server_id_storage;
 	struct iov_tail opt, client_id_base;
 	const struct opt_ia_na *ia = NULL;
+	/* cppcheck-suppress [variableScope,unmatchedSuppression] */
 	struct opt_hdr client_id_storage;
+	/* cppcheck-suppress [variableScope,unmatchedSuppression] */
 	struct opt_ia_na ia_storage;
 	const struct in6_addr *src;
 	struct msg_hdr mh_storage;

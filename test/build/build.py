@@ -18,11 +18,12 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from typing import Iterable, Iterator
+from typing import Iterator
 
 import exeter
 
-def sh(cmd):
+
+def sh(cmd: str) -> None:
     """Run given command in a shell"""
     subprocess.run(cmd, shell=True)
 

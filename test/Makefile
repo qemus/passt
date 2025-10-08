@@ -8,6 +8,8 @@
 BATS = bats -j $(shell nproc)
 EXETOOL = exeter/exetool/exetool
 WGET = wget -c
+FLAKE8 = flake8
+MYPY = mypy --strict
 
 DEBIAN_IMGS = debian-8.11.0-openstack-amd64.qcow2 \
 	debian-10-nocloud-amd64.qcow2 \
@@ -52,23 +54,26 @@ UBUNTU_NEW_IMGS = xenial-server-cloudimg-powerpc-disk1.img \
 	jammy-server-cloudimg-s390x.img
 UBUNTU_IMGS = $(UBUNTU_OLD_IMGS) $(UBUNTU_NEW_IMGS)
 
-DOWNLOAD_ASSETS = exeter mbuto podman \
+DOWNLOAD_ASSETS = $(EXETOOL) mbuto podman \
 	$(DEBIAN_IMGS) $(FEDORA_IMGS) $(OPENSUSE_IMGS) $(UBUNTU_IMGS)
 TESTDATA_ASSETS = small.bin big.bin medium.bin \
 	rampstream
 LOCAL_ASSETS = mbuto.img mbuto.mem.img podman/bin/podman QEMU_EFI.fd \
 	$(DEBIAN_IMGS:%=prepared-%) $(FEDORA_IMGS:%=prepared-%) \
 	$(UBUNTU_NEW_IMGS:%=prepared-%) \
-	nstool guest-key guest-key.pub $(EXETOOL) \
-	$(TESTDATA_ASSETS)
+	nstool guest-key guest-key.pub $(TESTDATA_ASSETS)
 
 ASSETS = $(DOWNLOAD_ASSETS) $(LOCAL_ASSETS)
 
 EXETER_PYPATH = exeter/py3
+EXETER_PYTHON = build/build.py
 EXETER_BATS = smoke/smoke.sh.bats \
-	build/build.py.bats build/static_checkers.sh.bats
+	$(EXETER_PYTHON:%=%.bats) build/static_checkers.sh.bats
 BATS_FILES = $(EXETER_BATS) \
 	podman/test/system/505-networking-pasta.bats
+
+# Python test code (for linters)
+PYPKGS = $(EXETER_PYTHON)
 
 CFLAGS = -Wall -Werror -Wextra -pedantic -std=c99
 
@@ -128,6 +133,12 @@ medium.bin:
 big.bin:
 	dd if=/dev/urandom bs=1M count=10 of=$@
 
+flake8: pull-exeter
+	PYTHONPATH=$(EXETER_PYPATH) $(FLAKE8) $(PYPKGS)
+
+mypy: pull-exeter
+	PYTHONPATH=$(EXETER_PYPATH) $(MYPY) $(PYPKGS)
+
 $(EXETER_BATS): %.bats: % $(EXETOOL)
 	PYTHONPATH=$(EXETER_PYPATH) $(EXETOOL) bats -- $< > $@
 
@@ -142,6 +153,7 @@ debug: assets
 
 clean:
 	rm -f perf.js *~
+	rm -rf .mypy_cache
 	rm -f $(LOCAL_ASSETS)
 	rm -f $(EXETER_BATS)
 	rm -rf test_logs

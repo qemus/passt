@@ -1030,6 +1030,11 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 					return 0;
 			}
 
+			/* This trips a cppcheck bug in some versions, including
+			 * cppcheck 2.18.3.
+			 * https://sourceforge.net/p/cppcheck/discussion/general/thread/fecde59085/
+			 */
+			/* cppcheck-suppress [uninitvar,unmatchedSuppression] */
 			conn->seq_ack_to_tap = tinfo->tcpi_bytes_acked +
 				conn->seq_init_from_tap;
 
@@ -1769,7 +1774,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 			}
 		}
 
-		if (th->fin)
+		if (th->fin && seq == seq_from_tap)
 			fin = 1;
 
 		if (!len)
@@ -1876,7 +1881,7 @@ eintr:
 	}
 
 out:
-	if (keep != -1) {
+	if (keep != -1 || partial_send) {
 		/* We use an 8-bit approximation here: the associated risk is
 		 * that we skip a duplicate ACK on 8-bit sequence number
 		 * collision. Fast retransmit is a SHOULD in RFC 5681, 3.2.
@@ -2130,9 +2135,15 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 	/* Established connections not accepting data from tap */
 	if (conn->events & TAP_FIN_RCVD) {
+		size_t dlen;
 		bool retr;
 
-		retr = th->ack && !tcp_packet_data_len(th, l4len) && !th->fin &&
+		if ((dlen = tcp_packet_data_len(th, l4len))) {
+			flow_dbg(conn, "data segment in CLOSE-WAIT (%zu B)",
+				 dlen);
+		}
+
+		retr = th->ack && !th->fin &&
 		       ntohl(th->ack_seq) == conn->seq_ack_from_tap &&
 		       ntohs(th->window) == conn->wnd_from_tap;
 

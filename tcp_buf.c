@@ -368,7 +368,19 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 			conn_flag(c, conn, STALLED);
 		} else if ((conn->events & (SOCK_FIN_RCVD | TAP_FIN_SENT)) ==
 			   SOCK_FIN_RCVD) {
-			int ret = tcp_buf_send_flag(c, conn, FIN | ACK);
+			int ret;
+
+			/* On TAP_FIN_SENT, we won't get further data events
+			 * from the socket, and this might be the last ACK
+			 * segment we send to the tap, so update its sequence to
+			 * include everything we received until now.
+			 *
+			 * See also the special handling on CONN_IS_CLOSING() in
+			 * tcp_update_seqack_wnd().
+			 */
+			conn->seq_ack_to_tap = conn->seq_from_tap;
+
+			ret = tcp_buf_send_flag(c, conn, FIN | ACK);
 			if (ret) {
 				tcp_rst(c, conn);
 				return ret;

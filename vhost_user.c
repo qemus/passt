@@ -939,6 +939,7 @@ static bool vu_get_queue_num_exec(struct vu_dev *vdev,
 {
 	(void)vdev;
 
+	/* NOLINTNEXTLINE(misc-redundant-expression) */
 	vmsg_set_reply_u64(vmsg, VHOST_USER_MAX_VQS / 2);
 
 	debug("VHOST_USER_MAX_VQS  %u", VHOST_USER_MAX_VQS / 2);

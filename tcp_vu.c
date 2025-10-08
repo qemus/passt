@@ -410,7 +410,12 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 			conn_flag(c, conn, STALLED);
 		} else if ((conn->events & (SOCK_FIN_RCVD | TAP_FIN_SENT)) ==
 			   SOCK_FIN_RCVD) {
-			int ret = tcp_vu_send_flag(c, conn, FIN | ACK);
+			int ret;
+
+			/* See tcp_buf_data_from_sock() */
+			conn->seq_ack_to_tap = conn->seq_from_tap;
+
+			ret = tcp_vu_send_flag(c, conn, FIN | ACK);
 			if (ret) {
 				tcp_rst(c, conn);
 				return ret;
