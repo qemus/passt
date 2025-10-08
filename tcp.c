@@ -1014,34 +1014,54 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	uint32_t new_wnd_to_tap = prev_wnd_to_tap;
 	int s = conn->sock;
 
-	if (!bytes_acked_cap) {
-		conn->seq_ack_to_tap = conn->seq_from_tap;
-		if (SEQ_LT(conn->seq_ack_to_tap, prev_ack_to_tap))
-			conn->seq_ack_to_tap = prev_ack_to_tap;
-	} else {
-		if ((unsigned)SNDBUF_GET(conn) < SNDBUF_SMALL ||
-		    tcp_rtt_dst_low(conn) || CONN_IS_CLOSING(conn) ||
-		    (conn->flags & LOCAL) || force_seq) {
-			conn->seq_ack_to_tap = conn->seq_from_tap;
-		} else if (conn->seq_ack_to_tap != conn->seq_from_tap) {
-			if (!tinfo) {
-				tinfo = &tinfo_new;
-				if (getsockopt(s, SOL_TCP, TCP_INFO, tinfo, &sl))
-					return 0;
-			}
-
-			/* This trips a cppcheck bug in some versions, including
-			 * cppcheck 2.18.3.
-			 * https://sourceforge.net/p/cppcheck/discussion/general/thread/fecde59085/
-			 */
-			/* cppcheck-suppress [uninitvar,unmatchedSuppression] */
-			conn->seq_ack_to_tap = tinfo->tcpi_bytes_acked +
-				conn->seq_init_from_tap;
-
-			if (SEQ_LT(conn->seq_ack_to_tap, prev_ack_to_tap))
-				conn->seq_ack_to_tap = prev_ack_to_tap;
+	/* At this point we could ack all the data we've accepted for forwarding
+	 * (seq_from_tap).  When possible, however, we want to only acknowledge
+	 * what the peer has acknowledged.  This makes it appear to the guest
+	 * more like a direct connection to the peer, and may improve flow
+	 * control behaviour.
+	 *
+	 * For it to be possible and worth it we need:
+	 *  - The TCP_INFO Linux extension which gives us the peer acked bytes
+	 *  - Not to be told not to (force_seq)
+	 *  - Not half-closed in the peer->guest direction
+	 *      With no data coming from the peer, we might not get events which
+	 *      would prompt us to recheck bytes_acked.  We could poll on a
+	 *      timer, but that's more trouble than it's worth.
+	 *  - Not a host local connection
+	 *      Data goes from socket to socket, with nothing meaningfully "in
+	 *      flight".
+	 *  - Not a pseudo-local connection (e.g. to a VM on the same host)
+	 *  - Large enough send buffer
+	 *      In these cases, there's not enough in flight to bother.
+	 */
+	if (bytes_acked_cap && !force_seq &&
+	    !CONN_IS_CLOSING(conn) &&
+	    !(conn->flags & LOCAL) && !tcp_rtt_dst_low(conn) &&
+	    (unsigned)SNDBUF_GET(conn) >= SNDBUF_SMALL) {
+		if (!tinfo) {
+			tinfo = &tinfo_new;
+			if (getsockopt(s, SOL_TCP, TCP_INFO, tinfo, &sl))
+				return 0;
 		}
+
+		/* This trips a cppcheck bug in some versions, including
+		 * cppcheck 2.18.3.
+		 * https://sourceforge.net/p/cppcheck/discussion/general/thread/fecde59085/
+		 */
+		/* cppcheck-suppress [uninitvar,unmatchedSuppression] */
+		conn->seq_ack_to_tap = tinfo->tcpi_bytes_acked +
+		                       conn->seq_init_from_tap;
+	} else {
+		/* Fall back to acknowledging everything we got */
+		conn->seq_ack_to_tap = conn->seq_from_tap;
 	}
+
+	/* It's occasionally possible for us to go from using the fallback above
+	 * to the tcpi_bytes_acked method.  In that case, we must be careful not
+	 * to let our ACKed sequence go backwards.
+	 */
+	if (SEQ_LT(conn->seq_ack_to_tap, prev_ack_to_tap))
+		conn->seq_ack_to_tap = prev_ack_to_tap;
 
 	if (!snd_wnd_cap) {
 		tcp_get_sndbuf(conn);
