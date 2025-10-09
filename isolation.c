@@ -188,6 +188,9 @@ void isolate_initial(int argc, char **argv)
 	 * We have to keep CAP_SETUID and CAP_SETGID at this stage, so
 	 * that we can switch user away from root.
 	 *
+	 * CAP_DAC_OVERRIDE may be required for socket setup when combined
+	 * with --runas.
+	 *
 	 * We have to keep some capabilities for the --netns-only case:
 	 *  - CAP_SYS_ADMIN, so that we can setns() to the netns.
 	 *  - Keep CAP_NET_ADMIN, so that we can configure interfaces
@@ -198,7 +201,7 @@ void isolate_initial(int argc, char **argv)
 	 * isolate_prefork().
 	 */
 	keep = BIT(CAP_NET_BIND_SERVICE) | BIT(CAP_SETUID) | BIT(CAP_SETGID) |
-	       BIT(CAP_SYS_ADMIN) | BIT(CAP_NET_ADMIN);
+	       BIT(CAP_SYS_ADMIN) | BIT(CAP_NET_ADMIN) | BIT(CAP_DAC_OVERRIDE);
 
 	/* Since Linux 5.12, if we want to update /proc/self/uid_map to create
 	 * a mapping from UID 0, which only happens with pasta spawning a child
