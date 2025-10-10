@@ -336,13 +336,8 @@ is fully configurable with command line options.
 [![Stars](https://starchart.cc/qemus/passt.svg?variant=adaptive)](https://starchart.cc/qemus/passt)
 
 [build_url]: https://github.com/qemus/passt/
-[hub_url]: https://hub.docker.com/r/qemux/passt/
-[tag_url]: https://hub.docker.com/r/qemux/passt/tags
-[pkg_url]: https://github.com/qemus/passt/pkgs/container/passt
 [release_url]: https://github.com/qemus/passt/releases/
 
 [Build]: https://github.com/qemus/passt/actions/workflows/build.yml/badge.svg
 [Size]: https://img.shields.io/badge/size-712_KB-steelblue?style=flat&color=066da5
-[Pulls]: https://img.shields.io/docker/pulls/qemux/passt.svg?style=flat&label=pulls&logo=docker
-[Version]: https://img.shields.io/docker/v/qemux/passt/latest?arch=amd64&sort=semver&color=066da5
-[Package]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fipitio.github.io%2Fbackage%2Fqemus%2Fpasst%2Fpasst.json&query=%24.downloads&logo=github&style=flat&color=066da5&label=pulls
+[Version]: https://img.shields.io/github/v/tag/qemus/passt?label=version&sort=semver&color=066da5
