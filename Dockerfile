@@ -20,15 +20,16 @@ RUN set -eu && \
         build-essential && \
     apt-get clean && \
     git clone --depth 1 --branch "$BRANCH_ARG"  https://passt.top/passt /src && \
-    cd src && patch -p1 < ../pad_frames.patch && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Override isolation code
 COPY ./isolation.shim /src/isolation.c
+COPY ./pad_frames.patch /src/
 
 WORKDIR /src
 
 RUN set -eu && \
+   patch -p1 < pad_frames.patch && \
    make pkgs && \
    mv /src/*.deb /passt.deb
 
