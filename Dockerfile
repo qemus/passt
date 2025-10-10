@@ -24,12 +24,10 @@ RUN set -eu && \
 
 # Override isolation code
 COPY ./isolation.shim /src/isolation.c
-COPY ./pad_frames.patch /src/
 
 WORKDIR /src
 
 RUN set -eu && \
-   patch -p1 < pad_frames.patch && \
    make pkgs && \
    mv /src/*.deb /passt.deb
 
