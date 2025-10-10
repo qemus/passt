@@ -1,0 +1,100 @@
+diff --git a/arp.c b/arp.c
+index ad088b1..ed291ea 100644
+--- a/arp.c
++++ b/arp.c
+@@ -69,10 +69,13 @@ static bool ignore_arp(const struct ctx *c,
+  */
+ int arp(const struct ctx *c, struct iov_tail *data)
+ {
+-	struct {
+-		struct ethhdr eh;
+-		struct arphdr ah;
+-		struct arpmsg am;
++	union {
++		struct {
++			struct ethhdr eh;
++			struct arphdr ah;
++			struct arpmsg am;
++		};
++		uint8_t data[ETH_ZLEN];
+ 	} __attribute__((__packed__)) resp;
+ 	struct arphdr ah_storage;
+ 	struct ethhdr eh_storage;
+@@ -119,10 +122,13 @@ int arp(const struct ctx *c, struct iov_tail *data)
+  */
+ void arp_send_init_req(const struct ctx *c)
+ {
+-	struct {
+-		struct ethhdr eh;
+-		struct arphdr ah;
+-		struct arpmsg am;
++	union {
++		struct {
++			struct ethhdr eh;
++			struct arphdr ah;
++			struct arpmsg am;
++		};
++		uint8_t data[ETH_ZLEN];
+ 	} __attribute__((__packed__)) req;
+ 
+ 	/* Ethernet header */
+diff --git a/tap.c b/tap.c
+index 95d309b..47a2a4d 100644
+--- a/tap.c
++++ b/tap.c
+@@ -122,18 +122,40 @@ unsigned long tap_l2_max_len(const struct ctx *c)
+ 	return 0; /* Unreachable, for cppcheck's sake */
+ }
+ 
++/**
++ * tap_l2_pad() - Pad inbound packet to 802.3 minimum length if needed
++ * @buf:	Start of frame
++ * @l2len:	Input Layer-2 packet length
++ *
++ * Return: possibly padded Layer-2 packet length
++ */
++size_t tap_l2_pad(void *buf, size_t l2len)
++{
++	uint16_t pad;
++
++	if (l2len >= ETH_ZLEN)
++		return l2len;
++
++	pad = l2len - ETH_ZLEN;
++	memset(((char *)buf) + l2len, 0, pad);
++	return ETH_ZLEN;
++}
++
+ /**
+  * tap_send_single() - Send a single frame
+  * @c:		Execution context
+  * @data:	Packet buffer
+  * @l2len:	Total L2 packet length
+  */
+-void tap_send_single(const struct ctx *c, const void *data, size_t l2len)
++void tap_send_single(const struct ctx *c, void *data, size_t l2len)
+ {
+-	uint32_t vnet_len = htonl(l2len);
+ 	struct iovec iov[2];
++	uint32_t vnet_len;
+ 	size_t iovcnt = 0;
+ 
++	l2len = tap_l2_pad(data, l2len);
++	vnet_len = htonl(l2len);
++
+ 	switch (c->mode) {
+ 	case MODE_PASST:
+ 		iov[iovcnt] = IOV_OF_LVALUE(vnet_len);
+diff --git a/tap.h b/tap.h
+index 21db4d2..706de91 100644
+--- a/tap.h
++++ b/tap.h
+@@ -103,7 +103,7 @@ void tap_udp6_send(const struct ctx *c,
+ void tap_icmp6_send(const struct ctx *c,
+ 		    const struct in6_addr *src, const struct in6_addr *dst,
+ 		    const void *in, size_t l4len);
+-void tap_send_single(const struct ctx *c, const void *data, size_t l2len);
++void tap_send_single(const struct ctx *c, void *data, size_t l2len);
+ size_t tap_send_frames(const struct ctx *c, const struct iovec *iov,
+ 		       size_t bufs_per_frame, size_t nframes);
+ void eth_update_mac(struct ethhdr *eh,
