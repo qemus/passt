@@ -17,9 +17,23 @@ jobs:
       packages: write
       contents: read
     steps:
-    - uses: actions/checkout@v5
-    - uses: repo-sync/github-sync@v2
+    - 
+      name: Check if repo is up
+      run: |
+          #!/bin/bash
+          set -eu
+          echo "exists=false" >> $GITHUB_ENV
+          if git ls-remote --tags https://passt.top/passt >/dev/null; then
+            echo "exists=true" >> $GITHUB_ENV
+          fi
+    - 
+      name: Checkout
+      uses: actions/checkout@v5
+      if: env.exists == 'true'
+    - 
       name: Sync repo to branch
+      if: env.exists == 'true'
+      uses: repo-sync/github-sync@v2
       with:
         source_repo: "https://passt.top/passt"
         source_branch: master
