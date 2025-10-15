@@ -11,7 +11,7 @@
 
 Prebuilt packages of [Passt](https://passt.top), a tool that provides user-mode networking for virtual machines.
 
-Unlike the the official distribution, these binaries have all their isolation features removed, as they are incompatible with Docker's default security policies.
+**Beware**: Unlike the the official distribution, the binaries in these packages have all their isolation features removed, as those are incompatible with Docker's default security policies. So only use them inside a Docker container, otherwise just use the official ones.
 
 # passt: Plug A Simple Socket Transport
 
