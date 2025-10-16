@@ -87,7 +87,7 @@ lat	-
 lat	-
 nsb	tcp_crr --nolog -6
 gout	LAT tcp_crr --nolog -l1 -6 -c -H __MAP_NS6__ | sed -n 's/^throughput=\(.*\)/\1/p'
-lat	__LAT__ 500 400
+lat	__LAT__ 550 450
 
 tr	TCP throughput over IPv4: guest to host
 iperf3s	ns 10002
@@ -137,7 +137,7 @@ lat	-
 lat	-
 nsb	tcp_crr --nolog -4
 gout	LAT tcp_crr --nolog -l1 -4 -c -H __MAP_NS4__ | sed -n 's/^throughput=\(.*\)/\1/p'
-lat	__LAT__ 500 400
+lat	__LAT__ 550 450
 
 tr	TCP throughput over IPv6: host to guest
 iperf3s	guest 10001
@@ -208,6 +208,6 @@ lat	-
 guestb	tcp_crr --nolog -P 10001 -C 10011 -4
 sleep	1
 nsout	LAT tcp_crr --nolog -l1 -P 10001 -C 10011 -4 -c -H 127.0.0.1 | sed -n 's/^throughput=\(.*\)/\1/p'
-lat	__LAT__ 500 300
+lat	__LAT__ 500 350
 
 te

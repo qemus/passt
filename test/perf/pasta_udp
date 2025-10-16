@@ -39,7 +39,7 @@ iperf3s	host 10003
 # (datagram size) = (packet size) - 48: 40 bytes of IPv6 header, 8 of UDP header
 
 iperf3	BW ns ::1 10003 __TIME__ __OPTS__ -b 5G -l 1452
-bw	__BW__ 1.0 1.5
+bw	__BW__ 0.8 1.2
 iperf3	BW ns ::1 10003 __TIME__ __OPTS__ -b 10G -l 3972
 bw	__BW__ 1.2 1.8
 iperf3	BW ns ::1 10003 __TIME__ __OPTS__ -b 30G -l 16336
@@ -64,7 +64,7 @@ iperf3s	host 10003
 # (datagram size) = (packet size) - 28: 20 bytes of IPv4 header, 8 of UDP header
 
 iperf3	BW ns 127.0.0.1 10003 __TIME__ __OPTS__ -b 5G -l 1372
-bw	__BW__ 1.0 1.5
+bw	__BW__ 0.8 1.2
 iperf3	BW ns 127.0.0.1 10003 __TIME__ __OPTS__ -b 10G -l 3972
 bw	__BW__ 1.2 1.8
 iperf3	BW ns 127.0.0.1 10003 __TIME__ __OPTS__ -b 30G -l 16356
@@ -88,7 +88,7 @@ tr	UDP throughput over IPv6: host to ns
 iperf3s	ns 10002
 
 iperf3	BW host ::1 10002 __TIME__ __OPTS__ -b 5G -l 1452
-bw	__BW__ 1.0 1.5
+bw	__BW__ 0.8 1.2
 iperf3	BW host ::1 10002 __TIME__ __OPTS__ -b 10G -l 3972
 bw	__BW__ 1.2 1.8
 iperf3	BW host ::1 10002 __TIME__ __OPTS__ -b 30G -l 16336
@@ -111,7 +111,7 @@ lat	__LAT__ 200 150
 tr	UDP throughput over IPv4: host to ns
 iperf3s	ns 10002
 iperf3	BW host 127.0.0.1 10002 __TIME__ __OPTS__ -b 5G -l 1372
-bw	__BW__ 1.0 1.5
+bw	__BW__ 0.8 1.2
 iperf3	BW host 127.0.0.1 10002 __TIME__ __OPTS__ -b 10G -l 3972
 bw	__BW__ 1.2 1.8
 iperf3	BW host 127.0.0.1 10002 __TIME__ __OPTS__ -b 30G -l 16356

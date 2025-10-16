@@ -115,7 +115,7 @@ letter before sending.
 
 Use `git send-email` to send patches directly to the mailing list:
 
-    git send-email --to=passt-dev@passt.top 000*.patch -o outgoing/000*.patch
+    git send-email --to=passt-dev@passt.top outgoing/000*.patch
 
 If there are CCs (e.g. maintainers, reviewers), you can add them with `--cc`:
 

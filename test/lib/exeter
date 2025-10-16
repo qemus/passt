@@ -13,18 +13,18 @@
 # Copyright Red Hat
 # Author: David Gibson <david@gibson.dropbear.id.au>
 
-EXETOOL="$BASEPATH/exeter/exetool/exetool"
+EXETOOL="${BASEPATH}/exeter/exetool/exetool"
 
 # is_exeter() - Determine if a test file is an exeter program
 # $@:	Command line to invoke test program
 is_exeter() {
-	$EXETOOL probe -- "$@"
+	${EXETOOL} probe -- "${@}"
 }
 
 # exeter() - Run each test in an exeter program, logging each test separately
 # $@:	Command line to invoke exeter test program
 exeter() {
-	STATESETUP="${STATEBASE}/$1"
+	STATESETUP="${STATEBASE}/${1}"
 	mkdir -p "${STATESETUP}"
 
 	context_setup_host host
@@ -32,9 +32,9 @@ exeter() {
 
 	cd test
 
-	__ntests=$($EXETOOL list -- "$@" | wc -l)
-	if [ $? != 0 ]; then
-		info "Failed to get exeter manifest for $@"
+	__ntests=$(${EXETOOL} list -- "${@}" | wc -l)
+	if [ ${?} != 0 ]; then
+		info "Failed to get exeter manifest for ${@}"
 		pause_continue \
 			"Press any key to pause test session"		\
 			"Resuming in "					\
@@ -43,13 +43,21 @@ exeter() {
 		return
 	fi
 
-	status_file_start "$* (exeter)" ${__ntests}
+	status_file_start "${*} (exeter)" ${__ntests}
 	[ ${CI} -eq 1 ] && video_link "${1}"
 
-	for __testid in $($EXETOOL list -- "$@"); do
-		__desc="$($EXETOOL desc -- "$@" -- ${__testid})"
+	for __testid in $(${EXETOOL} list -- "${@}"); do
+		__desc="$(${EXETOOL} desc -- "${@}" -- "${__testid}")"
 		status_test_start "${__desc}"
-		context_run host "$@" "${__testid}" && status_test_ok || status_test_fail
+		status=0
+		context_run host "${*} '${__testid}'" || status="${?}"
+		if [ "${status}" = 0 ]; then
+			status_test_ok
+		elif [ "${status}" = 77 ]; then
+			status_test_skip
+		else
+			status_test_fail
+		fi
 	done
 
 	cd ..

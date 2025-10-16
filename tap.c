@@ -188,7 +188,7 @@ void *tap_push_l2h(const struct ctx *c, void *buf, uint16_t proto)
 
 /**
  * tap_push_ip4h() - Build IPv4 header for inbound packet, with checksum
- * @c:		Execution context
+ * @ip4h:	Buffer in which to build the IPv4 header
  * @src:	IPv4 source address
  * @dst:	IPv4 destination address
  * @l4len:	IPv4 payload length
@@ -217,7 +217,7 @@ void *tap_push_ip4h(struct iphdr *ip4h, struct in_addr src,
 
 /**
  * tap_push_uh4() - Build UDPv4 header with checksum
- * @c:		Execution context
+ * @uh:		Buffer in which to build the UDP header
  * @src:	IPv4 source address
  * @sport:	UDP source port
  * @dst:	IPv4 destination address
@@ -293,7 +293,7 @@ void tap_icmp4_send(const struct ctx *c, struct in_addr src, struct in_addr dst,
 
 /**
  * tap_push_ip6h() - Build IPv6 header for inbound packet
- * @c:		Execution context
+ * @ip6h:	Buffer in which to build the IPv6 header
  * @src:	IPv6 source address
  * @dst:	IPv6 destination address
  * @l4len:	L4 payload length
@@ -319,7 +319,7 @@ void *tap_push_ip6h(struct ipv6hdr *ip6h,
 
 /**
  * tap_push_uh6() - Build UDPv6 header with checksum
- * @c:		Execution context
+ * @uh:		Buffer in which to build the UDP header
  * @src:	IPv6 source address
  * @sport:	UDP source port
  * @dst:	IPv6 destination address

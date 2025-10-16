@@ -54,7 +54,7 @@
 #include "migrate.h"
 #include "repair.h"
 
-#define EPOLL_EVENTS		8
+#define NUM_EPOLL_EVENTS	8
 
 #define TIMER_INTERVAL__	MIN(TCP_TIMER_INTERVAL, UDP_TIMER_INTERVAL)
 #define TIMER_INTERVAL_		MIN(TIMER_INTERVAL__, ICMP_TIMER_INTERVAL)
@@ -245,7 +245,7 @@ static void print_stats(const struct ctx *c, const struct passt_stats *stats,
  */
 int main(int argc, char **argv)
 {
-	struct epoll_event events[EPOLL_EVENTS];
+	struct epoll_event events[NUM_EPOLL_EVENTS];
 	struct passt_stats stats = { 0 };
 	int nfds, i, devnull_fd = -1;
 	struct ctx c = { 0 };
@@ -349,7 +349,7 @@ int main(int argc, char **argv)
 loop:
 	/* NOLINTBEGIN(bugprone-branch-clone): intervals can be the same */
 	/* cppcheck-suppress [duplicateValueTernary, unmatchedSuppression] */
-	nfds = epoll_wait(c.epollfd, events, EPOLL_EVENTS, TIMER_INTERVAL);
+	nfds = epoll_wait(c.epollfd, events, NUM_EPOLL_EVENTS, TIMER_INTERVAL);
 	/* NOLINTEND(bugprone-branch-clone) */
 	if (nfds == -1 && errno != EINTR)
 		die_perror("epoll_wait() failed in main loop");
