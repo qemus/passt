@@ -1,6 +1,6 @@
 <!---
 SPDX-License-Identifier: GPL-2.0-or-later
-Copyright (c) 2025 Red Hat
+Copyright Red Hat
 Author: Yumei Huang <yuhuang@redhat.com>
 -->
 
@@ -24,6 +24,10 @@ to prepare patches and participate in the email-based review process.
 
 * Edit the source code or documentation following the
   [Linux kernel coding style](https://www.kernel.org/doc/html/latest/process/coding-style.html).
+  When adding or editing local variable declarations, please use the reverse
+  Christmas tree as described
+  [here](https://www.kernel.org/doc/Documentation/process/maintainer-kvm-x86.rst)
+  and [here](https://hisham.hm/2018/06/16/when-listing-repeated-things-make-pyramids/).
 
 * Stage your changes:
 

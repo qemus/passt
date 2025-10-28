@@ -51,7 +51,7 @@ guest	sed /proc/slabinfo -ne 's/^\([^ ]* *[^ ]* *[^ ]* *[^ ]*\).*/\\\1/p' > /tmp
 guest	kill \$(cat /tmp/pid)
 guest	diff -y --suppress-common-lines /tmp/meminfo.before /tmp/meminfo.after || :
 guest	nm -td -Sr --size-sort -P /bin/passt.avx2 | head -30 | tee /tmp/nm.size
-guest	sed /proc/slabinfo -ne 's/\(.*<objsize>\).*$/\1/p' | tail -1; (diff -y --suppress-common-lines /tmp/slabinfo.before /tmp/slabinfo.after | sort -grk8)
+guest	sed /proc/slabinfo -ne 's/\(.*<objsize>\).*$/\\\1/p' | tail -1; (diff -y --suppress-common-lines /tmp/slabinfo.before /tmp/slabinfo.after | sort -grk8)
 endef
 
 def	summary

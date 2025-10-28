@@ -27,7 +27,7 @@
 #include "lineread.h"
 #include "flow_table.h"
 
-/* Empheral port range: values from RFC 6335 */
+/* Ephemeral port range: values from RFC 6335 */
 static in_port_t fwd_ephemeral_min = (1 << 15) + (1 << 14);
 static in_port_t fwd_ephemeral_max = NUM_PORTS - 1;
 
