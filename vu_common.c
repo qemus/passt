@@ -6,7 +6,6 @@
  */
 
 #include <errno.h>
-#include <unistd.h>
 #include <sys/uio.h>
 #include <sys/eventfd.h>
 #include <netinet/if_ether.h>
@@ -19,6 +18,7 @@
 #include "pcap.h"
 #include "vu_common.h"
 #include "migrate.h"
+#include "epoll_ctl.h"
 
 #define VU_MAX_TX_BUFFER_NB	2
 

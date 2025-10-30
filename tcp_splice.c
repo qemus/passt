@@ -44,7 +44,6 @@
 #include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <sys/epoll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
@@ -56,6 +55,7 @@
 #include "siphash.h"
 #include "inany.h"
 #include "flow.h"
+#include "epoll_ctl.h"
 
 #include "flow_table.h"
 
@@ -149,7 +149,9 @@ static void tcp_splice_conn_epoll_events(uint16_t events,
 static int tcp_splice_epoll_ctl(const struct ctx *c,
 				struct tcp_splice_conn *conn)
 {
-	int m = conn->in_epoll ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+	int epollfd = flow_in_epoll(&conn->f) ? flow_epollfd(&conn->f)
+					      : c->epollfd;
+	int m = flow_in_epoll(&conn->f) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
 	const union epoll_ref ref[SIDES] = {
 		{ .type = EPOLL_TYPE_TCP_SPLICE, .fd = conn->s[0],
 		  .flowside = FLOW_SIDX(conn, 0) },
@@ -161,25 +163,24 @@ static int tcp_splice_epoll_ctl(const struct ctx *c,
 
 	tcp_splice_conn_epoll_events(conn->events, ev);
 
-	if (epoll_ctl(c->epollfd, m, conn->s[0], &ev[0]) ||
-	    epoll_ctl(c->epollfd, m, conn->s[1], &ev[1])) {
+
+	if (epoll_ctl(epollfd, m, conn->s[0], &ev[0]) ||
+	    epoll_ctl(epollfd, m, conn->s[1], &ev[1])) {
 		int ret = -errno;
 		flow_perror(conn, "ERROR on epoll_ctl()");
 		return ret;
 	}
-
-	conn->in_epoll = true;
+	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 
 	return 0;
 }
 
 /**
  * conn_flag_do() - Set/unset given flag, log, update epoll on CLOSING flag
- * @c:		Execution context
  * @conn:	Connection pointer
  * @flag:	Flag to set, or ~flag to unset
  */
-static void conn_flag_do(const struct ctx *c, struct tcp_splice_conn *conn,
+static void conn_flag_do(struct tcp_splice_conn *conn,
 			 unsigned long flag)
 {
 	if (flag & (flag - 1)) {
@@ -204,15 +205,15 @@ static void conn_flag_do(const struct ctx *c, struct tcp_splice_conn *conn,
 	}
 
 	if (flag == CLOSING) {
-		epoll_del(c, conn->s[0]);
-		epoll_del(c, conn->s[1]);
+		epoll_del(flow_epollfd(&conn->f), conn->s[0]);
+		epoll_del(flow_epollfd(&conn->f), conn->s[1]);
 	}
 }
 
 #define conn_flag(c, conn, flag)					\
 	do {								\
 		flow_trace(conn, "flag at %s:%i", __func__, __LINE__);	\
-		conn_flag_do(c, conn, flag);				\
+		conn_flag_do(conn, flag);				\
 	} while (0)
 
 /**
@@ -751,10 +752,9 @@ void tcp_splice_init(struct ctx *c)
 
 /**
  * tcp_splice_timer() - Timer for spliced connections
- * @c:		Execution context
  * @conn:	Connection to handle
  */
-void tcp_splice_timer(const struct ctx *c, struct tcp_splice_conn *conn)
+void tcp_splice_timer(struct tcp_splice_conn *conn)
 {
 	unsigned sidei;
 

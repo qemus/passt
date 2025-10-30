@@ -15,6 +15,7 @@
 #include "passt.h"
 #include "flow_table.h"
 #include "udp_internal.h"
+#include "epoll_ctl.h"
 
 #define UDP_CONN_TIMEOUT	180 /* s, timeout for ephemeral or local bind */
 
@@ -51,7 +52,7 @@ void udp_flow_close(const struct ctx *c, struct udp_flow *uflow)
 	flow_foreach_sidei(sidei) {
 		flow_hash_remove(c, FLOW_SIDX(uflow, sidei));
 		if (uflow->s[sidei] >= 0) {
-			epoll_del(c, uflow->s[sidei]);
+			epoll_del(flow_epollfd(&uflow->f), uflow->s[sidei]);
 			close(uflow->s[sidei]);
 			uflow->s[sidei] = -1;
 		}
@@ -77,18 +78,32 @@ static int udp_flow_sock(const struct ctx *c,
 		flow_sidx_t sidx;
 		uint32_t data;
 	} fref = { .sidx = FLOW_SIDX(uflow, sidei) };
+	union epoll_ref ref;
+	int rc;
 	int s;
 
-	s = flowside_sock_l4(c, EPOLL_TYPE_UDP, pif, side, fref.data);
+	s = flowside_sock_l4(c, EPOLL_TYPE_UDP, pif, side);
 	if (s < 0) {
 		flow_dbg_perror(uflow, "Couldn't open flow specific socket");
 		return s;
 	}
 
-	if (flowside_connect(c, s, pif, side) < 0) {
-		int rc = -errno;
+	ref.type = EPOLL_TYPE_UDP;
+	ref.data = fref.data;
+	ref.fd = s;
 
-		epoll_del(c, s);
+	flow_epollid_set(&uflow->f, EPOLLFD_ID_DEFAULT);
+
+	rc = epoll_add(flow_epollfd(&uflow->f), EPOLLIN, ref);
+	if (rc < 0) {
+		close(s);
+		return rc;
+	}
+
+	if (flowside_connect(c, s, pif, side) < 0) {
+		rc = -errno;
+
+		epoll_del(flow_epollfd(&uflow->f), s);
 		close(s);
 
 		flow_dbg_perror(uflow, "Couldn't connect flow socket");

@@ -15,7 +15,6 @@
 #include <errno.h>
 #include <net/ethernet.h>
 #include <net/if.h>
-#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <stdio.h>
@@ -23,10 +22,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/epoll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <unistd.h>
 #include <time.h>
 
 #include <linux/icmpv6.h>
@@ -41,6 +38,7 @@
 #include "inany.h"
 #include "icmp.h"
 #include "flow_table.h"
+#include "epoll_ctl.h"
 
 #define ICMP_ECHO_TIMEOUT	60 /* s, timeout for ICMP socket activity */
 #define ICMP_NUM_IDS		(1U << 16)
@@ -155,7 +153,7 @@ unexpected:
 static void icmp_ping_close(const struct ctx *c,
 			    const struct icmp_ping_flow *pingf)
 {
-	epoll_del(c, pingf->sock);
+	epoll_del(flow_epollfd(&pingf->f), pingf->sock);
 	close(pingf->sock);
 	flow_hash_remove(c, FLOW_SIDX(pingf, INISIDE));
 }
@@ -176,10 +174,10 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 {
 	uint8_t proto = af == AF_INET ? IPPROTO_ICMP : IPPROTO_ICMPV6;
 	uint8_t flowtype = af == AF_INET ? FLOW_PING4 : FLOW_PING6;
-	union epoll_ref ref = { .type = EPOLL_TYPE_PING };
 	union flow *flow = flow_alloc();
 	struct icmp_ping_flow *pingf;
 	const struct flowside *tgt;
+	union epoll_ref ref;
 
 	if (!flow)
 		return NULL;
@@ -200,9 +198,7 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 
 	pingf->seq = -1;
 
-	ref.flowside = FLOW_SIDX(flow, TGTSIDE);
-	pingf->sock = flowside_sock_l4(c, EPOLL_TYPE_PING, PIF_HOST,
-				       tgt, ref.data);
+	pingf->sock = flowside_sock_l4(c, EPOLL_TYPE_PING, PIF_HOST, tgt);
 
 	if (pingf->sock < 0) {
 		warn("Cannot open \"ping\" socket. You might need to:");
@@ -213,6 +209,17 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 
 	if (pingf->sock > FD_REF_MAX)
 		goto cancel;
+
+	flow_epollid_set(&pingf->f, EPOLLFD_ID_DEFAULT);
+
+	ref.type = EPOLL_TYPE_PING;
+	ref.flowside = FLOW_SIDX(flow, TGTSIDE);
+	ref.fd = pingf->sock;
+
+	if (epoll_add(flow_epollfd(&pingf->f), EPOLLIN, ref) < 0) {
+		close(pingf->sock);
+		goto cancel;
+	}
 
 	flow_dbg(pingf, "new socket %i for echo ID %"PRIu16, pingf->sock, id);
 

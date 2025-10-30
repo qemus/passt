@@ -5,6 +5,7 @@
  * Passt/pasta interface types and IDs
  */
 
+#include <errno.h>
 #include <stdint.h>
 #include <assert.h>
 #include <netinet/in.h>
@@ -14,7 +15,7 @@
 #include "siphash.h"
 #include "ip.h"
 #include "inany.h"
-#include "passt.h"
+#include "epoll_ctl.h"
 
 const char *pif_type_str[] = {
 	[PIF_NONE]		= "<none>",
@@ -83,7 +84,9 @@ int pif_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 		.sa6.sin6_addr = in6addr_any,
 		.sa6.sin6_port = htons(port),
 	};
+	union epoll_ref ref;
 	socklen_t sl;
+	int ret;
 
 	ASSERT(pif_is_socket(pif));
 
@@ -93,11 +96,26 @@ int pif_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 		ASSERT(addr && inany_is_loopback(addr));
 	}
 
-	if (!addr)
-		return sock_l4_sa(c, type, &sa, sizeof(sa.sa6),
-				  ifname, false, data);
+	if (!addr) {
+		ref.fd = sock_l4_sa(c, type, &sa, sizeof(sa.sa6),
+				    ifname, false);
+	} else {
+		pif_sockaddr(c, &sa, &sl, pif, addr, port);
+		ref.fd = sock_l4_sa(c, type, &sa, sl,
+				    ifname, sa.sa_family == AF_INET6);
+	}
 
-	pif_sockaddr(c, &sa, &sl, pif, addr, port);
-	return sock_l4_sa(c, type, &sa, sl,
-			  ifname, sa.sa_family == AF_INET6, data);
+	if (ref.fd < 0)
+		return ref.fd;
+
+	ref.type = type;
+	ref.data = data;
+
+	ret = epoll_add(c->epollfd, EPOLLIN, ref);
+	if (ret < 0) {
+		close(ref.fd);
+		return ret;
+	}
+
+	return ref.fd;
 }

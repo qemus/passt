@@ -12,7 +12,6 @@
 /**
  * struct tcp_tap_conn - Descriptor for a TCP connection (not spliced)
  * @f:			Generic flow information
- * @in_epoll:		Is the connection in the epoll set?
  * @retrans:		Number of retransmissions occurred due to ACK_TIMEOUT
  * @ws_from_tap:	Window scaling factor advertised from tap/guest
  * @ws_to_tap:		Window scaling factor advertised to tap/guest
@@ -35,8 +34,6 @@
 struct tcp_tap_conn {
 	/* Must be first element */
 	struct flow_common f;
-
-	bool		in_epoll	:1;
 
 #define TCP_RETRANS_BITS		3
 	unsigned int	retrans		:TCP_RETRANS_BITS;
@@ -196,7 +193,6 @@ struct tcp_tap_transfer_ext {
  * @written:		Bytes written (not fully written from one other side read)
  * @events:		Events observed/actions performed on connection
  * @flags:		Connection flags (attributes, not events)
- * @in_epoll:		Is the connection in the epoll set?
  */
 struct tcp_splice_conn {
 	/* Must be first element */
@@ -220,8 +216,6 @@ struct tcp_splice_conn {
 #define RCVLOWAT_SET(sidei_)		((sidei_) ? BIT(1) : BIT(0))
 #define RCVLOWAT_ACT(sidei_)		((sidei_) ? BIT(3) : BIT(2))
 #define CLOSING				BIT(4)
-
-	bool in_epoll	:1;
 };
 
 /* Socket pools */
@@ -245,7 +239,7 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 bool tcp_flow_is_established(const struct tcp_tap_conn *conn);
 
 bool tcp_splice_flow_defer(struct tcp_splice_conn *conn);
-void tcp_splice_timer(const struct ctx *c, struct tcp_splice_conn *conn);
+void tcp_splice_timer(struct tcp_splice_conn *conn);
 int tcp_conn_pool_sock(int pool[]);
 int tcp_conn_sock(sa_family_t af);
 int tcp_sock_refill_pool(int pool[], sa_family_t af);

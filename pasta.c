@@ -27,7 +27,6 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <syslog.h>
-#include <sys/epoll.h>
 #include <sys/inotify.h>
 #include <sys/mount.h>
 #include <sys/timerfd.h>
@@ -49,6 +48,7 @@
 #include "isolation.h"
 #include "netlink.h"
 #include "log.h"
+#include "epoll_ctl.h"
 
 #define HOSTNAME_PREFIX		"pasta-"
 
@@ -444,7 +444,6 @@ static int pasta_netns_quit_timer(void)
  */
 void pasta_netns_quit_init(const struct ctx *c)
 {
-	struct epoll_event ev = { .events = EPOLLIN };
 	int flags = O_NONBLOCK | O_CLOEXEC;
 	struct statfs s = { 0 };
 	bool try_inotify = true;
@@ -487,8 +486,8 @@ void pasta_netns_quit_init(const struct ctx *c)
 		die("netns monitor file number %i too big, exiting", fd);
 
 	ref.fd = fd;
-	ev.data.u64 = ref.u64;
-	epoll_ctl(c->epollfd, EPOLL_CTL_ADD, fd, &ev);
+
+	epoll_add(c->epollfd, EPOLLIN, ref);
 }
 
 /**

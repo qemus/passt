@@ -167,7 +167,7 @@ static inline bool flowside_eq(const struct flowside *left,
 }
 
 int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
-		     const struct flowside *tgt, uint32_t data);
+		     const struct flowside *tgt);
 int flowside_connect(const struct ctx *c, int s,
 		     uint8_t pif, const struct flowside *tgt);
 
@@ -177,7 +177,8 @@ int flowside_connect(const struct ctx *c, int s,
  * @type:	Type of packet flow
  * @pif[]:	Interface for each side of the flow
  * @side[]:	Information for each side of the flow
- * @tap_omac: MAC address of remote endpoint as seen from the guest
+ * @tap_omac:	MAC address of remote endpoint as seen from the guest
+ * @epollid:	epollfd identifier, or EPOLLFD_ID_INVALID
  */
 struct flow_common {
 #ifdef __GNUC__
@@ -193,8 +194,17 @@ struct flow_common {
 #endif
 	uint8_t		pif[SIDES];
 	struct flowside	side[SIDES];
+
 	uint8_t		tap_omac[6];
+
+#define EPOLLFD_ID_BITS 8
+	unsigned int	epollid:EPOLLFD_ID_BITS;
 };
+
+#define EPOLLFD_ID_DEFAULT	0
+#define EPOLLFD_ID_SIZE		(1 << EPOLLFD_ID_BITS)
+#define EPOLLFD_ID_MAX		(EPOLLFD_ID_SIZE - 1)
+#define EPOLLFD_ID_INVALID	EPOLLFD_ID_MAX
 
 #define FLOW_INDEX_BITS		17	/* 128k - 1 */
 #define FLOW_MAX		MAX_FROM_BITS(FLOW_INDEX_BITS)
@@ -251,6 +261,11 @@ flow_sidx_t flow_lookup_sa(const struct ctx *c, uint8_t proto, uint8_t pif,
 union flow;
 
 void flow_init(void);
+bool flow_in_epoll(const struct flow_common *f);
+int flow_epollfd(const struct flow_common *f);
+void flow_epollid_set(struct flow_common *f, int epollid);
+void flow_epollid_clear(struct flow_common *f);
+void flow_epollid_register(int epollid, int epollfd);
 void flow_defer_handler(const struct ctx *c, const struct timespec *now);
 int flow_migrate_source_early(struct ctx *c, const struct migrate_stage *stage,
 			      int fd);

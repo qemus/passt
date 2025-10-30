@@ -94,7 +94,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/epoll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -115,6 +114,7 @@
 #include "flow_table.h"
 #include "udp_internal.h"
 #include "udp_vu.h"
+#include "epoll_ctl.h"
 
 #define UDP_MAX_FRAMES		32  /* max # of frames to receive at once */
 

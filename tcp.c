@@ -279,7 +279,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
@@ -309,6 +308,7 @@
 #include "tcp_internal.h"
 #include "tcp_buf.h"
 #include "tcp_vu.h"
+#include "epoll_ctl.h"
 
 /*
  * The size of TCP header (including options) is given by doff (Data Offset)
@@ -504,25 +504,27 @@ static uint32_t tcp_conn_epoll_events(uint8_t events, uint8_t conn_flags)
  */
 static int tcp_epoll_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 {
-	int m = conn->in_epoll ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+	int m = flow_in_epoll(&conn->f) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
 	union epoll_ref ref = { .type = EPOLL_TYPE_TCP, .fd = conn->sock,
 		                .flowside = FLOW_SIDX(conn, !TAPSIDE(conn)), };
 	struct epoll_event ev = { .data.u64 = ref.u64 };
+	int epollfd = flow_in_epoll(&conn->f) ? flow_epollfd(&conn->f)
+					      : c->epollfd;
 
 	if (conn->events == CLOSED) {
-		if (conn->in_epoll)
-			epoll_del(c, conn->sock);
+		if (flow_in_epoll(&conn->f))
+			epoll_del(epollfd, conn->sock);
 		if (conn->timer != -1)
-			epoll_del(c, conn->timer);
+			epoll_del(epollfd, conn->timer);
 		return 0;
 	}
 
 	ev.events = tcp_conn_epoll_events(conn->events, conn->flags);
 
-	if (epoll_ctl(c->epollfd, m, conn->sock, &ev))
+	if (epoll_ctl(epollfd, m, conn->sock, &ev))
 		return -errno;
 
-	conn->in_epoll = true;
+	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 
 	if (conn->timer != -1) {
 		union epoll_ref ref_t = { .type = EPOLL_TYPE_TCP_TIMER,
@@ -531,7 +533,8 @@ static int tcp_epoll_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		struct epoll_event ev_t = { .data.u64 = ref_t.u64,
 					    .events = EPOLLIN | EPOLLET };
 
-		if (epoll_ctl(c->epollfd, EPOLL_CTL_MOD, conn->timer, &ev_t))
+		if (epoll_ctl(flow_epollfd(&conn->f), EPOLL_CTL_MOD,
+			      conn->timer, &ev_t))
 			return -errno;
 	}
 
@@ -540,12 +543,11 @@ static int tcp_epoll_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 
 /**
  * tcp_timer_ctl() - Set timerfd based on flags/events, create timerfd if needed
- * @c:		Execution context
  * @conn:	Connection pointer
  *
  * #syscalls timerfd_create timerfd_settime
  */
-static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
+static void tcp_timer_ctl(struct tcp_tap_conn *conn)
 {
 	struct itimerspec it = { { 0 }, { 0 } };
 
@@ -558,6 +560,7 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 					.flow = FLOW_IDX(conn) };
 		struct epoll_event ev = { .data.u64 = ref.u64,
 					  .events = EPOLLIN | EPOLLET };
+		int epollfd = flow_epollfd(&conn->f);
 		int fd;
 
 		fd = timerfd_create(CLOCK_MONOTONIC, 0);
@@ -570,7 +573,7 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		}
 		conn->timer = fd;
 
-		if (epoll_ctl(c->epollfd, EPOLL_CTL_ADD, conn->timer, &ev)) {
+		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn->timer, &ev)) {
 			flow_dbg_perror(conn, "failed to add timer");
 			close(conn->timer);
 			conn->timer = -1;
@@ -628,7 +631,7 @@ void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
 			 * flags and factor this into the logic below.
 			 */
 			if (flag == ACK_FROM_TAP_DUE)
-				tcp_timer_ctl(c, conn);
+				tcp_timer_ctl(conn);
 
 			return;
 		}
@@ -644,7 +647,7 @@ void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
 	if (flag == ACK_FROM_TAP_DUE || flag == ACK_TO_TAP_DUE		  ||
 	    (flag == ~ACK_FROM_TAP_DUE && (conn->flags & ACK_TO_TAP_DUE)) ||
 	    (flag == ~ACK_TO_TAP_DUE   && (conn->flags & ACK_FROM_TAP_DUE)))
-		tcp_timer_ctl(c, conn);
+		tcp_timer_ctl(conn);
 }
 
 /**
@@ -699,7 +702,7 @@ void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
 		tcp_epoll_ctl(c, conn);
 
 	if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED))
-		tcp_timer_ctl(c, conn);
+		tcp_timer_ctl(conn);
 }
 
 /**
@@ -1767,7 +1770,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 				   seq, conn->seq_from_tap);
 
 			tcp_send_flag(c, conn, ACK);
-			tcp_timer_ctl(c, conn);
+			tcp_timer_ctl(conn);
 
 			if (p->count == 1) {
 				tcp_tap_window_update(c, conn,
@@ -2418,7 +2421,7 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
 		tcp_send_flag(c, conn, ACK_IF_NEEDED);
-		tcp_timer_ctl(c, conn);
+		tcp_timer_ctl(conn);
 	} else if (conn->flags & ACK_FROM_TAP_DUE) {
 		if (!(conn->events & ESTABLISHED)) {
 			flow_dbg(conn, "handshake timeout");
@@ -2440,7 +2443,7 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 				return;
 
 			tcp_data_from_sock(c, conn);
-			tcp_timer_ctl(c, conn);
+			tcp_timer_ctl(conn);
 		}
 	} else {
 		struct itimerspec new = { { 0 }, { ACT_TIMEOUT, 0 } };
@@ -3235,6 +3238,11 @@ static int tcp_flow_repair_queue(const struct tcp_tap_conn *conn,
 	size_t chunk = len;
 	uint8_t *p = buf;
 
+	if (conn->sock < 0) {
+		flow_err(conn, "Invalid socket descriptor for repair queue");
+		return -EBADF;
+	}
+
 	while (len > 0) {
 		ssize_t rc = send(conn->sock, p, MIN(len, chunk), 0);
 
@@ -3488,7 +3496,7 @@ int tcp_flow_migrate_source_ext(const struct ctx *c,
 	if (c->migrate_no_linger)
 		close(s);
 	else
-		epoll_del(c, s);
+		epoll_del(flow_epollfd(&conn->f), s);
 
 	/* Adjustments unrelated to FIN segments: sequence numbers we dumped are
 	 * based on the end of the queues.
@@ -3637,7 +3645,7 @@ static int tcp_flow_repair_connect(const struct ctx *c,
 		return rc;
 	}
 
-	conn->in_epoll = 0;
+	flow_epollid_clear(&conn->f);
 	conn->timer = -1;
 	conn->listening_sock = -1;
 

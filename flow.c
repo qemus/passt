@@ -116,6 +116,7 @@ static_assert(ARRAY_SIZE(flow_proto) == FLOW_NUM_TYPES,
 unsigned flow_first_free;
 union flow flowtab[FLOW_MAX];
 static const union flow *flow_new_entry; /* = NULL */
+static int epoll_id_to_fd[EPOLLFD_ID_MAX];
 
 /* Hash table to index it */
 #define FLOW_HASH_LOAD		70		/* % */
@@ -163,7 +164,6 @@ static void flowside_from_af(struct flowside *side, sa_family_t af,
  * @type:	Socket epoll type
  * @sa:		Socket address
  * @sl:		Length of @sa
- * @data:	epoll reference data
  */
 struct flowside_sock_args {
 	const struct ctx *c;
@@ -173,7 +173,6 @@ struct flowside_sock_args {
 	const struct sockaddr *sa;
 	socklen_t sl;
 	const char *path;
-	uint32_t data;
 };
 
 /** flowside_sock_splice() - Create and bind socket for PIF_SPLICE based on flowside
@@ -188,7 +187,7 @@ static int flowside_sock_splice(void *arg)
 	ns_enter(a->c);
 
 	a->fd = sock_l4_sa(a->c, a->type, a->sa, a->sl, NULL,
-	                   a->sa->sa_family == AF_INET6, a->data);
+	                   a->sa->sa_family == AF_INET6);
 	a->err = errno;
 
 	return 0;
@@ -205,7 +204,7 @@ static int flowside_sock_splice(void *arg)
  *         (if specified).
  */
 int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
-		     const struct flowside *tgt, uint32_t data)
+		     const struct flowside *tgt)
 {
 	const char *ifname = NULL;
 	union sockaddr_inany sa;
@@ -225,12 +224,12 @@ int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 			ifname = c->ip6.ifname_out;
 
 		return sock_l4_sa(c, type, &sa, sl, ifname,
-				  sa.sa_family == AF_INET6, data);
+				  sa.sa_family == AF_INET6);
 
 	case PIF_SPLICE: {
 		struct flowside_sock_args args = {
 			.c = c, .type = type,
-			.sa = &sa.sa, .sl = sl, .data = data,
+			.sa = &sa.sa, .sl = sl,
 		};
 		NS_CALL(flowside_sock_splice, &args);
 		errno = args.err;
@@ -347,6 +346,63 @@ static void flow_set_state(struct flow_common *f, enum flow_state state)
 		  FLOW_STATE(f));
 
 	flow_log_details_(f, LOG_DEBUG, MAX(state, oldstate));
+}
+
+/**
+ * flow_in_epoll() - Check if flow is registered with an epoll instance
+ * @f:		Flow to check
+ *
+ * Return: true if flow is registered with epoll, false otherwise
+ */
+bool flow_in_epoll(const struct flow_common *f)
+{
+	return f->epollid != EPOLLFD_ID_INVALID;
+}
+
+/**
+ * flow_epollfd() - Get the epoll file descriptor for a flow
+ * @f:		Flow to query
+ *
+ * Return: epoll file descriptor associated with the flow's thread
+ */
+int flow_epollfd(const struct flow_common *f)
+{
+	ASSERT(f->epollid < EPOLLFD_ID_MAX);
+
+	return epoll_id_to_fd[f->epollid];
+}
+
+/**
+ * flow_epollid_set() - Associate a flow with an epoll id
+ * @f:		Flow to update
+ * @epollid:	epoll id to associate with this flow
+ */
+void flow_epollid_set(struct flow_common *f, int epollid)
+{
+	ASSERT(epollid < EPOLLFD_ID_MAX);
+
+	f->epollid = epollid;
+}
+
+/**
+ * flow_epollid_clear() - Clear the flow epoll id
+ * @f:		Flow to update
+ */
+void flow_epollid_clear(struct flow_common *f)
+{
+	f->epollid = EPOLLFD_ID_INVALID;
+}
+
+/**
+ * flow_epollid_register() - Initialize the epoll id -> fd mapping
+ * @epollid:	epoll id to associate to
+ * @epollfd:	epoll file descriptor for this epoll id
+ */
+void flow_epollid_register(int epollid, int epollfd)
+{
+	ASSERT(epollid < EPOLLFD_ID_MAX);
+
+	epoll_id_to_fd[epollid] = epollfd;
 }
 
 /**
@@ -552,6 +608,7 @@ union flow *flow_alloc(void)
 
 	flow_new_entry = flow;
 	memset(flow, 0, sizeof(*flow));
+	flow_epollid_clear(&flow->f);
 	flow_set_state(&flow->f, FLOW_STATE_NEW);
 
 	return flow;
@@ -831,7 +888,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 		case FLOW_TCP_SPLICE:
 			closed = tcp_splice_flow_defer(&flow->tcp_splice);
 			if (!closed && timer)
-				tcp_splice_timer(c, &flow->tcp_splice);
+				tcp_splice_timer(&flow->tcp_splice);
 			break;
 		case FLOW_PING4:
 		case FLOW_PING6:

@@ -18,7 +18,6 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <net/ethernet.h>
-#include <sys/epoll.h>
 #include <sys/uio.h>
 #include <fcntl.h>
 #include <string.h>
@@ -35,6 +34,7 @@
 #include "packet.h"
 #include "log.h"
 #include "pcap.h"
+#include "epoll_ctl.h"
 #ifdef HAS_GETRANDOM
 #include <sys/random.h>
 #endif
@@ -47,18 +47,15 @@
  * @sl:		Length of @sa
  * @ifname:	Interface for binding, NULL for any
  * @v6only:	Set IPV6_V6ONLY socket option
- * @data:	epoll reference portion for protocol handlers
  *
  * Return: newly created socket, negative error code on failure
  */
 int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 	       const void *sa, socklen_t sl,
-	       const char *ifname, bool v6only, uint32_t data)
+	       const char *ifname, bool v6only)
 {
 	sa_family_t af = ((const struct sockaddr *)sa)->sa_family;
-	union epoll_ref ref = { .type = type, .data = data };
 	bool freebind = false;
-	struct epoll_event ev;
 	int fd, y = 1, ret;
 	uint8_t proto;
 	int socktype;
@@ -99,8 +96,6 @@ int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 		close(fd);
 		return -EBADF;
 	}
-
-	ref.fd = fd;
 
 	if (v6only)
 		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &y, sizeof(y)))
@@ -169,14 +164,6 @@ int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 		ret = -errno;
 		warn("TCP socket listen: %s", strerror_(-ret));
 		close(fd);
-		return ret;
-	}
-
-	ev.events = EPOLLIN;
-	ev.data.u64 = ref.u64;
-	if (epoll_ctl(c->epollfd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-		ret = -errno;
-		warn("L4 epoll_ctl: %s", strerror_(-ret));
 		return ret;
 	}
 
@@ -992,17 +979,6 @@ void raw_random(void *buf, size_t buflen)
 
 	if (random_read < buflen)
 		die("Unexpected EOF on random data source");
-}
-
-/**
- * epoll_del() - Remove a file descriptor from our passt epoll
- * @c:		Execution context
- * @fd:		File descriptor to remove
- */
-void epoll_del(const struct ctx *c, int fd)
-{
-	epoll_ctl(c->epollfd, EPOLL_CTL_DEL, fd, NULL);
-
 }
 
 /**

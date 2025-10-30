@@ -26,7 +26,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdint.h>
-#include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -61,6 +60,7 @@
 #include "log.h"
 #include "vhost_user.h"
 #include "vu_common.h"
+#include "epoll_ctl.h"
 
 /* Maximum allowed frame lengths (including L2 header) */
 
@@ -1146,7 +1146,7 @@ void tap_sock_reset(struct ctx *c)
 	}
 
 	/* Close the connected socket, wait for a new connection */
-	epoll_del(c, c->fd_tap);
+	epoll_del(c->epollfd, c->fd_tap);
 	close(c->fd_tap);
 	c->fd_tap = -1;
 	if (c->mode == MODE_VU)
@@ -1331,14 +1331,12 @@ static void tap_backend_show_hints(struct ctx *c)
 static void tap_sock_unix_init(const struct ctx *c)
 {
 	union epoll_ref ref = { .type = EPOLL_TYPE_TAP_LISTEN };
-	struct epoll_event ev = { 0 };
 
 	listen(c->fd_tap_listen, 0);
 
 	ref.fd = c->fd_tap_listen;
-	ev.events = EPOLLIN | EPOLLET;
-	ev.data.u64 = ref.u64;
-	epoll_ctl(c->epollfd, EPOLL_CTL_ADD, c->fd_tap_listen, &ev);
+
+	epoll_add(c->epollfd, EPOLLIN | EPOLLET, ref);
 }
 
 /**
@@ -1347,7 +1345,6 @@ static void tap_sock_unix_init(const struct ctx *c)
  */
 static void tap_start_connection(const struct ctx *c)
 {
-	struct epoll_event ev = { 0 };
 	union epoll_ref ref = { 0 };
 
 	ref.fd = c->fd_tap;
@@ -1363,9 +1360,7 @@ static void tap_start_connection(const struct ctx *c)
 		break;
 	}
 
-	ev.events = EPOLLIN | EPOLLRDHUP;
-	ev.data.u64 = ref.u64;
-	epoll_ctl(c->epollfd, EPOLL_CTL_ADD, c->fd_tap, &ev);
+	epoll_add(c->epollfd, EPOLLIN | EPOLLRDHUP, ref);
 
 	if (c->ifi4)
 		arp_send_init_req(c);

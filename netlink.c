@@ -36,6 +36,7 @@
 #include "log.h"
 #include "ip.h"
 #include "netlink.h"
+#include "epoll_ctl.h"
 
 /* Same as RTA_NEXT() but for nexthops: RTNH_NEXT() doesn't take 'attrlen' */
 #define RTNH_NEXT_AND_DEC(rtnh, attrlen)				\

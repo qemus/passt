@@ -35,40 +35,6 @@ union epoll_ref;
 #define MAC_OUR_LAA	\
 	((uint8_t [ETH_ALEN]){0x9a, 0x55, 0x9a, 0x55, 0x9a, 0x55})
 
-/**
- * union epoll_ref - Breakdown of reference for epoll fd bookkeeping
- * @type:	Type of fd (tells us what to do with events)
- * @fd:		File descriptor number (implies < 2^24 total descriptors)
- * @flow:	Index of the flow this fd is linked to
- * @tcp_listen:	TCP-specific reference part for listening sockets
- * @udp:	UDP-specific reference part
- * @icmp:	ICMP-specific reference part
- * @data:	Data handled by protocol handlers
- * @nsdir_fd:	netns dirfd for fallback timer checking if namespace is gone
- * @queue:	vhost-user queue index for this fd
- * @u64:	Opaque reference for epoll_ctl() and epoll_wait()
- */
-union epoll_ref {
-	struct {
-		enum epoll_type type:8;
-#define FD_REF_BITS		24
-#define FD_REF_MAX		((int)MAX_FROM_BITS(FD_REF_BITS))
-		int32_t		fd:FD_REF_BITS;
-		union {
-			uint32_t flow;
-			flow_sidx_t flowside;
-			union tcp_listen_epoll_ref tcp_listen;
-			union udp_listen_epoll_ref udp;
-			uint32_t data;
-			int nsdir_fd;
-			int queue;
-		};
-	};
-	uint64_t u64;
-};
-static_assert(sizeof(union epoll_ref) <= sizeof(union epoll_data),
-	      "epoll_ref must have same size as epoll_data");
-
 /* Large enough for ~128 maximum size frames */
 #define PKT_BUF_BYTES		(8UL << 20)
 

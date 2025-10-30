@@ -22,6 +22,7 @@
 #include "inany.h"
 #include "flow.h"
 #include "flow_table.h"
+#include "epoll_ctl.h"
 
 #include "repair.h"
 
@@ -47,7 +48,6 @@ static int repair_nfds;
 void repair_sock_init(const struct ctx *c)
 {
 	union epoll_ref ref = { .type = EPOLL_TYPE_REPAIR_LISTEN };
-	struct epoll_event ev = { 0 };
 
 	if (c->fd_repair_listen == -1)
 		return;
@@ -58,10 +58,8 @@ void repair_sock_init(const struct ctx *c)
 	}
 
 	ref.fd = c->fd_repair_listen;
-	ev.events = EPOLLIN | EPOLLHUP | EPOLLET;
-	ev.data.u64 = ref.u64;
-	if (epoll_ctl(c->epollfd, EPOLL_CTL_ADD, c->fd_repair_listen, &ev))
-		err_perror("repair helper socket epoll_ctl(), won't migrate");
+	if (epoll_add(c->epollfd, EPOLLIN | EPOLLHUP | EPOLLET, ref))
+		err("repair helper socket epoll_ctl(), won't migrate");
 }
 
 /**
@@ -74,7 +72,6 @@ void repair_sock_init(const struct ctx *c)
 int repair_listen_handler(struct ctx *c, uint32_t events)
 {
 	union epoll_ref ref = { .type = EPOLL_TYPE_REPAIR };
-	struct epoll_event ev = { 0 };
 	struct ucred ucred;
 	socklen_t len;
 	int rc;
@@ -112,11 +109,10 @@ int repair_listen_handler(struct ctx *c, uint32_t events)
 		info("Accepted TCP_REPAIR helper, PID %i", ucred.pid);
 
 	ref.fd = c->fd_repair;
-	ev.events = EPOLLHUP | EPOLLET;
-	ev.data.u64 = ref.u64;
-	if (epoll_ctl(c->epollfd, EPOLL_CTL_ADD, c->fd_repair, &ev)) {
-		rc = errno;
-		debug_perror("epoll_ctl() on TCP_REPAIR helper socket");
+
+	rc = epoll_add(c->epollfd, EPOLLHUP | EPOLLET, ref);
+	if (rc < 0) {
+		debug("epoll_ctl() on TCP_REPAIR helper socket");
 		close(c->fd_repair);
 		c->fd_repair = -1;
 		return rc;

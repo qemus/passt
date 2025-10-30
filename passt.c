@@ -19,7 +19,6 @@
  * created in a separate network namespace).
  */
 
-#include <sys/epoll.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -54,6 +53,7 @@
 #include "migrate.h"
 #include "repair.h"
 #include "netlink.h"
+#include "epoll_ctl.h"
 
 #define NUM_EPOLL_EVENTS	8
 
@@ -231,6 +231,95 @@ static void print_stats(const struct ctx *c, const struct passt_stats *stats,
 }
 
 /**
+ * passt_worker() - Process epoll events and handle protocol operations
+ * @opaque:	Pointer to execution context (struct ctx)
+ * @nfds:	Number of file descriptors ready (epoll_wait return value)
+ * @events:	epoll_event array of ready file descriptors
+ */
+static void passt_worker(void *opaque, int nfds, struct epoll_event *events)
+{
+	static struct passt_stats stats = { 0 };
+	struct ctx *c = opaque;
+	struct timespec now;
+	int i;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now))
+		err_perror("Failed to get CLOCK_MONOTONIC time");
+
+	for (i = 0; i < nfds; i++) {
+		union epoll_ref ref = *((union epoll_ref *)&events[i].data.u64);
+		uint32_t eventmask = events[i].events;
+
+		trace("%s: epoll event on %s %i (events: 0x%08x)",
+		      c->mode == MODE_PASTA ? "pasta" : "passt",
+		      EPOLL_TYPE_STR(ref.type), ref.fd, eventmask);
+
+		switch (ref.type) {
+		case EPOLL_TYPE_TAP_PASTA:
+			tap_handler_pasta(c, eventmask, &now);
+			break;
+		case EPOLL_TYPE_TAP_PASST:
+			tap_handler_passt(c, eventmask, &now);
+			break;
+		case EPOLL_TYPE_TAP_LISTEN:
+			tap_listen_handler(c, eventmask);
+			break;
+		case EPOLL_TYPE_NSQUIT_INOTIFY:
+			pasta_netns_quit_inotify_handler(c, ref.fd);
+			break;
+		case EPOLL_TYPE_NSQUIT_TIMER:
+			pasta_netns_quit_timer_handler(c, ref);
+			break;
+		case EPOLL_TYPE_TCP:
+			tcp_sock_handler(c, ref, eventmask);
+			break;
+		case EPOLL_TYPE_TCP_SPLICE:
+			tcp_splice_sock_handler(c, ref, eventmask);
+			break;
+		case EPOLL_TYPE_TCP_LISTEN:
+			tcp_listen_handler(c, ref, &now);
+			break;
+		case EPOLL_TYPE_TCP_TIMER:
+			tcp_timer_handler(c, ref);
+			break;
+		case EPOLL_TYPE_UDP_LISTEN:
+			udp_listen_sock_handler(c, ref, eventmask, &now);
+			break;
+		case EPOLL_TYPE_UDP:
+			udp_sock_handler(c, ref, eventmask, &now);
+			break;
+		case EPOLL_TYPE_PING:
+			icmp_sock_handler(c, ref);
+			break;
+		case EPOLL_TYPE_VHOST_CMD:
+			vu_control_handler(c->vdev, c->fd_tap, eventmask);
+			break;
+		case EPOLL_TYPE_VHOST_KICK:
+			vu_kick_cb(c->vdev, ref, &now);
+			break;
+		case EPOLL_TYPE_REPAIR_LISTEN:
+			repair_listen_handler(c, eventmask);
+			break;
+		case EPOLL_TYPE_REPAIR:
+			repair_handler(c, eventmask);
+			break;
+		case EPOLL_TYPE_NL_NEIGH:
+			nl_neigh_notify_handler(c);
+			break;
+		default:
+			/* Can't happen */
+			ASSERT(0);
+		}
+		stats.events[ref.type]++;
+		print_stats(c, &stats, &now);
+	}
+
+	post_handler(c, &now);
+
+	migrate_handler(c);
+}
+
+/**
  * main() - Entry point and main loop
  * @argc:	Argument count
  * @argv:	Options, plus optional target PID for pasta mode
@@ -247,8 +336,7 @@ static void print_stats(const struct ctx *c, const struct passt_stats *stats,
 int main(int argc, char **argv)
 {
 	struct epoll_event events[NUM_EPOLL_EVENTS];
-	struct passt_stats stats = { 0 };
-	int nfds, i, devnull_fd = -1;
+	int nfds, devnull_fd = -1;
 	struct ctx c = { 0 };
 	struct rlimit limit;
 	struct timespec now;
@@ -286,6 +374,7 @@ int main(int argc, char **argv)
 	c.epollfd = epoll_create1(EPOLL_CLOEXEC);
 	if (c.epollfd == -1)
 		die_perror("Failed to create epoll file descriptor");
+	flow_epollid_register(EPOLLFD_ID_DEFAULT, c.epollfd);
 
 	if (getrlimit(RLIMIT_NOFILE, &limit))
 		die_perror("Failed to get maximum value of open files limit");
@@ -358,80 +447,7 @@ loop:
 	if (nfds == -1 && errno != EINTR)
 		die_perror("epoll_wait() failed in main loop");
 
-	if (clock_gettime(CLOCK_MONOTONIC, &now))
-		err_perror("Failed to get CLOCK_MONOTONIC time");
-
-	for (i = 0; i < nfds; i++) {
-		union epoll_ref ref = *((union epoll_ref *)&events[i].data.u64);
-		uint32_t eventmask = events[i].events;
-
-		trace("%s: epoll event on %s %i (events: 0x%08x)",
-		      c.mode == MODE_PASTA ? "pasta" : "passt",
-		      EPOLL_TYPE_STR(ref.type), ref.fd, eventmask);
-
-		switch (ref.type) {
-		case EPOLL_TYPE_TAP_PASTA:
-			tap_handler_pasta(&c, eventmask, &now);
-			break;
-		case EPOLL_TYPE_TAP_PASST:
-			tap_handler_passt(&c, eventmask, &now);
-			break;
-		case EPOLL_TYPE_TAP_LISTEN:
-			tap_listen_handler(&c, eventmask);
-			break;
-		case EPOLL_TYPE_NSQUIT_INOTIFY:
-			pasta_netns_quit_inotify_handler(&c, ref.fd);
-			break;
-		case EPOLL_TYPE_NSQUIT_TIMER:
-			pasta_netns_quit_timer_handler(&c, ref);
-			break;
-		case EPOLL_TYPE_TCP:
-			tcp_sock_handler(&c, ref, eventmask);
-			break;
-		case EPOLL_TYPE_TCP_SPLICE:
-			tcp_splice_sock_handler(&c, ref, eventmask);
-			break;
-		case EPOLL_TYPE_TCP_LISTEN:
-			tcp_listen_handler(&c, ref, &now);
-			break;
-		case EPOLL_TYPE_TCP_TIMER:
-			tcp_timer_handler(&c, ref);
-			break;
-		case EPOLL_TYPE_UDP_LISTEN:
-			udp_listen_sock_handler(&c, ref, eventmask, &now);
-			break;
-		case EPOLL_TYPE_UDP:
-			udp_sock_handler(&c, ref, eventmask, &now);
-			break;
-		case EPOLL_TYPE_PING:
-			icmp_sock_handler(&c, ref);
-			break;
-		case EPOLL_TYPE_VHOST_CMD:
-			vu_control_handler(c.vdev, c.fd_tap, eventmask);
-			break;
-		case EPOLL_TYPE_VHOST_KICK:
-			vu_kick_cb(c.vdev, ref, &now);
-			break;
-		case EPOLL_TYPE_REPAIR_LISTEN:
-			repair_listen_handler(&c, eventmask);
-			break;
-		case EPOLL_TYPE_REPAIR:
-			repair_handler(&c, eventmask);
-			break;
-		case EPOLL_TYPE_NL_NEIGH:
-			nl_neigh_notify_handler(&c);
-			break;
-		default:
-			/* Can't happen */
-			ASSERT(0);
-		}
-		stats.events[ref.type]++;
-		print_stats(&c, &stats, &now);
-	}
-
-	post_handler(&c, &now);
-
-	migrate_handler(&c);
+	passt_worker(&c, nfds, events);
 
 	goto loop;
 }
