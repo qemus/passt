@@ -16,6 +16,7 @@
 #include "ip.h"
 #include "siphash.h"
 #include "inany.h"
+#include "fwd.h"
 
 const union inany_addr inany_loopback4 = INANY_INIT4(IN4ADDR_LOOPBACK_INIT);
 const union inany_addr inany_any4 = INANY_INIT4(IN4ADDR_ANY_INIT);

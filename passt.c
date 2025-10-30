@@ -53,6 +53,7 @@
 #include "vu_common.h"
 #include "migrate.h"
 #include "repair.h"
+#include "netlink.h"
 
 #define NUM_EPOLL_EVENTS	8
 
@@ -79,6 +80,7 @@ char *epoll_type_str[] = {
 	[EPOLL_TYPE_VHOST_KICK]		= "vhost-user kick socket",
 	[EPOLL_TYPE_REPAIR_LISTEN]	= "TCP_REPAIR helper listening socket",
 	[EPOLL_TYPE_REPAIR]		= "TCP_REPAIR helper socket",
+	[EPOLL_TYPE_NL_NEIGH]		= "netlink neighbour notifier socket",
 };
 static_assert(ARRAY_SIZE(epoll_type_str) == EPOLL_NUM_TYPES,
 	      "epoll_type_str[] doesn't match enum epoll_type");
@@ -157,12 +159,11 @@ static void timer_init(struct ctx *c, const struct timespec *now)
 /**
  * proto_update_l2_buf() - Update scatter-gather L2 buffers in protocol handlers
  * @eth_d:	Ethernet destination address, NULL if unchanged
- * @eth_s:	Ethernet source address, NULL if unchanged
  */
-void proto_update_l2_buf(const unsigned char *eth_d, const unsigned char *eth_s)
+void proto_update_l2_buf(const unsigned char *eth_d)
 {
-	tcp_update_l2_buf(eth_d, eth_s);
-	udp_update_l2_buf(eth_d, eth_s);
+	tcp_update_l2_buf(eth_d);
+	udp_update_l2_buf(eth_d);
 }
 
 /**
@@ -312,7 +313,7 @@ int main(int argc, char **argv)
 	if ((!c.no_udp && udp_init(&c)) || (!c.no_tcp && tcp_init(&c)))
 		_exit(EXIT_FAILURE);
 
-	proto_update_l2_buf(c.guest_mac, c.our_tap_mac);
+	proto_update_l2_buf(c.guest_mac);
 
 	if (c.ifi4 && !c.no_dhcp)
 		dhcp_init();
@@ -321,6 +322,9 @@ int main(int argc, char **argv)
 		dhcpv6_init(&c);
 
 	pcap_init(&c);
+
+	fwd_neigh_table_init(&c);
+	nl_neigh_notify_init(&c);
 
 	if (!c.foreground) {
 		if ((devnull_fd = open("/dev/null", O_RDWR | O_CLOEXEC)) < 0)
@@ -413,6 +417,9 @@ loop:
 			break;
 		case EPOLL_TYPE_REPAIR:
 			repair_handler(&c, eventmask);
+			break;
+		case EPOLL_TYPE_NL_NEIGH:
+			nl_neigh_notify_handler(&c);
 			break;
 		default:
 			/* Can't happen */

@@ -22,5 +22,7 @@ struct arpmsg {
 
 int arp(const struct ctx *c, struct iov_tail *data);
 void arp_send_init_req(const struct ctx *c);
+void arp_announce(const struct ctx *c, struct in_addr *ip,
+		  const unsigned char *mac);
 
 #endif /* ARP_H */

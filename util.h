@@ -101,6 +101,8 @@ void abort_with_msg(const char *fmt, ...)
 	((uint8_t [ETH_ALEN]){ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff })
 #define MAC_ZERO		((uint8_t [ETH_ALEN]){ 0 })
 #define MAC_IS_ZERO(addr)	(!memcmp((addr), MAC_ZERO, ETH_ALEN))
+#define MAC_UNDEF		MAC_BROADCAST
+#define MAC_IS_UNDEF(addr)	(!memcmp((addr), MAC_UNDEF, ETH_ALEN))
 
 #ifndef __bswap_constant_16
 #define __bswap_constant_16(x)						\

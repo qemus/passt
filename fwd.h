@@ -56,5 +56,12 @@ uint8_t fwd_nat_from_splice(const struct ctx *c, uint8_t proto,
 			    const struct flowside *ini, struct flowside *tgt);
 uint8_t fwd_nat_from_host(const struct ctx *c, uint8_t proto,
 			  const struct flowside *ini, struct flowside *tgt);
+void fwd_neigh_table_update(const struct ctx *c, const union inany_addr *addr,
+			    const uint8_t *mac, bool permanent);
+void fwd_neigh_table_free(const struct ctx *c,
+			  const union inany_addr *addr);
+void fwd_neigh_mac_get(const struct ctx *c, const union inany_addr *addr,
+		       uint8_t *mac);
+void fwd_neigh_table_init(const struct ctx *c);
 
 #endif /* FWD_H */

@@ -177,6 +177,7 @@ int flowside_connect(const struct ctx *c, int s,
  * @type:	Type of packet flow
  * @pif[]:	Interface for each side of the flow
  * @side[]:	Information for each side of the flow
+ * @tap_omac: MAC address of remote endpoint as seen from the guest
  */
 struct flow_common {
 #ifdef __GNUC__
@@ -192,6 +193,7 @@ struct flow_common {
 #endif
 	uint8_t		pif[SIDES];
 	struct flowside	side[SIDES];
+	uint8_t		tap_omac[6];
 };
 
 #define FLOW_INDEX_BITS		17	/* 128k - 1 */

@@ -919,8 +919,10 @@ static void tcp_fill_header(struct tcphdr *th,
 
 /**
  * tcp_fill_headers() - Fill 802.3, IP, TCP headers
+ * @c:			Execution context
  * @conn:		Connection pointer
  * @taph:		tap backend specific header
+ * @eh:		Pointer to Ethernet header
  * @ip4h:		Pointer to IPv4 header, or NULL
  * @ip6h:		Pointer to IPv6 header, or NULL
  * @th:			Pointer to TCP header
@@ -929,14 +931,15 @@ static void tcp_fill_header(struct tcphdr *th,
  * @seq:		Sequence number for this segment
  * @no_tcp_csum:	Do not set TCP checksum
  */
-void tcp_fill_headers(const struct tcp_tap_conn *conn,
-		      struct tap_hdr *taph,
+void tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
+		      struct tap_hdr *taph, struct ethhdr *eh,
 		      struct iphdr *ip4h, struct ipv6hdr *ip6h,
 		      struct tcphdr *th, struct iov_tail *payload,
 		      const uint16_t *ip4_check, uint32_t seq, bool no_tcp_csum)
 {
 	const struct flowside *tapside = TAPFLOW(conn);
 	size_t l4len = iov_tail_size(payload) + sizeof(*th);
+	uint8_t *omac = conn->f.tap_omac;
 	size_t l3len = l4len;
 	uint32_t psum = 0;
 
@@ -962,6 +965,7 @@ void tcp_fill_headers(const struct tcp_tap_conn *conn,
 			psum = proto_ipv4_header_psum(l4len, IPPROTO_TCP,
 						      *src4, *dst4);
 		}
+		eh->h_proto = htons_constant(ETH_P_IP);
 	}
 
 	if (ip6h) {
@@ -982,7 +986,13 @@ void tcp_fill_headers(const struct tcp_tap_conn *conn,
 						      &ip6h->saddr,
 						      &ip6h->daddr);
 		}
+		eh->h_proto = htons_constant(ETH_P_IPV6);
 	}
+
+	/* Find if neighbour table has a recorded MAC address */
+	if (MAC_IS_UNDEF(omac))
+		fwd_neigh_mac_get(c, &tapside->oaddr, omac);
+	eth_update_mac(eh, NULL, omac);
 
 	tcp_fill_header(th, conn, seq);
 
@@ -1994,7 +2004,8 @@ static void tcp_rst_no_conn(const struct ctx *c, int af,
 		return;
 
 	if (af == AF_INET) {
-		struct iphdr *ip4h = tap_push_l2h(c, buf, ETH_P_IP);
+		struct iphdr *ip4h = tap_push_l2h(c, buf, c->our_tap_mac,
+						  ETH_P_IP);
 		const struct in_addr *rst_src = daddr;
 		const struct in_addr *rst_dst = saddr;
 
@@ -2004,7 +2015,8 @@ static void tcp_rst_no_conn(const struct ctx *c, int af,
 					      *rst_src, *rst_dst);
 
 	} else {
-		struct ipv6hdr *ip6h = tap_push_l2h(c, buf, ETH_P_IPV6);
+		struct ipv6hdr *ip6h = tap_push_l2h(c, buf, c->our_tap_mac,
+						    ETH_P_IPV6);
 		const struct in6_addr *rst_src = daddr;
 		const struct in6_addr *rst_dst = saddr;
 

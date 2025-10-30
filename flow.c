@@ -449,6 +449,7 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 
 	switch (f->pif[INISIDE]) {
 	case PIF_TAP:
+		memcpy(f->tap_omac, MAC_UNDEF, ETH_ALEN);
 		tgtpif = fwd_nat_from_tap(c, proto, ini, tgt);
 		break;
 
@@ -458,6 +459,7 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 
 	case PIF_HOST:
 		tgtpif = fwd_nat_from_host(c, proto, ini, tgt);
+		fwd_neigh_mac_get(c, &tgt->oaddr, f->tap_omac);
 		break;
 
 	default:

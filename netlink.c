@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
+#include <net/if_arp.h>
 
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -40,6 +41,10 @@
 #define RTNH_NEXT_AND_DEC(rtnh, attrlen)				\
 	((attrlen) -= RTNH_ALIGN((rtnh)->rtnh_len), RTNH_NEXT(rtnh))
 
+/* Convenience macro borrowed from kernel */
+#define NUD_VALID				\
+	(NUD_PERMANENT | NUD_NOARP | NUD_REACHABLE | NUD_PROBE | NUD_STALE)
+
 /* Netlink expects a buffer of at least 8kiB or the system page size,
  * whichever is larger.  32kiB is recommended for more efficient.
  * Since the largest page size on any remotely common Linux setup is
@@ -50,9 +55,10 @@
 #define NLBUFSIZ 65536
 
 /* Socket in init, in target namespace, sequence (just needs to be monotonic) */
-int nl_sock	= -1;
-int nl_sock_ns	= -1;
-static int nl_seq = 1;
+int nl_sock		 = -1;
+int nl_sock_ns		 = -1;
+static int nl_sock_neigh = -1;
+static int nl_seq	 = 1;
 
 /**
  * nl_sock_init_do() - Set up netlink sockets in init or target namespace
@@ -1102,4 +1108,201 @@ int nl_link_set_flags(int s, unsigned int ifi,
 	};
 
 	return nl_do(s, &req, RTM_NEWLINK, 0, sizeof(req));
+}
+
+/**
+ * nl_neigh_msg_read() - Interpret a neighbour state message from netlink
+ * @c:		Execution context
+ * @nh:	Message to be read
+ */
+static void nl_neigh_msg_read(const struct ctx *c, struct nlmsghdr *nh)
+{
+	struct ndmsg *ndm = NLMSG_DATA(nh);
+	struct rtattr *rta = (struct rtattr *)(ndm + 1);
+	size_t na = NLMSG_PAYLOAD(nh, sizeof(*ndm));
+	char ip_str[INET6_ADDRSTRLEN];
+	char mac_str[ETH_ADDRSTRLEN];
+	const uint8_t *lladdr = NULL;
+	union inany_addr addr, daddr;
+	const void *dst = NULL;
+	size_t lladdr_len = 0;
+	size_t dstlen = 0;
+
+	if (nh->nlmsg_type == NLMSG_DONE)
+		return;
+
+	if (nh->nlmsg_type == NLMSG_ERROR) {
+		const struct nlmsgerr *errmsg = (struct nlmsgerr *)ndm;
+
+		warn("netlink error message on neighbour notifier: %s",
+		     strerror_(-errmsg->error));
+		return;
+	}
+
+	if (nh->nlmsg_type != RTM_NEWNEIGH && nh->nlmsg_type != RTM_DELNEIGH)
+		return;
+
+	for (; RTA_OK(rta, na); rta = RTA_NEXT(rta, na)) {
+		if (rta->rta_type == NDA_DST) {
+			dst = RTA_DATA(rta);
+			dstlen = RTA_PAYLOAD(rta);
+		} else if (rta->rta_type ==  NDA_LLADDR) {
+			lladdr = RTA_DATA(rta);
+			lladdr_len = RTA_PAYLOAD(rta);
+		}
+	}
+
+	if (!dst)
+		return;
+
+	if (ndm->ndm_family == AF_INET && ndm->ndm_ifindex != c->ifi4)
+		return;
+
+	if (ndm->ndm_family == AF_INET6 && ndm->ndm_ifindex != c->ifi6)
+		return;
+
+	if (ndm->ndm_family != AF_INET && ndm->ndm_family != AF_INET6)
+		return;
+
+	if (ndm->ndm_family == AF_INET && dstlen != sizeof(struct in_addr)) {
+		warn("netlink: wrong address length in AF_INET notification");
+		return;
+	}
+	if (ndm->ndm_family == AF_INET6 && dstlen != sizeof(struct in6_addr)) {
+		warn("netlink: wrong address length in AF_INET6 notification");
+		return;
+	}
+
+	/* We only handle guest-side visible addresses */
+	inany_from_af(&addr, ndm->ndm_family, dst);
+	if (!nat_inbound(c, &addr, &daddr))
+		return;
+
+	inany_ntop(&daddr, ip_str, sizeof(ip_str));
+
+	if (nh->nlmsg_type == RTM_DELNEIGH) {
+		trace("neighbour notifier delete: %s", ip_str);
+		fwd_neigh_table_free(c, &daddr);
+		return;
+	}
+	if (!(ndm->ndm_state & NUD_VALID)) {
+		trace("neighbour notifier: %s unreachable, state: 0x%04x",
+		      ip_str, ndm->ndm_state);
+		fwd_neigh_table_free(c, &daddr);
+		return;
+	}
+	if (!lladdr) {
+		warn("RTM_NEWNEIGH %s: missing link layer address", ip_str);
+		return;
+	}
+	if (lladdr_len != ETH_ALEN || ndm->ndm_type != ARPHRD_ETHER)
+		return;
+
+	eth_ntop(lladdr, mac_str, sizeof(mac_str));
+	trace("neighbour notifier update: %s / %s", ip_str, mac_str);
+	fwd_neigh_table_update(c, &daddr, lladdr, false);
+}
+
+/**
+ * nl_neigh_sync() - Read current contents of ARP/NDP tables
+ * @c:		Execution context
+ * @proto:	Protocol, AF_INET or AF_INET6
+ * @ifi:	Interface index
+ */
+static void nl_neigh_sync(const struct ctx *c, int proto, int ifi)
+{
+	struct {
+		struct nlmsghdr nlh;
+		struct ndmsg    ndm;
+	} req = {
+		.ndm.ndm_family  = proto,
+		.ndm.ndm_ifindex = ifi,
+	};
+	struct nlmsghdr *nh;
+	char buf[NLBUFSIZ];
+	ssize_t status;
+	uint32_t seq;
+
+	seq = nl_send(nl_sock_neigh, &req, RTM_GETNEIGH,
+		      NLM_F_DUMP, sizeof(req));
+	nl_foreach_oftype(nh, status, nl_sock_neigh, buf, seq, RTM_NEWNEIGH)
+		nl_neigh_msg_read(c, nh);
+	if (status < 0)
+		warn("netlink: RTM_GETNEIGH failed: %s", strerror_(-status));
+}
+
+/**
+ * nl_neigh_notify_handler() - Non-blocking drain of pending neighbour updates
+ * @c:		Execution context
+ */
+void nl_neigh_notify_handler(const struct ctx *c)
+{
+	char buf[NLBUFSIZ];
+
+	for (;;) {
+		ssize_t n = recv(nl_sock_neigh, buf, sizeof(buf), MSG_DONTWAIT);
+		struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno != EAGAIN)
+				warn_perror("netlink notifier read error");
+			return;
+		}
+		for (; NLMSG_OK(nh, n); nh = NLMSG_NEXT(nh, n))
+			nl_neigh_msg_read(c, nh);
+	}
+}
+
+/**
+ * nl_neigh_notify_init() - Subscribe to neighbour events
+ * @c:		Execution context
+ *
+ * Return: 0 on success, -1 on failure
+ */
+int nl_neigh_notify_init(const struct ctx *c)
+{
+	union epoll_ref ref = {
+		.type = EPOLL_TYPE_NL_NEIGH
+	};
+	struct epoll_event ev = {
+		.events = EPOLLIN
+	};
+	struct sockaddr_nl addr = {
+		.nl_family = AF_NETLINK,
+		.nl_groups = RTMGRP_NEIGH,
+	};
+
+	if (nl_sock_neigh >= 0) {
+		warn("netlink: neighbour notifier socket already exists");
+		return 0;
+	}
+
+	nl_sock_neigh = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC,
+			       NETLINK_ROUTE);
+	if (nl_sock_neigh < 0) {
+		warn_perror("Failed to create neighbour notifier socket");
+		return -1;
+	}
+
+	if (bind(nl_sock_neigh, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		warn_perror("Failed to bind neighbour notifier socket");
+		close(nl_sock_neigh);
+		nl_sock_neigh = -1;
+		return -1;
+	}
+
+	ev.data.u64 = ref.u64;
+	if (epoll_ctl(c->epollfd, EPOLL_CTL_ADD, nl_sock_neigh, &ev) == -1) {
+		warn_perror("epoll_ctl() on neighbour notifier socket failed");
+		close(nl_sock_neigh);
+		nl_sock_neigh = -1;
+		return -1;
+	}
+
+	nl_neigh_sync(c, AF_INET, c->ifi4);
+	nl_neigh_sync(c, AF_INET6, c->ifi6);
+
+	return 0;
 }

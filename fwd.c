@@ -26,12 +26,224 @@
 #include "passt.h"
 #include "lineread.h"
 #include "flow_table.h"
+#include "netlink.h"
+#include "arp.h"
+#include "ndp.h"
 
 /* Ephemeral port range: values from RFC 6335 */
 static in_port_t fwd_ephemeral_min = (1 << 15) + (1 << 14);
 static in_port_t fwd_ephemeral_max = NUM_PORTS - 1;
 
 #define PORT_RANGE_SYSCTL	"/proc/sys/net/ipv4/ip_local_port_range"
+
+#define NEIGH_TABLE_SLOTS    1024
+#define NEIGH_TABLE_SIZE     (NEIGH_TABLE_SLOTS / 2)
+static_assert((NEIGH_TABLE_SLOTS & (NEIGH_TABLE_SLOTS - 1)) == 0,
+	      "NEIGH_TABLE_SLOTS must be a power of two");
+
+/**
+ * struct neigh_table_entry - Entry in the ARP/NDP table
+ * @next:	Next entry in slot or free list
+ * @addr:	IP address of represented host
+ * @mac:	MAC address of represented host
+ * @permanent:	Entry cannot be altered or freed by notification
+ */
+struct neigh_table_entry {
+	struct neigh_table_entry *next;
+	union inany_addr addr;
+	uint8_t mac[ETH_ALEN];
+	bool permanent;
+};
+
+/**
+ * struct neigh_table - Cache of ARP/NDP table contents
+ * @entries:	Entries to be plugged into the hash slots when allocated
+ * @slots:	Hash table slots
+ * @free:	Linked list of unused entries
+ */
+struct neigh_table {
+	struct neigh_table_entry entries[NEIGH_TABLE_SIZE];
+	struct neigh_table_entry *slots[NEIGH_TABLE_SLOTS];
+	struct neigh_table_entry *free;
+};
+
+static struct neigh_table neigh_table;
+
+/**
+ * neigh_table_slot() - Hash key to a number within the table range
+ * @c:		Execution context
+ * @key:	The key to be used for the hash
+ *
+ * Return: the resulting hash value
+ */
+static size_t neigh_table_slot(const struct ctx *c,
+			       const union inany_addr *key)
+{
+	struct siphash_state st = SIPHASH_INIT(c->hash_secret);
+	uint32_t i;
+
+	inany_siphash_feed(&st, key);
+	i = siphash_final(&st, sizeof(*key), 0);
+
+	return ((size_t)i) & (NEIGH_TABLE_SIZE - 1);
+}
+
+/**
+ * fwd_neigh_table_find() - Find a MAC table entry
+ * @c:		Execution context
+ * @addr:	Neighbour address to be used as key for the lookup
+ *
+ * Return: the matching entry, if found. Otherwise NULL
+ */
+static struct neigh_table_entry *fwd_neigh_table_find(const struct ctx *c,
+						      const union inany_addr *addr)
+{
+	size_t slot = neigh_table_slot(c, addr);
+	struct neigh_table_entry *e = neigh_table.slots[slot];
+
+	while (e && !inany_equals(&e->addr, addr))
+		e = e->next;
+
+	return e;
+}
+
+/**
+ * fwd_neigh_table_update() - Allocate or update neighbour table entry
+ * @c:		Execution context
+ * @addr:	IP address used to determine insertion slot and store in entry
+ * @mac:	The MAC address associated with the neighbour address
+ * @permanent:	Created entry cannot be altered or freed
+ */
+void fwd_neigh_table_update(const struct ctx *c, const union inany_addr *addr,
+			    const uint8_t *mac, bool permanent)
+{
+	struct neigh_table *t = &neigh_table;
+	struct neigh_table_entry *e;
+	ssize_t slot;
+
+	/* MAC address might change sometimes */
+	e = fwd_neigh_table_find(c, addr);
+	if (e) {
+		if (!e->permanent)
+			memcpy(e->mac, mac, ETH_ALEN);
+		return;
+	}
+
+	e = t->free;
+	if (!e) {
+		debug("Failed to allocate neighbour table entry");
+		return;
+	}
+	t->free = e->next;
+	slot = neigh_table_slot(c, addr);
+	e->next = t->slots[slot];
+	t->slots[slot] = e;
+
+	memcpy(&e->addr, addr, sizeof(*addr));
+	memcpy(e->mac, mac, ETH_ALEN);
+	e->permanent = permanent;
+
+	if (!memcmp(mac, c->our_tap_mac, ETH_ALEN))
+		return;
+
+	if (inany_v4(addr))
+		arp_announce(c, inany_v4(addr), e->mac);
+	else
+		ndp_unsolicited_na(c, &addr->a6);
+}
+
+/**
+ * fwd_neigh_table_free() - Remove an entry from a slot and add it to free list
+ * @c:		Execution context
+ * @addr:	IP address used to find the slot for the entry
+ */
+void fwd_neigh_table_free(const struct ctx *c, const union inany_addr *addr)
+{
+	ssize_t slot = neigh_table_slot(c, addr);
+	struct neigh_table *t = &neigh_table;
+	struct neigh_table_entry *e, **prev;
+
+	prev = &t->slots[slot];
+	e = t->slots[slot];
+	while (e && !inany_equals(&e->addr, addr)) {
+		prev = &e->next;
+		e = e->next;
+	}
+
+	if (!e || e->permanent)
+		return;
+
+	*prev = e->next;
+	e->next = t->free;
+	t->free = e;
+	memset(&e->addr, 0, sizeof(*addr));
+	memset(e->mac, 0, ETH_ALEN);
+}
+
+/**
+ * fwd_neigh_mac_get() - Look up MAC address in the ARP/NDP table
+ * @c:		Execution context
+ * @addr:	Neighbour IP address used as lookup key
+ * @mac:	Buffer for returned MAC address
+ */
+void fwd_neigh_mac_get(const struct ctx *c, const union inany_addr *addr,
+		       uint8_t *mac)
+{
+	const struct neigh_table_entry *e = fwd_neigh_table_find(c, addr);
+
+	if (!e) {
+		union inany_addr ggw;
+
+		if (inany_v4(addr))
+			ggw = inany_from_v4(c->ip4.guest_gw);
+		else
+			ggw.a6 = c->ip6.guest_gw;
+
+		e = fwd_neigh_table_find(c, &ggw);
+	}
+
+	if (e)
+		memcpy(mac, e->mac, ETH_ALEN);
+	else
+		memcpy(mac, c->our_tap_mac, ETH_ALEN);
+}
+
+/**
+ * fwd_neigh_table_init() - Initialize the neighbour table
+ * @c:		Execution context
+ */
+void fwd_neigh_table_init(const struct ctx *c)
+{
+	union inany_addr mhl = inany_from_v4(c->ip4.map_host_loopback);
+	union inany_addr mga = inany_from_v4(c->ip4.map_guest_addr);
+	struct neigh_table *t = &neigh_table;
+	struct neigh_table_entry *e;
+	int i;
+
+	memset(t, 0, sizeof(*t));
+
+	for (i = 0; i < NEIGH_TABLE_SIZE; i++) {
+		e = &t->entries[i];
+		e->next = t->free;
+		t->free = e;
+	}
+
+	/* Blocker entries to stop events from hosts using these addresses */
+	if (!inany_is_unspecified4(&mhl))
+		fwd_neigh_table_update(c, &mhl, c->our_tap_mac, true);
+
+	if (!inany_is_unspecified4(&mga))
+		fwd_neigh_table_update(c, &mga, c->our_tap_mac, true);
+
+	mhl = *(union inany_addr *)&c->ip6.map_host_loopback;
+	mga = *(union inany_addr *)&c->ip6.map_guest_addr;
+
+	if (!inany_is_unspecified6(&mhl))
+		fwd_neigh_table_update(c, &mhl, c->our_tap_mac, true);
+
+	if (!inany_is_unspecified6(&mga))
+		fwd_neigh_table_update(c, &mga, c->our_tap_mac, true);
+}
 
 /** fwd_probe_ephemeral() - Determine what ports this host considers ephemeral
  *

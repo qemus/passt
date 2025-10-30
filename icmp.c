@@ -125,17 +125,21 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
 	flow_dbg(pingf, "echo reply to tap, ID: %"PRIu16", seq: %"PRIu16,
 		 ini->eport, seq);
 
+	/* Check if neighbour table has a recorded MAC address */
+	if (MAC_IS_UNDEF(pingf->f.tap_omac))
+		fwd_neigh_mac_get(c, &ini->oaddr, pingf->f.tap_omac);
+
 	if (pingf->f.type == FLOW_PING4) {
 		const struct in_addr *saddr = inany_v4(&ini->oaddr);
 		const struct in_addr *daddr = inany_v4(&ini->eaddr);
 
 		ASSERT(saddr && daddr); /* Must have IPv4 addresses */
-		tap_icmp4_send(c, *saddr, *daddr, buf, n);
+		tap_icmp4_send(c, *saddr, *daddr, buf, pingf->f.tap_omac, n);
 	} else if (pingf->f.type == FLOW_PING6) {
 		const struct in6_addr *saddr = &ini->oaddr.a6;
 		const struct in6_addr *daddr = &ini->eaddr.a6;
 
-		tap_icmp6_send(c, saddr, daddr, buf, n);
+		tap_icmp6_send(c, saddr, daddr, buf, pingf->f.tap_omac, n);
 	}
 	return;
 

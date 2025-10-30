@@ -326,7 +326,6 @@ struct ctx {
 	bool migrate_exit;
 };
 
-void proto_update_l2_buf(const unsigned char *eth_d,
-			 const unsigned char *eth_s);
+void proto_update_l2_buf(const unsigned char *eth_d);
 
 #endif /* PASST_H */

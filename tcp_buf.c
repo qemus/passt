@@ -40,8 +40,7 @@
 /* Static buffers */
 
 /* Ethernet header for IPv4 and IPv6 frames */
-static struct ethhdr		tcp4_eth_src;
-static struct ethhdr		tcp6_eth_src;
+static struct ethhdr		tcp_eth_hdr[TCP_FRAMES_MEM];
 
 static struct tap_hdr		tcp_payload_tap_hdr[TCP_FRAMES_MEM];
 
@@ -67,12 +66,13 @@ static struct iovec	tcp_l2_iov[TCP_FRAMES_MEM][TCP_NUM_IOVS];
 /**
  * tcp_update_l2_buf() - Update Ethernet header buffers with addresses
  * @eth_d:	Ethernet destination address, NULL if unchanged
- * @eth_s:	Ethernet source address, NULL if unchanged
  */
-void tcp_update_l2_buf(const unsigned char *eth_d, const unsigned char *eth_s)
+void tcp_update_l2_buf(const unsigned char *eth_d)
 {
-	eth_update_mac(&tcp4_eth_src, eth_d, eth_s);
-	eth_update_mac(&tcp6_eth_src, eth_d, eth_s);
+	int i;
+
+	for (i = 0; i < TCP_FRAMES_MEM; i++)
+		eth_update_mac(&tcp_eth_hdr[i], eth_d, NULL);
 }
 
 /**
@@ -84,9 +84,6 @@ void tcp_sock_iov_init(const struct ctx *c)
 	struct ipv6hdr ip6 = L2_BUF_IP6_INIT(IPPROTO_TCP);
 	struct iphdr iph = L2_BUF_IP4_INIT(IPPROTO_TCP);
 	int i;
-
-	tcp6_eth_src.h_proto = htons_constant(ETH_P_IPV6);
-	tcp4_eth_src.h_proto = htons_constant(ETH_P_IP);
 
 	for (i = 0; i < ARRAY_SIZE(tcp_payload); i++) {
 		tcp6_payload_ip[i] = ip6;
@@ -149,13 +146,15 @@ void tcp_payload_flush(const struct ctx *c)
 
 /**
  * tcp_l2_buf_fill_headers() - Fill 802.3, IP, TCP headers in pre-cooked buffers
+ * @c:		Execution context
  * @conn:	Connection pointer
  * @iov:	Pointer to an array of iovec of TCP pre-cooked buffers
  * @check:	Checksum, if already known
  * @seq:	Sequence number for this segment
  * @no_tcp_csum: Do not set TCP checksum
  */
-static void tcp_l2_buf_fill_headers(const struct tcp_tap_conn *conn,
+static void tcp_l2_buf_fill_headers(const struct ctx *c,
+				    struct tcp_tap_conn *conn,
 				    struct iovec *iov, const uint16_t *check,
 				    uint32_t seq, bool no_tcp_csum)
 {
@@ -164,6 +163,7 @@ static void tcp_l2_buf_fill_headers(const struct tcp_tap_conn *conn,
 	struct tap_hdr *taph = iov[TCP_IOV_TAP].iov_base;
 	const struct flowside *tapside = TAPFLOW(conn);
 	const struct in_addr *a4 = inany_v4(&tapside->oaddr);
+	struct ethhdr *eh = iov[TCP_IOV_ETH].iov_base;
 	struct ipv6hdr *ip6h = NULL;
 	struct iphdr *ip4h = NULL;
 
@@ -172,7 +172,7 @@ static void tcp_l2_buf_fill_headers(const struct tcp_tap_conn *conn,
 	else
 		ip6h = iov[TCP_IOV_IP].iov_base;
 
-	tcp_fill_headers(conn, taph, ip4h, ip6h, th, &tail,
+	tcp_fill_headers(c, conn, taph, eh, ip4h, ip6h, th, &tail,
 			 check, seq, no_tcp_csum);
 }
 
@@ -194,14 +194,12 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	int ret;
 
 	iov = tcp_l2_iov[tcp_payload_used];
-	if (CONN_V4(conn)) {
+	if (CONN_V4(conn))
 		iov[TCP_IOV_IP] = IOV_OF_LVALUE(tcp4_payload_ip[tcp_payload_used]);
-		iov[TCP_IOV_ETH].iov_base = &tcp4_eth_src;
-	} else {
+	else
 		iov[TCP_IOV_IP] = IOV_OF_LVALUE(tcp6_payload_ip[tcp_payload_used]);
-		iov[TCP_IOV_ETH].iov_base = &tcp6_eth_src;
-	}
 
+	iov[TCP_IOV_ETH] = IOV_OF_LVALUE(tcp_eth_hdr[tcp_payload_used]);
 	payload = iov[TCP_IOV_PAYLOAD].iov_base;
 	seq = conn->seq_to_tap;
 	ret = tcp_prepare_flags(c, conn, flags, &payload->th,
@@ -212,7 +210,7 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	tcp_frame_conns[tcp_payload_used++] = conn;
 	l4len = optlen + sizeof(struct tcphdr);
 	iov[TCP_IOV_PAYLOAD].iov_len = l4len;
-	tcp_l2_buf_fill_headers(conn, iov, NULL, seq, false);
+	tcp_l2_buf_fill_headers(c, conn, iov, NULL, seq, false);
 
 	if (flags & DUP_ACK) {
 		struct iovec *dup_iov = tcp_l2_iov[tcp_payload_used];
@@ -260,11 +258,10 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 			check = &iph->check;
 		}
 		iov[TCP_IOV_IP] = IOV_OF_LVALUE(tcp4_payload_ip[tcp_payload_used]);
-		iov[TCP_IOV_ETH].iov_base = &tcp4_eth_src;
 	} else if (CONN_V6(conn)) {
 		iov[TCP_IOV_IP] = IOV_OF_LVALUE(tcp6_payload_ip[tcp_payload_used]);
-		iov[TCP_IOV_ETH].iov_base = &tcp6_eth_src;
 	}
+	iov[TCP_IOV_ETH].iov_base = &tcp_eth_hdr[tcp_payload_used];
 	payload = iov[TCP_IOV_PAYLOAD].iov_base;
 	payload->th.th_off = sizeof(struct tcphdr) / 4;
 	payload->th.th_x2 = 0;
@@ -272,7 +269,7 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 	payload->th.ack = 1;
 	payload->th.psh = push;
 	iov[TCP_IOV_PAYLOAD].iov_len = dlen + sizeof(struct tcphdr);
-	tcp_l2_buf_fill_headers(conn, iov, check, seq, false);
+	tcp_l2_buf_fill_headers(c, conn, iov, check, seq, false);
 	if (++tcp_payload_used > TCP_FRAMES_MEM - 1)
 		tcp_payload_flush(c);
 }

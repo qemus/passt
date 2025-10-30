@@ -184,7 +184,7 @@ static void ndp_send(const struct ctx *c, const struct in6_addr *dst,
 {
 	const struct in6_addr *src = &c->ip6.our_tap_ll;
 
-	tap_icmp6_send(c, src, dst, buf, l4len);
+	tap_icmp6_send(c, src, dst, buf, c->our_tap_mac, l4len);
 }
 
 /**
@@ -196,6 +196,7 @@ static void ndp_send(const struct ctx *c, const struct in6_addr *dst,
 static void ndp_na(const struct ctx *c, const struct in6_addr *dst,
 	    const struct in6_addr *addr)
 {
+	union inany_addr tgt;
 	struct ndp_na na = {
 		.ih = {
 			.icmp6_type		= NA,
@@ -213,9 +214,20 @@ static void ndp_na(const struct ctx *c, const struct in6_addr *dst,
 		}
 	};
 
-	memcpy(na.target_l2_addr.mac, c->our_tap_mac, ETH_ALEN);
+	inany_from_af(&tgt, AF_INET6, addr);
+	fwd_neigh_mac_get(c, &tgt, na.target_l2_addr.mac);
 
 	ndp_send(c, dst, &na, sizeof(na));
+}
+
+/**
+ * ndp_unsolicited_na() - Send unsolicited NA
+ * @c:         Execution context
+ * @addr:      IPv6 address to advertise
+ */
+void ndp_unsolicited_na(const struct ctx *c, const struct in6_addr *addr)
+{
+	ndp_na(c, &in6addr_ll_all_nodes, addr);
 }
 
 /**

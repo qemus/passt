@@ -17,6 +17,8 @@ int nl_route_dup(int s_src, unsigned int ifi_src,
 		 int s_dst, unsigned int ifi_dst, sa_family_t af);
 int nl_addr_get(int s, unsigned int ifi, sa_family_t af,
 		void *addr, int *prefix_len, void *addr_l);
+bool nl_neigh_mac_get(int s, const union inany_addr *addr, int ifi,
+		      unsigned char *mac);
 int nl_addr_set(int s, unsigned int ifi, sa_family_t af,
 		const void *addr, int prefix_len);
 int nl_addr_get_ll(int s, unsigned int ifi, struct in6_addr *addr);
@@ -28,5 +30,7 @@ int nl_link_set_mac(int s, unsigned int ifi, const void *mac);
 int nl_link_set_mtu(int s, unsigned int ifi, int mtu);
 int nl_link_set_flags(int s, unsigned int ifi,
 		      unsigned int set, unsigned int change);
+int nl_neigh_notify_init(const struct ctx *c);
+void nl_neigh_notify_handler(const struct ctx *c);
 
 #endif /* NETLINK_H */

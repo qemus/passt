@@ -133,11 +133,8 @@ static int udp_splice_init[IP_VERSIONS][NUM_PORTS];
 /* UDP header and data for inbound messages */
 static struct udp_payload_t udp_payload[UDP_MAX_FRAMES];
 
-/* Ethernet header for IPv4 frames */
-static struct ethhdr udp4_eth_hdr;
-
-/* Ethernet header for IPv6 frames */
-static struct ethhdr udp6_eth_hdr;
+/* Ethernet headers for IPv4 and IPv6 frames */
+static struct ethhdr udp_eth_hdr[UDP_MAX_FRAMES];
 
 /**
  * struct udp_meta_t - Pre-cooked headers for UDP packets
@@ -210,12 +207,13 @@ void udp_portmap_clear(void)
 /**
  * udp_update_l2_buf() - Update L2 buffers with Ethernet and IPv4 addresses
  * @eth_d:	Ethernet destination address, NULL if unchanged
- * @eth_s:	Ethernet source address, NULL if unchanged
  */
-void udp_update_l2_buf(const unsigned char *eth_d, const unsigned char *eth_s)
+void udp_update_l2_buf(const unsigned char *eth_d)
 {
-	eth_update_mac(&udp4_eth_hdr, eth_d, eth_s);
-	eth_update_mac(&udp6_eth_hdr, eth_d, eth_s);
+	int i;
+
+	for (i = 0; i < UDP_MAX_FRAMES; i++)
+		eth_update_mac(&udp_eth_hdr[i], eth_d, NULL);
 }
 
 /**
@@ -238,6 +236,7 @@ static void udp_iov_init_one(const struct ctx *c, size_t i)
 
 	*siov = IOV_OF_LVALUE(payload->data);
 
+	tiov[UDP_IOV_ETH] = IOV_OF_LVALUE(udp_eth_hdr[i]);
 	tiov[UDP_IOV_TAP] = tap_hdr_iov(c, &meta->taph);
 	tiov[UDP_IOV_PAYLOAD].iov_base = payload;
 
@@ -252,9 +251,6 @@ static void udp_iov_init_one(const struct ctx *c, size_t i)
 static void udp_iov_init(const struct ctx *c)
 {
 	size_t i;
-
-	udp4_eth_hdr.h_proto = htons_constant(ETH_P_IP);
-	udp6_eth_hdr.h_proto = htons_constant(ETH_P_IPV6);
 
 	for (i = 0; i < UDP_MAX_FRAMES; i++)
 		udp_iov_init_one(c, i);
@@ -352,31 +348,34 @@ size_t udp_update_hdr6(struct ipv6hdr *ip6h, struct udp_payload_t *bp,
  * udp_tap_prepare() - Convert one datagram into a tap frame
  * @mmh:	Receiving mmsghdr array
  * @idx:	Index of the datagram to prepare
+ * @tap_omac:	MAC address of remote endpoint as seen from the guest
  * @toside:	Flowside for destination side
  * @no_udp_csum: Do not set UDP checksum
  */
 static void udp_tap_prepare(const struct mmsghdr *mmh,
-			    unsigned idx, const struct flowside *toside,
+			    unsigned int idx,
+			    const uint8_t *tap_omac,
+			    const struct flowside *toside,
 			    bool no_udp_csum)
 {
 	struct iovec (*tap_iov)[UDP_NUM_IOVS] = &udp_l2_iov[idx];
+	struct ethhdr *eh = (*tap_iov)[UDP_IOV_ETH].iov_base;
 	struct udp_payload_t *bp = &udp_payload[idx];
 	struct udp_meta_t *bm = &udp_meta[idx];
 	size_t l4len;
 
+	eth_update_mac(eh, NULL, tap_omac);
 	if (!inany_v4(&toside->eaddr) || !inany_v4(&toside->oaddr)) {
 		l4len = udp_update_hdr6(&bm->ip6h, bp, toside,
 					mmh[idx].msg_len, no_udp_csum);
-		tap_hdr_update(&bm->taph, l4len + sizeof(bm->ip6h) +
-			       sizeof(udp6_eth_hdr));
-		(*tap_iov)[UDP_IOV_ETH] = IOV_OF_LVALUE(udp6_eth_hdr);
+		tap_hdr_update(&bm->taph, l4len + sizeof(bm->ip6h) + ETH_HLEN);
+		eh->h_proto = htons_constant(ETH_P_IPV6);
 		(*tap_iov)[UDP_IOV_IP] = IOV_OF_LVALUE(bm->ip6h);
 	} else {
 		l4len = udp_update_hdr4(&bm->ip4h, bp, toside,
 					mmh[idx].msg_len, no_udp_csum);
-		tap_hdr_update(&bm->taph, l4len + sizeof(bm->ip4h) +
-			       sizeof(udp4_eth_hdr));
-		(*tap_iov)[UDP_IOV_ETH] = IOV_OF_LVALUE(udp4_eth_hdr);
+		tap_hdr_update(&bm->taph, l4len + sizeof(bm->ip4h) + ETH_HLEN);
+		eh->h_proto = htons_constant(ETH_P_IP);
 		(*tap_iov)[UDP_IOV_IP] = IOV_OF_LVALUE(bm->ip4h);
 	}
 	(*tap_iov)[UDP_IOV_PAYLOAD].iov_len = l4len;
@@ -401,6 +400,8 @@ static void udp_send_tap_icmp4(const struct ctx *c,
 	struct in_addr eaddr = toside->eaddr.v4mapped.a4;
 	in_port_t eport = toside->eport;
 	in_port_t oport = toside->oport;
+	union inany_addr saddr_any;
+	uint8_t tap_omac[ETH_ALEN];
 	struct {
 		struct icmphdr icmp4h;
 		struct iphdr ip4h;
@@ -422,7 +423,10 @@ static void udp_send_tap_icmp4(const struct ctx *c,
 	tap_push_uh4(&msg.uh, eaddr, eport, oaddr, oport, in, dlen);
 	memcpy(&msg.data, in, dlen);
 
-	tap_icmp4_send(c, saddr, eaddr, &msg, msglen);
+	/* Try to obtain the MAC address of the generating node */
+	saddr_any = inany_from_v4(saddr);
+	fwd_neigh_mac_get(c, &saddr_any, tap_omac);
+	tap_icmp4_send(c, saddr, eaddr, &msg, tap_omac, msglen);
 }
 
 
@@ -446,6 +450,7 @@ static void udp_send_tap_icmp6(const struct ctx *c,
 	const struct in6_addr *eaddr = &toside->eaddr.a6;
 	in_port_t eport = toside->eport;
 	in_port_t oport = toside->oport;
+	uint8_t tap_omac[ETH_ALEN];
 	struct {
 		struct icmp6_hdr icmp6h;
 		struct ipv6hdr ip6h;
@@ -467,7 +472,9 @@ static void udp_send_tap_icmp6(const struct ctx *c,
 	tap_push_uh6(&msg.uh, eaddr, eport, oaddr, oport, in, dlen);
 	memcpy(&msg.data, in, dlen);
 
-	tap_icmp6_send(c, saddr, eaddr, &msg, msglen);
+	/* Try to obtain the MAC address of the generating node */
+	fwd_neigh_mac_get(c, (union inany_addr *) saddr, tap_omac);
+	tap_icmp6_send(c, saddr, eaddr, &msg, tap_omac, msglen);
 }
 
 /**
@@ -801,13 +808,19 @@ static void udp_buf_sock_to_tap(const struct ctx *c, int s, int n,
 				flow_sidx_t tosidx)
 {
 	const struct flowside *toside = flowside_at_sidx(tosidx);
+	struct udp_flow *uflow = udp_at_sidx(tosidx);
+	uint8_t *omac = uflow->f.tap_omac;
 	int i;
 
 	if ((n = udp_sock_recv(c, s, udp_mh_recv, n)) <= 0)
 		return;
 
+	/* Find if neighbour table has a recorded MAC address */
+	if (MAC_IS_UNDEF(omac))
+		fwd_neigh_mac_get(c, &toside->oaddr, omac);
+
 	for (i = 0; i < n; i++)
-		udp_tap_prepare(udp_mh_recv, i, toside, false);
+		udp_tap_prepare(udp_mh_recv, i, omac, toside, false);
 
 	tap_send_frames(c, &udp_l2_iov[0][0], UDP_NUM_IOVS, n);
 }
