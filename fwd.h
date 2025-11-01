@@ -42,11 +42,10 @@ struct fwd_ports {
 	in_port_t delta[NUM_PORTS];
 };
 
-void fwd_scan_ports_tcp(struct fwd_ports *fwd, const struct fwd_ports *rev);
-void fwd_scan_ports_udp(struct fwd_ports *fwd, const struct fwd_ports *rev,
-			const struct fwd_ports *tcp_fwd,
-			const struct fwd_ports *tcp_rev);
+#define FWD_PORT_SCAN_INTERVAL		1000	/* ms */
+
 void fwd_scan_ports_init(struct ctx *c);
+void fwd_scan_ports_timer(struct ctx *c, const struct timespec *now);
 
 bool nat_inbound(const struct ctx *c, const union inany_addr *addr,
 		 union inany_addr *translated);

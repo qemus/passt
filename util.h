@@ -218,6 +218,8 @@ void bitmap_set(uint8_t *map, unsigned bit);
 void bitmap_clear(uint8_t *map, unsigned bit);
 bool bitmap_isset(const uint8_t *map, unsigned bit);
 void bitmap_or(uint8_t *dst, size_t size, const uint8_t *a, const uint8_t *b);
+void bitmap_and_not(uint8_t *dst, size_t size,
+		    const uint8_t *a, const uint8_t *b);
 char *line_read(char *buf, size_t len, int fd);
 void ns_enter(const struct ctx *c);
 bool ns_is_init(void);

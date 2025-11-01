@@ -57,8 +57,7 @@
 
 #define NUM_EPOLL_EVENTS	8
 
-#define TIMER_INTERVAL__	MIN(TCP_TIMER_INTERVAL, UDP_TIMER_INTERVAL)
-#define TIMER_INTERVAL_		MIN(TIMER_INTERVAL__, ICMP_TIMER_INTERVAL)
+#define TIMER_INTERVAL_		MIN(TCP_TIMER_INTERVAL, FWD_PORT_SCAN_INTERVAL)
 #define TIMER_INTERVAL		MIN(TIMER_INTERVAL_, FLOW_TIMER_INTERVAL)
 
 char pkt_buf[PKT_BUF_BYTES]	__attribute__ ((aligned(PAGE_SIZE)));
@@ -120,11 +119,10 @@ static void post_handler(struct ctx *c, const struct timespec *now)
 
 	/* NOLINTNEXTLINE(bugprone-branch-clone): intervals can be the same */
 	CALL_PROTO_HANDLER(tcp, TCP);
-	/* NOLINTNEXTLINE(bugprone-branch-clone): intervals can be the same */
-	CALL_PROTO_HANDLER(udp, UDP);
+#undef CALL_PROTO_HANDLER
 
 	flow_defer_handler(c, now);
-#undef CALL_PROTO_HANDLER
+	fwd_scan_ports_timer(c, now);
 
 	if (!c->no_ndp)
 		ndp_timer(c, now);

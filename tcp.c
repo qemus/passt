@@ -2832,7 +2832,6 @@ int tcp_init(struct ctx *c)
 static void tcp_port_rebind(struct ctx *c, bool outbound)
 {
 	const uint8_t *fmap = outbound ? c->tcp.fwd_out.map : c->tcp.fwd_in.map;
-	const uint8_t *rmap = outbound ? c->tcp.fwd_in.map : c->tcp.fwd_out.map;
 	int (*socks)[IP_VERSIONS] = outbound ? tcp_sock_ns : tcp_sock_init_ext;
 	unsigned port;
 
@@ -2850,10 +2849,6 @@ static void tcp_port_rebind(struct ctx *c, bool outbound)
 
 			continue;
 		}
-
-		/* Don't loop back our own ports */
-		if (bitmap_isset(rmap, port))
-			continue;
 
 		if ((c->ifi4 && socks[port][V4] == -1) ||
 		    (c->ifi6 && socks[port][V6] == -1)) {
@@ -2884,25 +2879,28 @@ static int tcp_port_rebind_outbound(void *arg)
 }
 
 /**
+ * tcp_port_rebind_all() - Rebind ports to match forward maps (in host & ns)
+ * @c:		Execution context
+ */
+void tcp_port_rebind_all(struct ctx *c)
+{
+	ASSERT(c->mode == MODE_PASTA && !c->no_tcp);
+
+	if (c->tcp.fwd_out.mode == FWD_AUTO)
+		NS_CALL(tcp_port_rebind_outbound, c);
+
+	if (c->tcp.fwd_in.mode == FWD_AUTO)
+		tcp_port_rebind(c, false);
+}
+
+/**
  * tcp_timer() - Periodic tasks: port detection, closed connections, pool refill
  * @c:		Execution context
  * @now:	Current timestamp
  */
-void tcp_timer(struct ctx *c, const struct timespec *now)
+void tcp_timer(const struct ctx *c, const struct timespec *now)
 {
 	(void)now;
-
-	if (c->mode == MODE_PASTA) {
-		if (c->tcp.fwd_out.mode == FWD_AUTO) {
-			fwd_scan_ports_tcp(&c->tcp.fwd_out, &c->tcp.fwd_in);
-			NS_CALL(tcp_port_rebind_outbound, c);
-		}
-
-		if (c->tcp.fwd_in.mode == FWD_AUTO) {
-			fwd_scan_ports_tcp(&c->tcp.fwd_in, &c->tcp.fwd_out);
-			tcp_port_rebind(c, false);
-		}
-	}
 
 	tcp_sock_refill_init(c);
 	if (c->mode == MODE_PASTA)

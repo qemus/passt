@@ -6,8 +6,6 @@
 #ifndef ICMP_H
 #define ICMP_H
 
-#define ICMP_TIMER_INTERVAL		10000 /* ms */
-
 struct ctx;
 struct icmp_ping_flow;
 

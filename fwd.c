@@ -322,13 +322,11 @@ bool fwd_port_is_ephemeral(in_port_t port)
  * @fd:		fd for relevant /proc/net file
  * @lstate:	Code for listening state to scan for
  * @map:	Bitmap where numbers of ports in listening state will be set
- * @exclude:	Bitmap of ports to exclude from setting (and clear)
  *
  * #syscalls:pasta lseek
  * #syscalls:pasta ppc64le:_llseek ppc64:_llseek arm:_llseek
  */
-static void procfs_scan_listen(int fd, unsigned int lstate,
-			       uint8_t *map, const uint8_t *exclude)
+static void procfs_scan_listen(int fd, unsigned int lstate, uint8_t *map)
 {
 	struct lineread lr;
 	unsigned long port;
@@ -353,56 +351,76 @@ static void procfs_scan_listen(int fd, unsigned int lstate,
 		if (state != lstate)
 			continue;
 
-		if (bitmap_isset(exclude, port))
-			bitmap_clear(map, port);
-		else
-			bitmap_set(map, port);
+		bitmap_set(map, port);
 	}
 }
 
 /**
  * fwd_scan_ports_tcp() - Scan /proc to update TCP forwarding map
  * @fwd:	Forwarding information to update
- * @rev:	Forwarding information for the reverse direction
  */
-void fwd_scan_ports_tcp(struct fwd_ports *fwd, const struct fwd_ports *rev)
+static void fwd_scan_ports_tcp(struct fwd_ports *fwd)
 {
+	if (fwd->mode != FWD_AUTO)
+		return;
+
 	memset(fwd->map, 0, PORT_BITMAP_SIZE);
-	procfs_scan_listen(fwd->scan4, TCP_LISTEN, fwd->map, rev->map);
-	procfs_scan_listen(fwd->scan6, TCP_LISTEN, fwd->map, rev->map);
+	procfs_scan_listen(fwd->scan4, TCP_LISTEN, fwd->map);
+	procfs_scan_listen(fwd->scan6, TCP_LISTEN, fwd->map);
 }
 
 /**
  * fwd_scan_ports_udp() - Scan /proc to update UDP forwarding map
  * @fwd:	Forwarding information to update
- * @rev:	Forwarding information for the reverse direction
  * @tcp_fwd:	Corresponding TCP forwarding information
- * @tcp_rev:	TCP forwarding information for the reverse direction
  */
-void fwd_scan_ports_udp(struct fwd_ports *fwd, const struct fwd_ports *rev,
-			const struct fwd_ports *tcp_fwd,
-			const struct fwd_ports *tcp_rev)
+static void fwd_scan_ports_udp(struct fwd_ports *fwd,
+			       const struct fwd_ports *tcp_fwd)
 {
-	uint8_t exclude[PORT_BITMAP_SIZE];
-
-	bitmap_or(exclude, PORT_BITMAP_SIZE, rev->map, tcp_rev->map);
+	if (fwd->mode != FWD_AUTO)
+		return;
 
 	memset(fwd->map, 0, PORT_BITMAP_SIZE);
-	procfs_scan_listen(fwd->scan4, UDP_LISTEN, fwd->map, exclude);
-	procfs_scan_listen(fwd->scan6, UDP_LISTEN, fwd->map, exclude);
+	procfs_scan_listen(fwd->scan4, UDP_LISTEN, fwd->map);
+	procfs_scan_listen(fwd->scan6, UDP_LISTEN, fwd->map);
 
 	/* Also forward UDP ports with the same numbers as bound TCP ports.
 	 * This is useful for a handful of protocols (e.g. iperf3) where a TCP
 	 * control port is used to set up transfers on a corresponding UDP
 	 * port.
-	 *
-	 * This means we need to skip numbers of TCP ports bound on the other
-	 * side, too. Otherwise, we would detect corresponding UDP ports as
-	 * bound and try to forward them from the opposite side, but it's
-	 * already us handling them.
 	 */
-	procfs_scan_listen(tcp_fwd->scan4, TCP_LISTEN, fwd->map, exclude);
-	procfs_scan_listen(tcp_fwd->scan6, TCP_LISTEN, fwd->map, exclude);
+	procfs_scan_listen(tcp_fwd->scan4, TCP_LISTEN, fwd->map);
+	procfs_scan_listen(tcp_fwd->scan6, TCP_LISTEN, fwd->map);
+}
+
+/**
+ * fwd_scan_ports() - Scan automatic port forwarding information
+ * @c:		Execution context
+ */
+static void fwd_scan_ports(struct ctx *c)
+{
+	fwd_scan_ports_tcp(&c->tcp.fwd_out);
+	fwd_scan_ports_tcp(&c->tcp.fwd_in);
+	fwd_scan_ports_udp(&c->udp.fwd_out, &c->tcp.fwd_out);
+	fwd_scan_ports_udp(&c->udp.fwd_in, &c->tcp.fwd_in);
+
+	if (c->tcp.fwd_out.mode == FWD_AUTO) {
+		bitmap_and_not(c->tcp.fwd_out.map, PORT_BITMAP_SIZE,
+			       c->tcp.fwd_out.map, c->tcp.fwd_in.map);
+	}
+	if (c->tcp.fwd_in.mode == FWD_AUTO) {
+		bitmap_and_not(c->tcp.fwd_in.map, PORT_BITMAP_SIZE,
+			       c->tcp.fwd_in.map, c->tcp.fwd_out.map);
+	}
+
+	if (c->udp.fwd_out.mode == FWD_AUTO) {
+		bitmap_and_not(c->udp.fwd_out.map, PORT_BITMAP_SIZE,
+			       c->udp.fwd_out.map, c->udp.fwd_in.map);
+	}
+	if (c->udp.fwd_in.mode == FWD_AUTO) {
+		bitmap_and_not(c->udp.fwd_in.map, PORT_BITMAP_SIZE,
+			       c->udp.fwd_in.map, c->udp.fwd_out.map);
+	}
 }
 
 /**
@@ -421,25 +439,46 @@ void fwd_scan_ports_init(struct ctx *c)
 	if (c->tcp.fwd_in.mode == FWD_AUTO) {
 		c->tcp.fwd_in.scan4 = open_in_ns(c, "/proc/net/tcp", flags);
 		c->tcp.fwd_in.scan6 = open_in_ns(c, "/proc/net/tcp6", flags);
-		fwd_scan_ports_tcp(&c->tcp.fwd_in, &c->tcp.fwd_out);
 	}
 	if (c->udp.fwd_in.mode == FWD_AUTO) {
 		c->udp.fwd_in.scan4 = open_in_ns(c, "/proc/net/udp", flags);
 		c->udp.fwd_in.scan6 = open_in_ns(c, "/proc/net/udp6", flags);
-		fwd_scan_ports_udp(&c->udp.fwd_in, &c->udp.fwd_out,
-				   &c->tcp.fwd_in, &c->tcp.fwd_out);
 	}
 	if (c->tcp.fwd_out.mode == FWD_AUTO) {
 		c->tcp.fwd_out.scan4 = open("/proc/net/tcp", flags);
 		c->tcp.fwd_out.scan6 = open("/proc/net/tcp6", flags);
-		fwd_scan_ports_tcp(&c->tcp.fwd_out, &c->tcp.fwd_in);
 	}
 	if (c->udp.fwd_out.mode == FWD_AUTO) {
 		c->udp.fwd_out.scan4 = open("/proc/net/udp", flags);
 		c->udp.fwd_out.scan6 = open("/proc/net/udp6", flags);
-		fwd_scan_ports_udp(&c->udp.fwd_out, &c->udp.fwd_in,
-				   &c->tcp.fwd_out, &c->tcp.fwd_in);
 	}
+	fwd_scan_ports(c);
+}
+
+/* Last time we scanned for open ports */
+static struct timespec scan_ports_run;
+
+/**
+ * fwd_scan_ports_timer() - Rescan open port information when necessary
+ * @c:		Execution context
+ * @now:	Current (monotonic) time
+ */
+void fwd_scan_ports_timer(struct ctx *c, const struct timespec *now)
+{
+	if (c->mode != MODE_PASTA)
+		return;
+
+	if (timespec_diff_ms(now, &scan_ports_run) < FWD_PORT_SCAN_INTERVAL)
+		return;
+
+	scan_ports_run = *now;
+
+	fwd_scan_ports(c);
+
+	if (!c->no_tcp)
+		tcp_port_rebind_all(c);
+	if (!c->no_udp)
+		udp_port_rebind_all(c);
 }
 
 /**

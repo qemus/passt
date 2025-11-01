@@ -6,8 +6,6 @@
 #ifndef UDP_H
 #define UDP_H
 
-#define UDP_TIMER_INTERVAL		1000 /* ms */
-
 void udp_portmap_clear(void);
 void udp_listen_sock_handler(const struct ctx *c, union epoll_ref ref,
 			     uint32_t events, const struct timespec *now);
@@ -20,7 +18,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 int udp_sock_init(const struct ctx *c, int ns, const union inany_addr *addr,
 		  const char *ifname, in_port_t port);
 int udp_init(struct ctx *c);
-void udp_timer(struct ctx *c, const struct timespec *now);
+void udp_port_rebind_all(struct ctx *c);
 void udp_update_l2_buf(const unsigned char *eth_d);
 
 /**
