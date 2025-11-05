@@ -22,7 +22,7 @@ IN="$@"
 [ -z "${ARCH}" ] && ARCH="$(uname -m)"
 [ -z "${CC}" ] && CC="cc"
 
-AUDIT_ARCH="AUDIT_ARCH_$(echo ${ARCH} | tr [a-z] [A-Z]             \
+AUDIT_ARCH="AUDIT_ARCH_$(echo ${ARCH} | tr '[a-z]' '[A-Z]'         \
                                       | sed 's/^ARM.*/ARM/'        \
                                       | sed 's/I[456]86/I386/'     \
                                       | sed 's/PPC64/PPC/'         \
