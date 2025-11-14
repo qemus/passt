@@ -694,12 +694,13 @@ void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
 		flow_dbg(conn, "%s",
 			 num == -1 	       ? "CLOSED" : tcp_event_str[num]);
 
-	if (event == CLOSED)
-		flow_hash_remove(c, TAP_SIDX(conn));
-	else if ((event == TAP_FIN_RCVD) && !(conn->events & SOCK_FIN_RCVD))
+	if ((event == TAP_FIN_RCVD) && !(conn->events & SOCK_FIN_RCVD)) {
 		conn_flag(c, conn, ACTIVE_CLOSE);
-	else
+	} else {
+		if (event == CLOSED)
+			flow_hash_remove(c, TAP_SIDX(conn));
 		tcp_epoll_ctl(c, conn);
+	}
 
 	if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED))
 		tcp_timer_ctl(conn);
