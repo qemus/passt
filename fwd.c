@@ -358,8 +358,9 @@ static void procfs_scan_listen(int fd, unsigned int lstate, uint8_t *map)
 /**
  * fwd_scan_ports_tcp() - Scan /proc to update TCP forwarding map
  * @fwd:	Forwarding information to update
+ * @exclude:	Ports to _not_ forward
  */
-static void fwd_scan_ports_tcp(struct fwd_ports *fwd)
+static void fwd_scan_ports_tcp(struct fwd_ports *fwd, const uint8_t *exclude)
 {
 	if (fwd->mode != FWD_AUTO)
 		return;
@@ -367,15 +368,18 @@ static void fwd_scan_ports_tcp(struct fwd_ports *fwd)
 	memset(fwd->map, 0, PORT_BITMAP_SIZE);
 	procfs_scan_listen(fwd->scan4, TCP_LISTEN, fwd->map);
 	procfs_scan_listen(fwd->scan6, TCP_LISTEN, fwd->map);
+	bitmap_and_not(fwd->map, PORT_BITMAP_SIZE, fwd->map, exclude);
 }
 
 /**
  * fwd_scan_ports_udp() - Scan /proc to update UDP forwarding map
  * @fwd:	Forwarding information to update
  * @tcp_fwd:	Corresponding TCP forwarding information
+ * @exclude:	Ports to _not_ forward
  */
 static void fwd_scan_ports_udp(struct fwd_ports *fwd,
-			       const struct fwd_ports *tcp_fwd)
+			       const struct fwd_ports *tcp_fwd,
+			       const uint8_t *exclude)
 {
 	if (fwd->mode != FWD_AUTO)
 		return;
@@ -391,6 +395,8 @@ static void fwd_scan_ports_udp(struct fwd_ports *fwd,
 	 */
 	procfs_scan_listen(tcp_fwd->scan4, TCP_LISTEN, fwd->map);
 	procfs_scan_listen(tcp_fwd->scan6, TCP_LISTEN, fwd->map);
+
+	bitmap_and_not(fwd->map, PORT_BITMAP_SIZE, fwd->map, exclude);
 }
 
 /**
@@ -399,28 +405,18 @@ static void fwd_scan_ports_udp(struct fwd_ports *fwd,
  */
 static void fwd_scan_ports(struct ctx *c)
 {
-	fwd_scan_ports_tcp(&c->tcp.fwd_out);
-	fwd_scan_ports_tcp(&c->tcp.fwd_in);
-	fwd_scan_ports_udp(&c->udp.fwd_out, &c->tcp.fwd_out);
-	fwd_scan_ports_udp(&c->udp.fwd_in, &c->tcp.fwd_in);
+	uint8_t excl_tcp_out[PORT_BITMAP_SIZE], excl_udp_out[PORT_BITMAP_SIZE];
+	uint8_t excl_tcp_in[PORT_BITMAP_SIZE], excl_udp_in[PORT_BITMAP_SIZE];
 
-	if (c->tcp.fwd_out.mode == FWD_AUTO) {
-		bitmap_and_not(c->tcp.fwd_out.map, PORT_BITMAP_SIZE,
-			       c->tcp.fwd_out.map, c->tcp.fwd_in.map);
-	}
-	if (c->tcp.fwd_in.mode == FWD_AUTO) {
-		bitmap_and_not(c->tcp.fwd_in.map, PORT_BITMAP_SIZE,
-			       c->tcp.fwd_in.map, c->tcp.fwd_out.map);
-	}
+	memcpy(excl_tcp_out, c->tcp.fwd_in.map, sizeof(excl_tcp_out));
+	memcpy(excl_tcp_in, c->tcp.fwd_out.map, sizeof(excl_tcp_in));
+	memcpy(excl_udp_out, c->udp.fwd_in.map, sizeof(excl_udp_out));
+	memcpy(excl_udp_in, c->udp.fwd_out.map, sizeof(excl_udp_in));
 
-	if (c->udp.fwd_out.mode == FWD_AUTO) {
-		bitmap_and_not(c->udp.fwd_out.map, PORT_BITMAP_SIZE,
-			       c->udp.fwd_out.map, c->udp.fwd_in.map);
-	}
-	if (c->udp.fwd_in.mode == FWD_AUTO) {
-		bitmap_and_not(c->udp.fwd_in.map, PORT_BITMAP_SIZE,
-			       c->udp.fwd_in.map, c->udp.fwd_out.map);
-	}
+	fwd_scan_ports_tcp(&c->tcp.fwd_out, excl_tcp_out);
+	fwd_scan_ports_tcp(&c->tcp.fwd_in, excl_tcp_in);
+	fwd_scan_ports_udp(&c->udp.fwd_out, &c->tcp.fwd_out, excl_udp_out);
+	fwd_scan_ports_udp(&c->udp.fwd_in, &c->tcp.fwd_in, excl_udp_in);
 }
 
 /**
