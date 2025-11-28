@@ -168,6 +168,9 @@ void arp_announce(const struct ctx *c, struct in_addr *ip,
 		struct arpmsg am;
 	} __attribute__((__packed__)) msg;
 
+	if (!tap_is_ready(c))
+		return;
+
 	/* Ethernet header */
 	msg.eh.h_proto = htons(ETH_P_ARP);
 	memcpy(msg.eh.h_dest, MAC_BROADCAST, sizeof(msg.eh.h_dest));

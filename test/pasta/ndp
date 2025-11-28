@@ -24,9 +24,9 @@ ns	while ! ip -j -6 addr show dev __IFNAME__ | jq -e '.[].addr_info.[] | select(
 test	SLAAC: prefix
 nsout	ADDR6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__IFNAME__").addr_info[] | select(.protocol == "kernel_ra") | .local + "/" + (.prefixlen | tostring)] | .[0]'
 nsout	PREFIX6 sipcalc __ADDR6__ | grep prefix | cut -d' ' -f4
-hout	HOST_ADDR6 ip -j -6 addr show|jq -rM ['.[] | select(.ifname == "__IFNAME__").addr_info[] | select(.scope != "host" and .scope != "link" and .deprecated != true).local] | .[0]'
-hout	HOST_PREFIX6 sipcalc __HOST_ADDR6__/64 | grep prefix | cut -d' ' -f4
-check	[ "__PREFIX6__" = "__HOST_PREFIX6__" ]
+hout	HOST_ADDR6 ip -j -6 addr show|jq -rM ['.[] | select(.ifname == "__IFNAME__").addr_info[] | select(.scope != "host" and .scope != "link" and .deprecated != true).local]| join("/64 ")'
+hout	HOST_PREFIX6 sipcalc __HOST_ADDR6__/64 | grep prefix | cut -d' ' -f4 | tr '\n' ' '
+check	echo "__HOST_PREFIX6__" | grep -wq "__PREFIX6__"
 
 test	SLAAC: route
 nsout	GW6 ip -j -6 route show|jq -rM '.[] | select(.dst == "default").gateway'

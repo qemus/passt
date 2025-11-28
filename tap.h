@@ -109,6 +109,7 @@ size_t tap_send_frames(const struct ctx *c, const struct iovec *iov,
 		       size_t bufs_per_frame, size_t nframes);
 void eth_update_mac(struct ethhdr *eh,
 		    const unsigned char *eth_d, const unsigned char *eth_s);
+bool tap_is_ready(const struct ctx *c);
 void tap_listen_handler(struct ctx *c, uint32_t events);
 void tap_handler_pasta(struct ctx *c, uint32_t events,
 		       const struct timespec *now);

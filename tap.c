@@ -1340,6 +1340,30 @@ static void tap_sock_unix_init(const struct ctx *c)
 }
 
 /**
+ * tap_is_ready() - Check if tap interface is ready to send packets
+ * @c:		Execution context
+ *
+ * For pasta mode, checks if the tap interface is up.
+ * For other modes, just checks if fd_tap is valid.
+ *
+ * Return: true if ready, false otherwise
+ */
+bool tap_is_ready(const struct ctx *c)
+{
+	if (c->fd_tap < 0)
+		return false;
+
+	if (c->mode == MODE_PASTA) {
+		/* If pasta_conf_ns is set, the interface was configured and
+		 * brought up during initialization. If not, it's still down.
+		 */
+		return c->pasta_conf_ns;
+	}
+
+	return true;
+}
+
+/**
  * tap_start_connection() - start a new connection
  * @c:		Execution context
  */
@@ -1361,6 +1385,9 @@ static void tap_start_connection(const struct ctx *c)
 	}
 
 	epoll_add(c->epollfd, EPOLLIN | EPOLLRDHUP, ref);
+
+	if (!tap_is_ready(c))
+		return;
 
 	if (c->ifi4)
 		arp_send_init_req(c);

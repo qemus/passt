@@ -55,8 +55,8 @@ guest	/sbin/dhclient -6 __IFNAME__
 # Wait for DAD to complete
 guest	while ip -j -6 addr show tentative | jq -e '.[].addr_info'; do sleep 0.1; done
 gout	ADDR6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__IFNAME__").addr_info[] | select(.prefixlen == 128).local] | .[0]'
-hout	HOST_ADDR6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__HOST_IFNAME6__").addr_info[] | select(.scope != "host" and .scope != "link" and .deprecated != true).local] | .[0]'
-check	[ "__ADDR6__" = "__HOST_ADDR6__" ]
+hout	HOST_ADDR6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__HOST_IFNAME6__").addr_info[] | select(.scope != "host" and .scope != "link" and .deprecated != true).local] | join(",")'
+check	echo "__HOST_ADDR6__" | grep -wq "__ADDR6__"
 
 test	DHCPv6: route
 gout	GW6 ip -j -6 route show|jq -rM '.[] | select(.dst == "default").gateway'

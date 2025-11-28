@@ -34,19 +34,21 @@ for network namespaces: traffic is forwarded using a tap interface inside the
 namespace, without the need to create further interfaces on the host, hence not
 requiring any capabilities or privileges.
 
-%package		selinux
-BuildArch:		noarch
-Summary:		SELinux support for passt and pasta
-Requires:		selinux-policy-%{selinuxtype}
-Requires:		container-selinux
-Requires(post):		selinux-policy-%{selinuxtype}
+%package		    selinux
+BuildArch:		    noarch
+Summary:		    SELinux support for passt and pasta
+%if 0%{?fedora} >= 43
+BuildRequires:      selinux-policy-devel
+%selinux_requires_min
+%else
+BuildRequires:      pkgconfig(systemd)
+Requires(post):     libselinux-utils
+Requires(post):     policycoreutils
+%endif
+Requires:		    container-selinux
+Requires:		    selinux-policy-%{selinuxtype}
 Requires(post):		container-selinux
-Requires(post):		policycoreutils
-Requires(post):		libselinux-utils
-Requires(preun):	policycoreutils
-BuildRequires:		selinux-policy-devel
-BuildRequires:		pkgconfig(systemd)
-Recommends:		selinux-policy-%{selinuxtype} >= %{selinux_policy_version}
+Requires(post):		selinux-policy-%{selinuxtype}
 
 %description selinux
 This package adds SELinux enforcement to passt(1), pasta(1), passt-repair(1).

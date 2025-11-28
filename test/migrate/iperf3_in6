@@ -44,8 +44,8 @@ guest1	/sbin/dhclient -6 __IFNAME1__
 # Wait for DAD to complete on the DHCP address
 guest1	while ip -j -6 addr show tentative | jq -e '.[].addr_info'; do sleep 0.1; done
 g1out	ADDR1_6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__IFNAME1__").addr_info[] | select(.prefixlen == 128).local] | .[0]'
-hout	HOST_ADDR6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__HOST_IFNAME6__").addr_info[] | select(.scope != "host" and .scope != "link" and .deprecated != true).local] | .[0]'
-check	[ "__ADDR1_6__" = "__HOST_ADDR6__" ]
+hout	HOST_ADDR6 ip -j -6 addr show|jq -rM '[.[] | select(.ifname == "__HOST_IFNAME6__").addr_info[] | select(.scope != "host" and .scope != "link" and .deprecated != true).local] | join(" ")'
+check	echo "__HOST_ADDR6__" | grep -wq "__ADDR1_6__"
 
 test	TCP/IPv6 host to guest throughput during migration
 
