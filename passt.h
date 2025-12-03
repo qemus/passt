@@ -204,6 +204,7 @@ struct ip6_ctx {
  * @freebind:		Allow binding of non-local addresses for forwarding
  * @low_wmem:		Low probed net.core.wmem_max
  * @low_rmem:		Low probed net.core.rmem_max
+ * @no_bindtodevice:	Unprivileged SO_BINDTODEVICE not available
  * @vdev:		vhost-user device
  * @device_state_fd:	Device state migration channel
  * @device_state_result: Device state migration result
@@ -281,6 +282,7 @@ struct ctx {
 
 	int low_wmem;
 	int low_rmem;
+	int no_bindtodevice;
 
 	struct vu_dev *vdev;
 

@@ -67,6 +67,23 @@ union sockaddr_inany {
 	struct sockaddr_in6	sa6;
 };
 
+/** socklen_inany() - Get relevant address length for sockaddr_inany address
+ * @sa:		sockaddr_inany socket address
+ *
+ * Return: socket address length for bind() or connect(), from IP family in @sa
+ */
+static inline socklen_t socklen_inany(const union sockaddr_inany *sa)
+{
+	switch (sa->sa_family) {
+	case AF_INET:
+		return sizeof(sa->sa4);
+	case AF_INET6:
+		return sizeof(sa->sa6);
+	default:
+		ASSERT(0);
+	}
+}
+
 /** inany_v4 - Extract IPv4 address, if present, from IPv[46] address
  * @addr:	IPv4 or IPv6 address
  *

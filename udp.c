@@ -780,7 +780,6 @@ static void udp_sock_to_sock(const struct ctx *c, int from_s, int n,
 	const struct udp_flow *uflow = udp_at_sidx(tosidx);
 	uint8_t topif = pif_at_sidx(tosidx);
 	int to_s = uflow->s[tosidx.sidei];
-	socklen_t sl;
 	int i;
 
 	if ((n = udp_sock_recv(c, from_s, udp_mh_recv, n)) <= 0)
@@ -791,7 +790,7 @@ static void udp_sock_to_sock(const struct ctx *c, int from_s, int n,
 			= udp_mh_recv[i].msg_len;
 	}
 
-	pif_sockaddr(c, &udp_splice_to, &sl, topif,
+	pif_sockaddr(c, &udp_splice_to, topif,
 		     &toside->eaddr, toside->eport);
 
 	sendmmsg(to_s, udp_mh_splice, n, MSG_NOSIGNAL);
@@ -999,7 +998,6 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 	flow_sidx_t tosidx;
 	in_port_t src, dst;
 	uint8_t topif;
-	socklen_t sl;
 
 	ASSERT(!c->no_udp);
 
@@ -1041,7 +1039,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 	s = uflow->s[tosidx.sidei];
 	ASSERT(s >= 0);
 
-	pif_sockaddr(c, &to_sa, &sl, topif, &toside->eaddr, toside->eport);
+	pif_sockaddr(c, &to_sa, topif, &toside->eaddr, toside->eport);
 
 	for (i = 0, j = 0; i < (int)p->count - idx && j < UIO_MAXIOV; i++) {
 		const struct udphdr *uh_send;
@@ -1054,7 +1052,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 			return p->count - idx;
 
 		mm[i].msg_hdr.msg_name = &to_sa;
-		mm[i].msg_hdr.msg_namelen = sl;
+		mm[i].msg_hdr.msg_namelen = socklen_inany(&to_sa);
 
 		if (data.cnt) {
 			int cnt;
@@ -1104,72 +1102,64 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 }
 
 /**
- * udp_sock_init() - Initialise listening sockets for a given port
+ * udp_sock_init() - Initialise listening socket for a given port
  * @c:		Execution context
- * @ns:		In pasta mode, if set, bind with loopback address in namespace
+ * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
  * @addr:	Pointer to address for binding, NULL if not configured
  * @ifname:	Name of interface to bind to, NULL if not configured
  * @port:	Port, host order
  *
- * Return: 0 on (partial) success, negative error code on (complete) failure
+ * Return: 0 on success, negative error code on failure
  */
-int udp_sock_init(const struct ctx *c, int ns, const union inany_addr *addr,
-		  const char *ifname, in_port_t port)
+int udp_sock_init(const struct ctx *c, uint8_t pif,
+		  const union inany_addr *addr, const char *ifname,
+		  in_port_t port)
 {
 	union udp_listen_epoll_ref uref = {
-		.pif = ns ? PIF_SPLICE : PIF_HOST,
+		.pif = pif,
 		.port = port,
 	};
-	int r4 = FD_REF_MAX + 1, r6 = FD_REF_MAX + 1;
+	int (*socks)[NUM_PORTS];
+	int s;
 
 	ASSERT(!c->no_udp);
+	ASSERT(pif_is_socket(pif));
 
-	if (!addr && c->ifi4 && c->ifi6 && !ns) {
-		int s;
+	if (pif == PIF_HOST)
+		socks = udp_splice_init;
+	else
+		socks = udp_splice_ns;
 
-		/* Attempt to get a dual stack socket */
-		s = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, PIF_HOST,
-				NULL, ifname, port, uref.u32);
-		udp_splice_init[V4][port] = s < 0 ? -1 : s;
-		udp_splice_init[V6][port] = s < 0 ? -1 : s;
-		if (IN_INTERVAL(0, FD_REF_MAX, s))
+	if (!c->ifi4) {
+		if (!addr)
+			/* Restrict to v6 only */
+			addr = &inany_any6;
+		else if (inany_v4(addr))
+			/* Nothing to do */
+			return 0;
+	}
+	if (!c->ifi6) {
+		if (!addr)
+			/* Restrict to v4 only */
+			addr = &inany_any4;
+		else if (!inany_v4(addr))
+			/* Nothing to do */
 			return 0;
 	}
 
-	if ((!addr || inany_v4(addr)) && c->ifi4) {
-		if (!ns) {
-			r4 = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, PIF_HOST,
-					 addr ? addr : &inany_any4, ifname,
-					 port, uref.u32);
-
-			udp_splice_init[V4][port] = r4 < 0 ? -1 : r4;
-		} else {
-			r4  = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, PIF_SPLICE,
-					  &inany_loopback4, ifname,
-					  port, uref.u32);
-			udp_splice_ns[V4][port] = r4 < 0 ? -1 : r4;
-		}
+	s = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, pif,
+			addr, ifname, port, uref.u32);
+	if (s > FD_REF_MAX) {
+		close(s);
+		s = -EIO;
 	}
 
-	if ((!addr || !inany_v4(addr)) && c->ifi6) {
-		if (!ns) {
-			r6 = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, PIF_HOST,
-					 addr ? addr : &inany_any6, ifname,
-					 port, uref.u32);
+	if (!addr || inany_v4(addr))
+		socks[V4][port] = s < 0 ? -1 : s;
+	if (!addr || !inany_v4(addr))
+		socks[V6][port] = s < 0 ? -1 : s;
 
-			udp_splice_init[V6][port] = r6 < 0 ? -1 : r6;
-		} else {
-			r6 = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, PIF_SPLICE,
-					 &inany_loopback6, ifname,
-					 port, uref.u32);
-			udp_splice_ns[V6][port] = r6 < 0 ? -1 : r6;
-		}
-	}
-
-	if (IN_INTERVAL(0, FD_REF_MAX, r4) || IN_INTERVAL(0, FD_REF_MAX, r6))
-		return 0;
-
-	return r4 < 0 ? r4 : r6;
+	return s < 0 ? s : 0;
 }
 
 /**
@@ -1190,6 +1180,26 @@ static void udp_splice_iov_init(void)
 		mh->msg_iov = &udp_iov_splice[i];
 		mh->msg_iovlen = 1;
 	}
+}
+
+/**
+ * udp_ns_sock_init() - Init socket to listen for spliced outbound connections
+ * @c:		Execution context
+ * @port:	Port, host order
+ */
+static void udp_ns_sock_init(const struct ctx *c, in_port_t port)
+{
+	ASSERT(!c->no_udp);
+
+	if (!c->no_bindtodevice) {
+		udp_sock_init(c, PIF_SPLICE, NULL, "lo", port);
+		return;
+	}
+
+	if (c->ifi4)
+		udp_sock_init(c, PIF_SPLICE, &inany_loopback4, NULL, port);
+	if (c->ifi6)
+		udp_sock_init(c, PIF_SPLICE, &inany_loopback6, NULL, port);
 }
 
 /**
@@ -1222,8 +1232,12 @@ static void udp_port_rebind(struct ctx *c, bool outbound)
 		}
 
 		if ((c->ifi4 && socks[V4][port] == -1) ||
-		    (c->ifi6 && socks[V6][port] == -1))
-			udp_sock_init(c, outbound, NULL, NULL, port);
+		    (c->ifi6 && socks[V6][port] == -1)) {
+			if (outbound)
+				udp_ns_sock_init(c, port);
+			else
+				udp_sock_init(c, PIF_HOST, NULL, NULL, port);
+		}
 	}
 }
 

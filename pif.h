@@ -57,7 +57,7 @@ static inline bool pif_is_socket(uint8_t pif)
 	return pif == PIF_HOST || pif == PIF_SPLICE;
 }
 
-void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa, socklen_t *sl,
+void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
 		  uint8_t pif, const union inany_addr *addr, in_port_t port);
 int pif_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 		const union inany_addr *addr, const char *ifname,

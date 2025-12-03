@@ -206,12 +206,14 @@ int do_clone(int (*fn)(void *), char *stack_area, size_t stack_size, int flags,
 #include "packet.h"
 
 struct ctx;
+union sockaddr_inany;
 
-int sock_l4_sa(const struct ctx *c, enum epoll_type type,
-	       const void *sa, socklen_t sl,
-	       const char *ifname, bool v6only);
+int sock_l4(const struct ctx *c, enum epoll_type type,
+	    const union sockaddr_inany *sa, const char *ifname);
+int sock_l4_dualstack_any(const struct ctx *c, enum epoll_type type,
+			  in_port_t port, const char *ifname);
 int sock_unix(char *sock_path);
-void sock_probe_mem(struct ctx *c);
+void sock_probe_features(struct ctx *c);
 long timespec_diff_ms(const struct timespec *a, const struct timespec *b);
 int64_t timespec_diff_us(const struct timespec *a, const struct timespec *b);
 void bitmap_set(uint8_t *map, unsigned bit);

@@ -660,7 +660,9 @@ uint8_t fwd_nat_from_splice(const struct ctx *c, uint8_t proto,
 		return PIF_NONE;
 	}
 
-	if (inany_v4(&ini->eaddr))
+	if (!inany_is_unspecified(&ini->oaddr))
+		tgt->eaddr = ini->oaddr;
+	else if (inany_v4(&ini->oaddr))
 		tgt->eaddr = inany_loopback4;
 	else
 		tgt->eaddr = inany_loopback6;

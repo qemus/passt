@@ -1472,12 +1472,11 @@ static void tcp_bind_outbound(const struct ctx *c,
 {
 	const struct flowside *tgt = &conn->f.side[TGTSIDE];
 	union sockaddr_inany bind_sa;
-	socklen_t sl;
 
 
-	pif_sockaddr(c, &bind_sa, &sl, PIF_HOST, &tgt->oaddr, tgt->oport);
+	pif_sockaddr(c, &bind_sa, PIF_HOST, &tgt->oaddr, tgt->oport);
 	if (!inany_is_unspecified(&tgt->oaddr) || tgt->oport) {
-		if (bind(s, &bind_sa.sa, sl)) {
+		if (bind(s, &bind_sa.sa, socklen_inany(&bind_sa))) {
 			char sstr[INANY_ADDRSTRLEN];
 
 			flow_dbg_perror(conn,
@@ -1537,7 +1536,6 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	union flow *flow;
 	int s = -1, mss;
 	uint64_t hash;
-	socklen_t sl;
 
 	if (!(flow = flow_alloc()))
 		return;
@@ -1570,7 +1568,7 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	if ((s = tcp_conn_sock(af)) < 0)
 		goto cancel;
 
-	pif_sockaddr(c, &sa, &sl, PIF_HOST, &tgt->eaddr, tgt->eport);
+	pif_sockaddr(c, &sa, PIF_HOST, &tgt->eaddr, tgt->eport);
 
 	/* Use bind() to check if the target address is local (EADDRINUSE or
 	 * similar) and already bound, and set the LOCAL flag in that case.
@@ -1582,7 +1580,7 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	 *
 	 * So, if bind() succeeds, close the socket, get a new one, and proceed.
 	 */
-	if (bind(s, &sa.sa, sl)) {
+	if (bind(s, &sa.sa, socklen_inany(&sa))) {
 		if (errno != EADDRNOTAVAIL && errno != EACCES)
 			conn_flag(c, conn, LOCAL);
 	} else {
@@ -1622,7 +1620,7 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 
 	tcp_bind_outbound(c, conn, s);
 
-	if (connect(s, &sa.sa, sl)) {
+	if (connect(s, &sa.sa, socklen_inany(&sa))) {
 		if (errno != EINPROGRESS) {
 			tcp_rst(c, conn);
 			goto cancel;
@@ -1641,7 +1639,8 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	tcp_epoll_ctl(c, conn);
 
 	if (c->mode == MODE_VU) { /* To rebind to same oport after migration */
-		sl = sizeof(sa);
+		socklen_t sl = sizeof(sa);
+
 		if (getsockname(s, &sa.sa, &sl) ||
 		    inany_from_sockaddr(&tgt->oaddr, &tgt->oport, &sa) < 0)
 			err_perror("Can't get local address for socket %i", s);
@@ -2370,11 +2369,9 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 	ini = flow_initiate_sa(flow, ref.tcp_listen.pif, &sa,
 			       NULL, ref.tcp_listen.port);
 
-	if (c->mode == MODE_VU) { /* Rebind to same address after migration */
-		if (getsockname(s, &sa.sa, &sl) ||
-		    inany_from_sockaddr(&ini->oaddr, &ini->oport, &sa) < 0)
-			err_perror("Can't get local address for socket %i", s);
-	}
+	if (getsockname(s, &sa.sa, &sl) ||
+	    inany_from_sockaddr(&ini->oaddr, &ini->oport, &sa) < 0)
+		err_perror("Can't get local address for socket %i", s);
 
 	if (!inany_is_unicast(&ini->eaddr) || ini->eport == 0) {
 		char sastr[SOCKADDR_STRLEN];
@@ -2557,29 +2554,42 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 /**
  * tcp_sock_init_one() - Initialise listening socket for address and port
  * @c:		Execution context
+ * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
  * @addr:	Pointer to address for binding, NULL for dual stack any
  * @ifname:	Name of interface to bind to, NULL if not configured
  * @port:	Port, host order
  *
  * Return: fd for the new listening socket, negative error code on failure
+ *
+ * If pif == PIF_SPLICE, the caller must have already entered the guest ns.
  */
-static int tcp_sock_init_one(const struct ctx *c, const union inany_addr *addr,
-			     const char *ifname, in_port_t port)
+static int tcp_sock_init_one(const struct ctx *c, uint8_t pif,
+			     const union inany_addr *addr, const char *ifname,
+			     in_port_t port)
 {
 	union tcp_listen_epoll_ref tref = {
 		.port = port,
-		.pif = PIF_HOST,
+		.pif = pif,
 	};
+	const struct fwd_ports *fwd;
 	int s;
 
-	s = pif_sock_l4(c, EPOLL_TYPE_TCP_LISTEN, PIF_HOST, addr,
-				ifname, port, tref.u32);
+	if (pif == PIF_HOST)
+		fwd = &c->tcp.fwd_in;
+	else
+		fwd = &c->tcp.fwd_out;
 
-	if (c->tcp.fwd_in.mode == FWD_AUTO) {
+	s = pif_sock_l4(c, EPOLL_TYPE_TCP_LISTEN, pif, addr, ifname,
+			port, tref.u32);
+
+	if (fwd->mode == FWD_AUTO) {
+		int (*socks)[IP_VERSIONS] = pif == PIF_SPLICE ?
+			tcp_sock_ns : tcp_sock_init_ext;
+
 		if (!addr || inany_v4(addr))
-			tcp_sock_init_ext[port][V4] = s < 0 ? -1 : s;
+			socks[port][V4] = s < 0 ? -1 : s;
 		if (!addr || !inany_v4(addr))
-			tcp_sock_init_ext[port][V6] = s < 0 ? -1 : s;
+			socks[port][V6] = s < 0 ? -1 : s;
 	}
 
 	if (s < 0)
@@ -2589,87 +2599,47 @@ static int tcp_sock_init_one(const struct ctx *c, const union inany_addr *addr,
 }
 
 /**
- * tcp_sock_init() - Create listening sockets for a given host ("inbound") port
+ * tcp_sock_init() - Create listening socket for a given host ("inbound") port
  * @c:		Execution context
+ * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
  * @addr:	Pointer to address for binding, NULL if not configured
  * @ifname:	Name of interface to bind to, NULL if not configured
  * @port:	Port, host order
  *
- * Return: 0 on (partial) success, negative error code on (complete) failure
+ * Return: 0 on success, negative error code on failure
  */
-int tcp_sock_init(const struct ctx *c, const union inany_addr *addr,
-		  const char *ifname, in_port_t port)
+int tcp_sock_init(const struct ctx *c, uint8_t pif,
+		  const union inany_addr *addr, const char *ifname,
+		  in_port_t port)
 {
-	int r4 = FD_REF_MAX + 1, r6 = FD_REF_MAX + 1;
+	int s;
 
 	ASSERT(!c->no_tcp);
 
-	if (!addr && c->ifi4 && c->ifi6)
-		/* Attempt to get a dual stack socket */
-		if (tcp_sock_init_one(c, NULL, ifname, port) >= 0)
+	if (!c->ifi4) {
+		if (!addr)
+			/* Restrict to v6 only */
+			addr = &inany_any6;
+		else if (inany_v4(addr))
+			/* Nothing to do */
 			return 0;
+	}
+	if (!c->ifi6) {
+		if (!addr)
+			/* Restrict to v4 only */
+			addr = &inany_any4;
+		else if (!inany_v4(addr))
+			/* Nothing to do */
+			return 0;
+	}
 
-	/* Otherwise create a socket per IP version */
-	if ((!addr || inany_v4(addr)) && c->ifi4)
-		r4 = tcp_sock_init_one(c, addr ? addr : &inany_any4,
-				       ifname, port);
-
-	if ((!addr || !inany_v4(addr)) && c->ifi6)
-		r6 = tcp_sock_init_one(c, addr ? addr : &inany_any6,
-				       ifname, port);
-
-	if (IN_INTERVAL(0, FD_REF_MAX, r4) || IN_INTERVAL(0, FD_REF_MAX, r6))
-		return 0;
-
-	return r4 < 0 ? r4 : r6;
-}
-
-/**
- * tcp_ns_sock_init4() - Init socket to listen for outbound IPv4 connections
- * @c:		Execution context
- * @port:	Port, host order
- */
-static void tcp_ns_sock_init4(const struct ctx *c, in_port_t port)
-{
-	union tcp_listen_epoll_ref tref = {
-		.port = port,
-		.pif = PIF_SPLICE,
-	};
-	int s;
-
-	ASSERT(c->mode == MODE_PASTA);
-
-	s = pif_sock_l4(c, EPOLL_TYPE_TCP_LISTEN, PIF_SPLICE, &inany_loopback4,
-			NULL, port, tref.u32);
+	s = tcp_sock_init_one(c, pif, addr, ifname, port);
 	if (s < 0)
-		s = -1;
+		return s;
+	if (s > FD_REF_MAX)
+		return -EIO;
 
-	if (c->tcp.fwd_out.mode == FWD_AUTO)
-		tcp_sock_ns[port][V4] = s;
-}
-
-/**
- * tcp_ns_sock_init6() - Init socket to listen for outbound IPv6 connections
- * @c:		Execution context
- * @port:	Port, host order
- */
-static void tcp_ns_sock_init6(const struct ctx *c, in_port_t port)
-{
-	union tcp_listen_epoll_ref tref = {
-		.port = port,
-		.pif = PIF_SPLICE,
-	};
-	int s;
-
-	ASSERT(c->mode == MODE_PASTA);
-
-	s = pif_sock_l4(c, EPOLL_TYPE_TCP_LISTEN, PIF_SPLICE, &inany_loopback6,
-			NULL, port, tref.u32);
-	if (s < 0)
-		s = -1;
-
-	if (c->tcp.fwd_out.mode == FWD_AUTO)
-		tcp_sock_ns[port][V6] = s;
+	return 0;
 }
 
 /**
@@ -2681,10 +2651,15 @@ static void tcp_ns_sock_init(const struct ctx *c, in_port_t port)
 {
 	ASSERT(!c->no_tcp);
 
+	if (!c->no_bindtodevice) {
+		tcp_sock_init(c, PIF_SPLICE, NULL, "lo", port);
+		return;
+	}
+
 	if (c->ifi4)
-		tcp_ns_sock_init4(c, port);
+		tcp_sock_init_one(c, PIF_SPLICE, &inany_loopback4, NULL, port);
 	if (c->ifi6)
-		tcp_ns_sock_init6(c, port);
+		tcp_sock_init_one(c, PIF_SPLICE, &inany_loopback6, NULL, port);
 }
 
 /**
@@ -2909,7 +2884,7 @@ static void tcp_port_rebind(struct ctx *c, bool outbound)
 			if (outbound)
 				tcp_ns_sock_init(c, port);
 			else
-				tcp_sock_init(c, NULL, NULL, port);
+				tcp_sock_init(c, PIF_HOST, NULL, NULL, port);
 		}
 	}
 }
@@ -3664,11 +3639,10 @@ static int tcp_flow_repair_bind(const struct ctx *c, struct tcp_tap_conn *conn)
 {
 	const struct flowside *sockside = HOSTFLOW(conn);
 	union sockaddr_inany a;
-	socklen_t sl;
 
-	pif_sockaddr(c, &a, &sl, PIF_HOST, &sockside->oaddr, sockside->oport);
+	pif_sockaddr(c, &a, PIF_HOST, &sockside->oaddr, sockside->oport);
 
-	if (bind(conn->sock, &a.sa, sizeof(a))) {
+	if (bind(conn->sock, &a.sa, socklen_inany(&a))) {
 		int rc = -errno;
 		flow_perror(conn, "Failed to bind socket for migrated flow");
 		return rc;

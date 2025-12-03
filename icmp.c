@@ -312,8 +312,9 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	ASSERT(flow_proto[pingf->f.type] == proto);
 	pingf->ts = now->tv_sec;
 
-	pif_sockaddr(c, &sa, &msh.msg_namelen, PIF_HOST, &tgt->eaddr, 0);
+	pif_sockaddr(c, &sa, PIF_HOST, &tgt->eaddr, 0);
 	msh.msg_name = &sa;
+	msh.msg_namelen = socklen_inany(&sa);
 	msh.msg_iov = iov;
 	msh.msg_iovlen = cnt;
 	msh.msg_control = NULL;

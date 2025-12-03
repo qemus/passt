@@ -352,7 +352,6 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 	sa_family_t af = inany_v4(&tgt->eaddr) ? AF_INET : AF_INET6;
 	uint8_t tgtpif = conn->f.pif[TGTSIDE];
 	union sockaddr_inany sa;
-	socklen_t sl;
 	int one = 1;
 
 	if (tgtpif == PIF_HOST)
@@ -380,9 +379,9 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 			   conn->s[1]);
 	}
 
-	pif_sockaddr(c, &sa, &sl, tgtpif, &tgt->eaddr, tgt->eport);
+	pif_sockaddr(c, &sa, tgtpif, &tgt->eaddr, tgt->eport);
 
-	if (connect(conn->s[1], &sa.sa, sl)) {
+	if (connect(conn->s[1], &sa.sa, socklen_inany(&sa))) {
 		if (errno != EINPROGRESS) {
 			flow_trace(conn, "Couldn't connect socket for splice: %s",
 				   strerror_(errno));

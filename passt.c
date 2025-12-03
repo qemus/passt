@@ -381,7 +381,7 @@ int main(int argc, char **argv)
 	if (setrlimit(RLIMIT_NOFILE, &limit))
 		die_perror("Failed to set current limit for open files");
 
-	sock_probe_mem(&c);
+	sock_probe_features(&c);
 
 	conf(&c, argc, argv);
 	trace_init(c.trace);

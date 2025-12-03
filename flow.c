@@ -163,16 +163,13 @@ static void flowside_from_af(struct flowside *side, sa_family_t af,
  * @err:	Filled in with errno if something failed
  * @type:	Socket epoll type
  * @sa:		Socket address
- * @sl:		Length of @sa
  */
 struct flowside_sock_args {
 	const struct ctx *c;
 	int fd;
 	int err;
 	enum epoll_type type;
-	const struct sockaddr *sa;
-	socklen_t sl;
-	const char *path;
+	const union sockaddr_inany *sa;
 };
 
 /** flowside_sock_splice() - Create and bind socket for PIF_SPLICE based on flowside
@@ -186,8 +183,7 @@ static int flowside_sock_splice(void *arg)
 
 	ns_enter(a->c);
 
-	a->fd = sock_l4_sa(a->c, a->type, a->sa, a->sl, NULL,
-	                   a->sa->sa_family == AF_INET6);
+	a->fd = sock_l4(a->c, a->type, a->sa, NULL);
 	a->err = errno;
 
 	return 0;
@@ -208,11 +204,10 @@ int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 {
 	const char *ifname = NULL;
 	union sockaddr_inany sa;
-	socklen_t sl;
 
 	ASSERT(pif_is_socket(pif));
 
-	pif_sockaddr(c, &sa, &sl, pif, &tgt->oaddr, tgt->oport);
+	pif_sockaddr(c, &sa, pif, &tgt->oaddr, tgt->oport);
 
 	switch (pif) {
 	case PIF_HOST:
@@ -223,13 +218,11 @@ int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 		else if (sa.sa_family == AF_INET6)
 			ifname = c->ip6.ifname_out;
 
-		return sock_l4_sa(c, type, &sa, sl, ifname,
-				  sa.sa_family == AF_INET6);
+		return sock_l4(c, type, &sa, ifname);
 
 	case PIF_SPLICE: {
 		struct flowside_sock_args args = {
-			.c = c, .type = type,
-			.sa = &sa.sa, .sl = sl,
+			.c = c, .type = type, .sa = &sa,
 		};
 		NS_CALL(flowside_sock_splice, &args);
 		errno = args.err;
@@ -258,10 +251,9 @@ int flowside_connect(const struct ctx *c, int s,
 		     uint8_t pif, const struct flowside *tgt)
 {
 	union sockaddr_inany sa;
-	socklen_t sl;
 
-	pif_sockaddr(c, &sa, &sl, pif, &tgt->eaddr, tgt->eport);
-	return connect(s, &sa.sa, sl);
+	pif_sockaddr(c, &sa, pif, &tgt->eaddr, tgt->eport);
+	return connect(s, &sa.sa, socklen_inany(&sa));
 }
 
 /** flow_log_ - Log flow-related message

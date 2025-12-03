@@ -40,21 +40,20 @@
 #endif
 
 /**
- * sock_l4_sa() - Create and bind socket to socket address, add to epoll list
+ * sock_l4_() - Create and bind socket to socket address
  * @c:		Execution context
  * @type:	epoll type
  * @sa:		Socket address to bind to
- * @sl:		Length of @sa
  * @ifname:	Interface for binding, NULL for any
- * @v6only:	Set IPV6_V6ONLY socket option
+ * @v6only:	If >= 0, set IPV6_V6ONLY socket option to this value
  *
  * Return: newly created socket, negative error code on failure
  */
-int sock_l4_sa(const struct ctx *c, enum epoll_type type,
-	       const void *sa, socklen_t sl,
-	       const char *ifname, bool v6only)
+static int sock_l4_(const struct ctx *c, enum epoll_type type,
+		    const union sockaddr_inany *sa, const char *ifname,
+		    int v6only)
 {
-	sa_family_t af = ((const struct sockaddr *)sa)->sa_family;
+	sa_family_t af = sa->sa_family;
 	bool freebind = false;
 	int fd, y = 1, ret;
 	uint8_t proto;
@@ -96,9 +95,13 @@ int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 		return -EBADF;
 	}
 
-	if (v6only)
-		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &y, sizeof(y)))
-			debug("Failed to set IPV6_V6ONLY on socket %i", fd);
+	if (v6only >= 0) {
+		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+			       &v6only, sizeof(v6only))) {
+			debug("Failed to set IPV6_V6ONLY to %d on socket %i",
+			      v6only, fd);
+		}
+	}
 
 	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &y, sizeof(y)))
 		debug("Failed to set SO_REUSEADDR on socket %i", fd);
@@ -126,9 +129,10 @@ int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 			char str[SOCKADDR_STRLEN];
 
 			ret = -errno;
-			warn("Can't bind %s socket for %s to %s, closing",
-			     EPOLL_TYPE_STR(proto),
-			     sockaddr_ntop(sa, str, sizeof(str)), ifname);
+			warn("SO_BINDTODEVICE %s failed for %s on %s: %s",
+			     ifname, EPOLL_TYPE_STR(type),
+			     sockaddr_ntop(sa, str, sizeof(str)),
+			     strerror_(-ret));
 			close(fd);
 			return ret;
 		}
@@ -146,7 +150,7 @@ int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 		}
 	}
 
-	if (bind(fd, sa, sl) < 0) {
+	if (bind(fd, &sa->sa, socklen_inany(sa)) < 0) {
 		/* We'll fail to bind to low ports if we don't have enough
 		 * capabilities, and we'll fail to bind on already bound ports,
 		 * this is fine. This might also fail for ICMP because of a
@@ -167,6 +171,57 @@ int sock_l4_sa(const struct ctx *c, enum epoll_type type,
 	}
 
 	return fd;
+}
+
+/**
+ * sock_l4() - Create and bind socket to given address
+ * @c:		Execution context
+ * @type:	epoll type
+ * @sa:		Socket address to bind to
+ * @ifname:	Interface for binding, NULL for any
+ *
+ * Return: newly created socket, negative error code on failure
+ */
+int sock_l4(const struct ctx *c, enum epoll_type type,
+	    const union sockaddr_inany *sa, const char *ifname)
+{
+	int v6only = -1;
+
+	/* The option doesn't exist for IPv4 sockets, and we don't care about it
+	 * for IPv6 sockets with a non-wildcard address.
+	 */
+	if (sa->sa_family == AF_INET6 &&
+	    IN6_IS_ADDR_UNSPECIFIED(&sa->sa6.sin6_addr))
+		v6only = 1;
+
+	return sock_l4_(c, type, sa, ifname, v6only);
+}
+
+/**
+ * sock_l4_dualstack_any() - Create dualstack socket bound to :: and 0.0.0.0
+ * @c:		Execution context
+ * @type:	epoll type
+ * @port	Port to bind to (:: and 0.0.0.0)
+ * @ifname:	Interface for binding, NULL for any
+ *
+ * Return: newly created socket, negative error code on failure
+ *
+ * A dual stack socket is effectively bound to both :: and 0.0.0.0.
+ */
+int sock_l4_dualstack_any(const struct ctx *c, enum epoll_type type,
+			  in_port_t port, const char *ifname)
+{
+	union sockaddr_inany sa = {
+		.sa6.sin6_family = AF_INET6,
+		.sa6.sin6_addr = in6addr_any,
+		.sa6.sin6_port = htons(port),
+	};
+
+	/* Dual stack sockets require IPV6_V6ONLY == 0.  Usually that's the
+	 * default, but sysctl net.ipv6.bindv6only can change that, so set the
+	 * sockopt explicitly.
+	 */
+	return sock_l4_(c, type, &sa, ifname, 0);
 }
 
 /**
@@ -232,12 +287,13 @@ int sock_unix(char *sock_path)
 }
 
 /**
- * sock_probe_mem() - Check if setting high SO_SNDBUF and SO_RCVBUF is allowed
+ * sock_probe_features() - Probe for socket features we might use
  * @c:		Execution context
  */
-void sock_probe_mem(struct ctx *c)
+void sock_probe_features(struct ctx *c)
 {
 	int v = INT_MAX / 2, s;
+	const char lo[] = "lo";
 	socklen_t sl;
 
 	s = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
@@ -246,6 +302,7 @@ void sock_probe_mem(struct ctx *c)
 		return;
 	}
 
+	/* Check if setting high SO_SNDBUF and SO_RCVBUF is allowed */
 	sl = sizeof(v);
 	if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &v, sizeof(v))	||
 	    getsockopt(s, SOL_SOCKET, SO_SNDBUF, &v, &sl) ||
@@ -257,6 +314,19 @@ void sock_probe_mem(struct ctx *c)
 	    getsockopt(s, SOL_SOCKET, SO_RCVBUF, &v, &sl) ||
 	    (size_t)v < RCVBUF_BIG)
 		c->low_rmem = 1;
+
+	/* Check if SO_BINDTODEVICE is available
+	 *
+	 * Supported since kernel version 5.7, commit c427bfec18f2 ("net: core:
+	 * enable SO_BINDTODEVICE for non-root users").  Some distro kernels may
+	 * have backports, of course.  Record whether we can use it so that we
+	 * can give more useful diagnostics.
+	 */
+	if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, lo, sizeof(lo) - 1)) {
+		if (errno != EPERM)
+			warn_perror("Unexpected error probing SO_BINDTODEVICE");
+		c->no_bindtodevice = 1;
+	}
 
 	close(s);
 }

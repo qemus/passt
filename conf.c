@@ -156,6 +156,12 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 		    optname, optarg);
 	}
 
+	if (ifname && c->no_bindtodevice) {
+		die(
+"Device binding for '-%c %s' unsupported (requires kernel 5.7+)",
+		    optname, optarg);
+	}
+
 	for (i = first; i <= last; i++) {
 		if (bitmap_isset(exclude, i))
 			continue;
@@ -169,9 +175,9 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 		fwd->delta[i] = to - first;
 
 		if (optname == 't')
-			ret = tcp_sock_init(c, addr, ifname, i);
+			ret = tcp_sock_init(c, PIF_HOST, addr, ifname, i);
 		else if (optname == 'u')
-			ret = udp_sock_init(c, 0, addr, ifname, i);
+			ret = udp_sock_init(c, PIF_HOST, addr, ifname, i);
 		else
 			/* No way to check in advance for -T and -U */
 			ret = 0;
@@ -229,6 +235,12 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		if (c->mode != MODE_PASTA)
 			die("'auto' port forwarding is only allowed for pasta");
 
+		if ((optname == 'T' || optname == 'U') && c->no_bindtodevice) {
+			warn(
+"'-%c auto' enabled without unprivileged SO_BINDTODEVICE", optname);
+			warn(
+"Forwarding from addresses other than 127.0.0.1 will not work");
+		}
 		fwd->mode = FWD_AUTO;
 		return;
 	}
