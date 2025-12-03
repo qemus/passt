@@ -12,7 +12,7 @@
 /**
  * struct tcp_tap_conn - Descriptor for a TCP connection (not spliced)
  * @f:			Generic flow information
- * @retrans:		Number of retransmissions occurred due to ACK_TIMEOUT
+ * @retries:		Number of retries occurred due to timeouts
  * @ws_from_tap:	Window scaling factor advertised from tap/guest
  * @ws_to_tap:		Window scaling factor advertised to tap/guest
  * @tap_mss:		MSS advertised by tap/guest, rounded to 2 ^ TCP_MSS_BITS
@@ -35,9 +35,9 @@ struct tcp_tap_conn {
 	/* Must be first element */
 	struct flow_common f;
 
-#define TCP_RETRANS_BITS		3
-	unsigned int	retrans		:TCP_RETRANS_BITS;
-#define TCP_MAX_RETRANS			MAX_FROM_BITS(TCP_RETRANS_BITS)
+#define TCP_RETRIES_BITS		3
+	unsigned int	retries		:TCP_RETRIES_BITS;
+#define TCP_MAX_RETRIES			MAX_FROM_BITS(TCP_RETRIES_BITS)
 
 #define TCP_WS_BITS			4	/* RFC 7323 */
 #define TCP_WS_MAX			14
@@ -77,6 +77,7 @@ struct tcp_tap_conn {
 #define ACK_TO_TAP_DUE		BIT(3)
 #define ACK_FROM_TAP_DUE	BIT(4)
 #define ACK_FROM_TAP_BLOCKS	BIT(5)
+#define SYN_RETRIED		BIT(6)
 
 #define SNDBUF_BITS		24
 	unsigned int	sndbuf		:SNDBUF_BITS;
@@ -99,7 +100,7 @@ struct tcp_tap_conn {
  * struct tcp_tap_transfer - Migrated TCP data, flow table part, network order
  * @pif:		Interfaces for each side of the flow
  * @side:		Addresses and ports for each side of the flow
- * @retrans:		Number of retransmissions occurred due to ACK_TIMEOUT
+ * @retries:		Number of retries occurred due to timeouts
  * @ws_from_tap:	Window scaling factor advertised from tap/guest
  * @ws_to_tap:		Window scaling factor advertised to tap/guest
  * @events:		Connection events, implying connection states
@@ -119,7 +120,7 @@ struct tcp_tap_transfer {
 	uint8_t		pif[SIDES];
 	struct flowside	side[SIDES];
 
-	uint8_t		retrans;
+	uint8_t		retries;
 	uint8_t		ws_from_tap;
 	uint8_t		ws_to_tap;
 	uint8_t		events;

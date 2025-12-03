@@ -589,6 +589,97 @@ int write_file(const char *path, const char *buf)
 	return len == 0 ? 0 : -1;
 }
 
+/**
+ * read_file() - Read contents of file into a NULL-terminated buffer
+ * @path:	Path to file to read
+ * @buf:	Buffer to store file contents
+ * @buf_size:	Size of buffer
+ *
+ * Return: number of bytes read on success, negative error code on failure
+ */
+static ssize_t read_file(const char *path, char *buf, size_t buf_size)
+{
+	size_t total_read = 0;
+	int fd;
+
+	if (!buf_size)
+		return -EINVAL;
+
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+
+	if (fd < 0)
+		return -errno;
+
+	while (total_read < buf_size) {
+		ssize_t rc = read(fd, buf + total_read, buf_size - total_read);
+
+		if (rc < 0) {
+			int errno_save = errno;
+			close(fd);
+			return -errno_save;
+		}
+
+		if (rc == 0)
+			break;
+
+		total_read += rc;
+	}
+
+	close(fd);
+
+	if (total_read == buf_size) {
+		buf[buf_size - 1] = '\0';
+		return -ENOBUFS;
+	}
+
+	buf[total_read] = '\0';
+
+	return total_read;
+}
+
+/**
+ * read_file_integer() - Read an integer value from a file
+ * @path:	Path to file to read
+ * @fallback:	Default value if file can't be read
+ *
+ * Return: integer value, @fallback on failure
+ */
+intmax_t read_file_integer(const char *path, intmax_t fallback)
+{
+	ssize_t bytes_read;
+	char buf[BUFSIZ];
+	intmax_t value;
+	char *end;
+
+	bytes_read = read_file(path, buf, sizeof(buf));
+
+	if (bytes_read < 0)
+		goto error;
+
+	if (bytes_read == 0) {
+		debug("Empty file %s", path);
+		goto error;
+	}
+
+	errno = 0;
+	value = strtoimax(buf, &end, 10);
+	if (*end && *end != '\n') {
+		debug("Non-numeric content in %s", path);
+		goto error;
+	}
+	if (errno) {
+		debug("Out of range value in %s: %s", path, buf);
+		goto error;
+	}
+
+	return value;
+
+error:
+	debug("Couldn't read %s, using %"PRIdMAX" as default value",
+	      path, fallback);
+	return fallback;
+}
+
 #ifdef __ia64__
 /* Needed by do_clone() below: glibc doesn't export the prototype of __clone2(),
  * use the description from clone(2).
