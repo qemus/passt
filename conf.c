@@ -1109,7 +1109,7 @@ static void conf_print(const struct ctx *c)
 		info("Template interface: %s%s%s%s%s",
 		     c->ifi4 > 0 ? if_indextoname(c->ifi4, ifn) : "",
 		     c->ifi4 > 0 ? " (IPv4)" : "",
-		     (c->ifi4 && c->ifi6) ? ", " : "",
+		     (c->ifi4 > 0 && c->ifi6 > 0) ? ", " : "",
 		     c->ifi6 > 0 ? if_indextoname(c->ifi6, ifn) : "",
 		     c->ifi6 > 0 ? " (IPv6)" : "");
 	}
@@ -2001,20 +2001,23 @@ void conf(struct ctx *c, int argc, char **argv)
 	    (*c->ip6.ifname_out && !c->ifi6))
 		die("External interface not usable");
 
+	if (!c->ifi4 && !c->ifi6 && !*c->pasta_ifn) {
+		strncpy(c->pasta_ifn, pasta_default_ifn,
+			sizeof(c->pasta_ifn) - 1);
+	}
 
-	if (!c->ifi4 && !c->ifi6) {
-		info("No external interface as template, switch to local mode");
+	if (!c->ifi4 && !v6_only) {
+		info("IPv4: no external interface as template, use local mode");
 
 		conf_ip4_local(&c->ip4);
 		c->ifi4 = -1;
+	}
+
+	if (!c->ifi6 && !v4_only) {
+		info("IPv6: no external interface as template, use local mode");
 
 		conf_ip6_local(&c->ip6);
 		c->ifi6 = -1;
-
-		if (!*c->pasta_ifn) {
-			strncpy(c->pasta_ifn, pasta_default_ifn,
-				sizeof(c->pasta_ifn) - 1);
-		}
 	}
 
 	if (c->ifi4 && !no_map_gw &&

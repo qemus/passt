@@ -21,6 +21,7 @@ IN="$@"
 
 [ -z "${ARCH}" ] && ARCH="$(uname -m)"
 [ -z "${CC}" ] && CC="cc"
+case "${ARCH}" in i[345]86) ARCH=i686 ;; esac
 
 AUDIT_ARCH="AUDIT_ARCH_$(echo ${ARCH} | tr '[a-z]' '[A-Z]'         \
                                       | sed 's/^ARM.*/ARM/'        \

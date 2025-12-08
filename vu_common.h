@@ -48,7 +48,7 @@ void vu_init_elem(struct vu_virtq_element *elem, struct iovec *iov,
 		  int elem_cnt);
 int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 	       struct vu_virtq_element *elem, int max_elem, size_t size,
-	       size_t *frame_size);
+	       size_t *collected);
 void vu_set_vnethdr(const struct vu_dev *vdev,
 		    struct virtio_net_hdr_mrg_rxbuf *vnethdr,
                     int num_buffers);

@@ -707,7 +707,7 @@ term() {
 
 	tmux set window-status-current-style 'bg=colour1 fg=colour233 bold'
 	tmux set status-right '#(TZ="UTC" date -Iseconds)'
-	tmux set status-right-length 50
+	tmux set status-right-length 64
 	tmux set status-right-style 'bg=colour1 fg=colour233 bold'
 
 	tmux set history-limit 500000

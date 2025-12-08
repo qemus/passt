@@ -166,8 +166,8 @@ By default, assigned IPv4 and IPv6 addresses are taken from the host interfaces
 with the first default route, if any, for the corresponding IP version. If no
 default routes are available and there is any interface with any route for a
 given IP version, the first of these interfaces will be chosen instead. If no
-such interface exists, the link-local address 169.254.2.1 is assigned for IPv4,
-and no additional address will be assigned for IPv6.
+such interface exists for a given IP version, the link-local address 169.254.2.1
+is assigned for IPv4, and no additional address will be assigned for IPv6.
 
 .TP
 .BR \-n ", " \-\-netmask " " \fImask
@@ -194,9 +194,9 @@ first default route, if any, for the corresponding IP version. If the default
 route is a multipath one, the gateway is the first nexthop router returned by
 the kernel which has the highest weight in the set of paths. If no default
 routes are available and there is just one interface with any route, that
-interface will be chosen instead. If no such interface exists, the link-local
-address 169.254.2.2 is used for IPv4, and the link-local address fe80::1 is used
-for IPv6.
+interface will be chosen instead. If no such interface exists for a given IP
+version, the link-local address 169.254.2.2 is used for IPv4, and the link-local
+address fe80::1 is used for IPv6.
 
 Note: these addresses are also used as source address for packets directed to
 the guest or to the target namespace having a loopback or local source address,
@@ -1117,8 +1117,9 @@ throughput of TCP connections.
 .SS Local mode for disconnected setups
 
 If \fBpasst\fR and \fBpasta\fR fail to find a host interface with a configured
-address, other than loopback addresses, they will, obviously, not attempt to
-source addresses or routes from the host.
+address for a given IP version, other than loopback addresses, they will,
+obviously, not attempt to source addresses or routes from the host, for that
+IP version.
 
 In this case, unless configured otherwise, they will assign the IPv4 link-local
 address 169.254.2.1 to the guest or target namespace, and no IPv6 address. The

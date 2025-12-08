@@ -76,13 +76,13 @@ void vu_init_elem(struct vu_virtq_element *elem, struct iovec *iov, int elem_cnt
  * 			in the in_sg array.
  * @max_elem:		Number of virtqueue elements in the array
  * @size:		Maximum size of the data in the frame
- * @frame_size:		The total size of the buffers (output)
+ * @collected:		Collected buffer length, up to @size, set on return
  *
  * Return: number of elements used to contain the frame
  */
 int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 	       struct vu_virtq_element *elem, int max_elem,
-	       size_t size, size_t *frame_size)
+	       size_t size, size_t *collected)
 {
 	size_t current_size = 0;
 	int elem_cnt = 0;
@@ -113,8 +113,8 @@ int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 			break;
 	}
 
-	if (frame_size)
-		*frame_size = current_size;
+	if (collected)
+		*collected = current_size;
 
 	return elem_cnt;
 }
