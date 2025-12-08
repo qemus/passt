@@ -39,6 +39,9 @@
 #include <sys/random.h>
 #endif
 
+/* Zero-filled buffer to pad 802.3 frames, up to 60 (ETH_ZLEN) bytes */
+uint8_t eth_pad[ETH_ZLEN] = { 0 };
+
 /**
  * sock_l4_() - Create and bind socket to socket address
  * @c:		Execution context
@@ -611,6 +614,9 @@ int __daemon(int pidfile_fd, int devnull_fd)
  * fls() - Find last (most significant) bit set in word
  * @x:		Word
  *
+ * Note: unlike ffs() and other implementations of fls(), notably the one from
+ * the Linux kernel, the starting position is 0 and not 1, that is, fls(1) = 0.
+ *
  * Return: position of most significant bit set, starting from 0, -1 if none
  */
 int fls(unsigned long x)
@@ -624,6 +630,17 @@ int fls(unsigned long x)
 		y++;
 
 	return y;
+}
+
+/**
+ * ilog2() - Integral part (floor) of binary logarithm (logarithm to the base 2)
+ * @x:		Argument
+ *
+ * Return: integral part of binary logarithm of @x, -1 if undefined (if @x is 0)
+ */
+int ilog2(unsigned long x)
+{
+	return fls(x);
 }
 
 /**
@@ -1219,4 +1236,42 @@ void fsync_pcap_and_log(void)
 
 	if (log_file != -1)
 		(void)fsync(log_file);
+}
+
+/**
+ * clamped_scale() - Scale @x from 100% to f% depending on @y's value
+ * @x:		Value to scale
+ * @y:		Value determining scaling
+ * @lo:		Lower bound for @y (start of y-axis slope)
+ * @hi:		Upper bound for @y (end of y-axis slope)
+ * @f:		Scaling factor, percent (might be less or more than 100)
+ *
+ * Return: @x scaled by @f * linear interpolation of @y between @lo and @hi
+ *
+ * In pictures:
+ *
+ *                f % -> ,----   * If @y < lo (for example, @y is y0), return @x
+ *                      /|   |
+ *                     / |   |   * If @lo < @y < @hi (for example, @y is y1),
+ *                    /  |   |     return @x scaled by a factor linearly
+ * (100 + f) / 2 % ->/   |   |     interpolated between 100% and f% depending on
+ *                  /|   |   |     @y's position between @lo (100%) and @hi (f%)
+ *                 / |   |   |
+ *                /  |   |   |   * If @y > @hi (for example, @y is y2), return
+ * 100 % -> -----'   |   |   |     @x * @f / 100
+ *           |   |   |   |   |
+ *          y0  lo  y1  hi  y2   Example: @f = 150, @lo = 10, @hi = 20, @y = 15,
+ *                                        @x = 1000
+ *                                        -> interpolated factor is 125%
+ *                                        -> return 1250
+ */
+long clamped_scale(long x, long y, long lo, long hi, long f)
+{
+	if (y < lo)
+		return x;
+
+	if (y > hi)
+		return x * f / 100;
+
+	return x - (x * (y - lo) / (hi - lo)) * (100 - f) / 100;
 }

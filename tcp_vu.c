@@ -91,12 +91,12 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	vu_set_element(&flags_elem[0], NULL, &flags_iov[0]);
 
 	elem_cnt = vu_collect(vdev, vq, &flags_elem[0], 1,
-			      hdrlen + sizeof(struct tcp_syn_opts), NULL);
+			      MAX(hdrlen + sizeof(*opts), ETH_ZLEN), NULL);
 	if (elem_cnt != 1)
 		return -1;
 
 	ASSERT(flags_elem[0].in_sg[0].iov_len >=
-	       hdrlen + sizeof(struct tcp_syn_opts));
+	       MAX(hdrlen + sizeof(*opts), ETH_ZLEN));
 
 	vu_set_vnethdr(vdev, flags_elem[0].in_sg[0].iov_base, 1);
 
@@ -137,6 +137,8 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 
 	tcp_fill_headers(c, conn, NULL, eh, ip4h, ip6h, th, &payload,
 			 NULL, seq, !*c->pcap);
+
+	vu_pad(&flags_elem[0].in_sg[0], hdrlen + optlen);
 
 	if (*c->pcap) {
 		pcap_iov(&flags_elem[0].in_sg[0], 1,
@@ -211,7 +213,8 @@ static ssize_t tcp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq,
 
 		cnt = vu_collect(vdev, vq, &elem[elem_cnt],
 				 VIRTQUEUE_MAX_SIZE - elem_cnt,
-				 MIN(mss, fillsize) + hdrlen, &frame_size);
+				 MAX(MIN(mss, fillsize) + hdrlen, ETH_ZLEN),
+				 &frame_size);
 		if (cnt == 0)
 			break;
 
@@ -254,6 +257,7 @@ static ssize_t tcp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq,
 
 		len -= iov->iov_len;
 	}
+
 	/* adjust head count */
 	while (*head_cnt > 0 && head[*head_cnt - 1] >= i)
 		(*head_cnt)--;
@@ -301,9 +305,9 @@ static void tcp_vu_prepare(const struct ctx *c, struct tcp_tap_conn *conn,
 	struct ethhdr *eh;
 
 	/* we guess the first iovec provided by the guest can embed
-	 * all the headers needed by L2 frame
+	 * all the headers needed by L2 frame, including any padding
 	 */
-	ASSERT(iov[0].iov_len >= hdrlen);
+	ASSERT(iov[0].iov_len >= MAX(hdrlen, ETH_ZLEN));
 
 	eh = vu_eth(base);
 
@@ -455,6 +459,9 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 		previous_dlen = dlen;
 
 		tcp_vu_prepare(c, conn, iov, buf_cnt, &check, !*c->pcap, push);
+
+		/* Pad first/single buffer only, it's at least ETH_ZLEN long */
+		vu_pad(iov, dlen + hdrlen);
 
 		if (*c->pcap) {
 			pcap_iov(iov, buf_cnt,

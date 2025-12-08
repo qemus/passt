@@ -293,3 +293,17 @@ err:
 
 	return -1;
 }
+
+/**
+ * vu_pad() - Pad 802.3 frame to minimum length (60 bytes) if needed
+ * @iov:	Buffer in iovec array where end of 802.3 frame is stored
+ * @l2len:	Layer-2 length already filled in frame
+ */
+void vu_pad(struct iovec *iov, size_t l2len)
+{
+	if (l2len >= ETH_ZLEN)
+		return;
+
+	memset((char *)iov->iov_base + iov->iov_len, 0, ETH_ZLEN - l2len);
+	iov->iov_len += ETH_ZLEN - l2len;
+}

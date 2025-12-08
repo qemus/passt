@@ -164,17 +164,19 @@ udp_meta[UDP_MAX_FRAMES];
 
 /**
  * enum udp_iov_idx - Indices for the buffers making up a single UDP frame
- * @UDP_IOV_TAP         tap specific header
- * @UDP_IOV_ETH         Ethernet header
- * @UDP_IOV_IP          IP (v4/v6) header
- * @UDP_IOV_PAYLOAD     IP payload (UDP header + data)
- * @UDP_NUM_IOVS        the number of entries in the iovec array
+ * @UDP_IOV_TAP		tap specific header
+ * @UDP_IOV_ETH		Ethernet header
+ * @UDP_IOV_IP		IP (v4/v6) header
+ * @UDP_IOV_PAYLOAD	IP payload (UDP header + data)
+ * @UDP_IOV_ETH_PAD	Ethernet (802.3) padding to 60 bytes
+ * @UDP_NUM_IOVS	the number of entries in the iovec array
  */
 enum udp_iov_idx {
 	UDP_IOV_TAP,
 	UDP_IOV_ETH,
 	UDP_IOV_IP,
 	UDP_IOV_PAYLOAD,
+	UDP_IOV_ETH_PAD,
 	UDP_NUM_IOVS,
 };
 
@@ -239,6 +241,7 @@ static void udp_iov_init_one(const struct ctx *c, size_t i)
 	tiov[UDP_IOV_ETH] = IOV_OF_LVALUE(udp_eth_hdr[i]);
 	tiov[UDP_IOV_TAP] = tap_hdr_iov(c, &meta->taph);
 	tiov[UDP_IOV_PAYLOAD].iov_base = payload;
+	tiov[UDP_IOV_ETH_PAD].iov_base = eth_pad;
 
 	mh->msg_iov	= siov;
 	mh->msg_iovlen	= 1;
@@ -345,6 +348,22 @@ size_t udp_update_hdr6(struct ipv6hdr *ip6h, struct udp_payload_t *bp,
 }
 
 /**
+ * udp_tap_pad() - Calculate padding to send out of padding (zero) buffer
+ * @iov:	Pointer to iovec of frame parts we're about to send
+ */
+static void udp_tap_pad(struct iovec *iov)
+{
+	size_t l2len = iov[UDP_IOV_ETH].iov_len +
+		       iov[UDP_IOV_IP].iov_len +
+		       iov[UDP_IOV_PAYLOAD].iov_len;
+
+	if (l2len < ETH_ZLEN)
+		iov[UDP_IOV_ETH_PAD].iov_len = ETH_ZLEN - l2len;
+	else
+		iov[UDP_IOV_ETH_PAD].iov_len = 0;
+}
+
+/**
  * udp_tap_prepare() - Convert one datagram into a tap frame
  * @mmh:	Receiving mmsghdr array
  * @idx:	Index of the datagram to prepare
@@ -362,23 +381,31 @@ static void udp_tap_prepare(const struct mmsghdr *mmh,
 	struct ethhdr *eh = (*tap_iov)[UDP_IOV_ETH].iov_base;
 	struct udp_payload_t *bp = &udp_payload[idx];
 	struct udp_meta_t *bm = &udp_meta[idx];
-	size_t l4len;
+	size_t l4len, l2len;
 
 	eth_update_mac(eh, NULL, tap_omac);
 	if (!inany_v4(&toside->eaddr) || !inany_v4(&toside->oaddr)) {
 		l4len = udp_update_hdr6(&bm->ip6h, bp, toside,
 					mmh[idx].msg_len, no_udp_csum);
-		tap_hdr_update(&bm->taph, l4len + sizeof(bm->ip6h) + ETH_HLEN);
+
+		l2len = MAX(l4len + sizeof(bm->ip6h) + ETH_HLEN, ETH_ZLEN);
+		tap_hdr_update(&bm->taph, l2len);
+
 		eh->h_proto = htons_constant(ETH_P_IPV6);
 		(*tap_iov)[UDP_IOV_IP] = IOV_OF_LVALUE(bm->ip6h);
 	} else {
 		l4len = udp_update_hdr4(&bm->ip4h, bp, toside,
 					mmh[idx].msg_len, no_udp_csum);
-		tap_hdr_update(&bm->taph, l4len + sizeof(bm->ip4h) + ETH_HLEN);
+
+		l2len = MAX(l4len + sizeof(bm->ip4h) + ETH_HLEN, ETH_ZLEN);
+		tap_hdr_update(&bm->taph, l2len);
+
 		eh->h_proto = htons_constant(ETH_P_IP);
 		(*tap_iov)[UDP_IOV_IP] = IOV_OF_LVALUE(bm->ip4h);
 	}
 	(*tap_iov)[UDP_IOV_PAYLOAD].iov_len = l4len;
+
+	udp_tap_pad(*tap_iov);
 }
 
 /**

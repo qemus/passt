@@ -202,9 +202,13 @@
  * - ACT_TIMEOUT, in the presence of any event: if no activity is detected on
  *   either side, the connection is reset
  *
- * - ACK_INTERVAL elapsed after data segment received from tap without having
+ * - RTT / 2 elapsed after data segment received from tap without having
  *   sent an ACK segment, or zero-sized window advertised to tap/guest (flag
- *   ACK_TO_TAP_DUE): forcibly check if an ACK segment can be sent
+ *   ACK_TO_TAP_DUE): forcibly check if an ACK segment can be sent.
+ *
+ *   RTT, here, is an approximation of the RTT value reported by the kernel via
+ *   TCP_INFO, with a representable range from RTT_STORE_MIN (100 us) to
+ *   RTT_STORE_MAX (3276.8 ms). The timeout value is clamped accordingly.
  *
  *
  * Summary of data flows (with ESTABLISHED event)
@@ -341,7 +345,6 @@ enum {
 #define MSS_DEFAULT			536
 #define WINDOW_DEFAULT			14600		/* RFC 6928 */
 
-#define ACK_INTERVAL			10		/* ms */
 #define RTO_INIT			1		/* s, RFC 6298 */
 #define RTO_INIT_AFTER_SYN_RETRIES	3		/* s, RFC 6298 */
 #define FIN_TIMEOUT			60
@@ -349,6 +352,16 @@ enum {
 
 #define LOW_RTT_TABLE_SIZE		8
 #define LOW_RTT_THRESHOLD		10 /* us */
+
+/* Parameters to temporarily exceed sending buffer to force TCP auto-tuning */
+#define SNDBUF_BOOST_BYTES_RTT_LO	2500 /* B * s: no boost until here */
+/* ...examples:  5 MB sent * 500 ns RTT, 250 kB * 10 ms,  8 kB * 300 ms */
+#define SNDBUF_BOOST_FACTOR		150 /* % */
+#define SNDBUF_BOOST_BYTES_RTT_HI	6000 /* apply full boost factor */
+/*		12 MB sent * 500 ns RTT, 600 kB * 10 ms, 20 kB * 300 ms */
+
+/* Ratio of buffer to bandwidth * delay product implying interactive traffic */
+#define SNDBUF_TO_BW_DELAY_INTERACTIVE	/* > */ 20 /* (i.e. < 5% of buffer) */
 
 #define ACK_IF_NEEDED	0		/* See tcp_send_flag() */
 
@@ -423,11 +436,13 @@ socklen_t tcp_info_size;
 	  sizeof(((struct tcp_info_linux *)NULL)->tcpi_##f_)) <= tcp_info_size)
 
 /* Kernel reports sending window in TCP_INFO (kernel commit 8f7baad7f035) */
-#define snd_wnd_cap	tcp_info_cap(snd_wnd)
+#define snd_wnd_cap		tcp_info_cap(snd_wnd)
 /* Kernel reports bytes acked in TCP_INFO (kernel commit 0df48c26d84) */
-#define bytes_acked_cap	tcp_info_cap(bytes_acked)
+#define bytes_acked_cap		tcp_info_cap(bytes_acked)
 /* Kernel reports minimum RTT in TCP_INFO (kernel commit cd9b266095f4) */
-#define min_rtt_cap	tcp_info_cap(min_rtt)
+#define min_rtt_cap		tcp_info_cap(min_rtt)
+/* Kernel reports delivery rate in TCP_INFO (kernel commit eb8329e0a04d) */
+#define delivery_rate_cap	tcp_info_cap(delivery_rate)
 
 /* sendmsg() to socket */
 static struct iovec	tcp_iov			[UIO_MAXIOV];
@@ -593,7 +608,9 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 	}
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
-		it.it_value.tv_nsec = (long)ACK_INTERVAL * 1000 * 1000;
+		it.it_value.tv_sec = RTT_GET(conn) / 2 / ((long)1000 * 1000);
+		it.it_value.tv_nsec = RTT_GET(conn) / 2 % ((long)1000 * 1000) *
+				      1000;
 	} else if (conn->flags & ACK_FROM_TAP_DUE) {
 		int exp = conn->retries, timeout = RTO_INIT;
 		if (!(conn->events & ESTABLISHED))
@@ -608,9 +625,17 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		it.it_value.tv_sec = ACT_TIMEOUT;
 	}
 
-	flow_dbg(conn, "timer expires in %llu.%03llus",
-		 (unsigned long long)it.it_value.tv_sec,
-		 (unsigned long long)it.it_value.tv_nsec / 1000 / 1000);
+	if (conn->flags & ACK_TO_TAP_DUE) {
+		flow_trace(conn, "timer expires in %llu.%03llums",
+			   (unsigned long)it.it_value.tv_sec * 1000 +
+			   (unsigned long long)it.it_value.tv_nsec %
+					       ((long)1000 * 1000),
+			   (unsigned long long)it.it_value.tv_nsec / 1000);
+	} else {
+		flow_dbg(conn, "timer expires in %llu.%03llus",
+			 (unsigned long long)it.it_value.tv_sec,
+			 (unsigned long long)it.it_value.tv_nsec / 1000 / 1000);
+	}
 
 	if (timerfd_settime(conn->timer, 0, &it, NULL))
 		flow_perror(conn, "failed to set timer");
@@ -773,7 +798,7 @@ static void tcp_rtt_dst_check(const struct tcp_tap_conn *conn,
 }
 
 /**
- * tcp_get_sndbuf() - Get, scale SO_SNDBUF between thresholds (1 to 0.5 usage)
+ * tcp_get_sndbuf() - Get, scale SO_SNDBUF between thresholds (1 to 0.75 usage)
  * @conn:	Connection pointer
  */
 static void tcp_get_sndbuf(struct tcp_tap_conn *conn)
@@ -788,11 +813,7 @@ static void tcp_get_sndbuf(struct tcp_tap_conn *conn)
 		return;
 	}
 
-	v = sndbuf;
-	if (v >= SNDBUF_BIG)
-		v /= 2;
-	else if (v > SNDBUF_SMALL)
-		v -= v * (v - SNDBUF_SMALL) / (SNDBUF_BIG - SNDBUF_SMALL) / 2;
+	v = clamped_scale(sndbuf, sndbuf, SNDBUF_SMALL, SNDBUF_BIG, 75);
 
 	SNDBUF_SET(conn, MIN(INT_MAX, v));
 }
@@ -1019,7 +1040,36 @@ void tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 	else
 		tcp_update_csum(psum, th, payload);
 
-	tap_hdr_update(taph, l3len + sizeof(struct ethhdr));
+	tap_hdr_update(taph, MAX(l3len + sizeof(struct ethhdr), ETH_ZLEN));
+}
+
+/**
+ * tcp_sndbuf_boost() - Calculate limit of sending buffer to force auto-tuning
+ * @conn:	Connection pointer
+ * @tinfo:	tcp_info from kernel, must be pre-fetched
+ *
+ * Return: increased sending buffer to use as a limit for advertised window
+ */
+static unsigned long tcp_sndbuf_boost(const struct tcp_tap_conn *conn,
+				      const struct tcp_info_linux *tinfo)
+{
+	unsigned long bytes_rtt_product;
+
+	if (!bytes_acked_cap)
+		return SNDBUF_GET(conn);
+
+	/* This is *not* a bandwidth-delay product, but it's somewhat related:
+	 * as we send more data (usually at the beginning of a connection), we
+	 * try to make the sending buffer progressively grow, with the RTT as a
+	 * factor (longer delay, bigger buffer needed).
+	 */
+	bytes_rtt_product = (long long)tinfo->tcpi_bytes_acked *
+			    tinfo->tcpi_rtt / 1000 / 1000;
+
+	return clamped_scale(SNDBUF_GET(conn), bytes_rtt_product,
+			     SNDBUF_BOOST_BYTES_RTT_LO,
+			     SNDBUF_BOOST_BYTES_RTT_HI,
+			     SNDBUF_BOOST_FACTOR);
 }
 
 /**
@@ -1030,6 +1080,8 @@ void tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
  * @tinfo:	tcp_info from kernel, can be NULL if not pre-fetched
  *
  * Return: 1 if sequence or window were updated, 0 otherwise
+ *
+ * #syscalls ioctl
  */
 int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 			  bool force_seq, struct tcp_info_linux *tinfo)
@@ -1040,6 +1092,7 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	socklen_t sl = sizeof(*tinfo);
 	struct tcp_info_linux tinfo_new;
 	uint32_t new_wnd_to_tap = prev_wnd_to_tap;
+	bool ack_everything = true;
 	int s = conn->sock;
 
 	/* At this point we could ack all the data we've accepted for forwarding
@@ -1049,7 +1102,8 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	 * control behaviour.
 	 *
 	 * For it to be possible and worth it we need:
-	 *  - The TCP_INFO Linux extension which gives us the peer acked bytes
+	 *  - The TCP_INFO Linux extensions which give us the peer acked bytes
+	 *    and the delivery rate (outbound bandwidth at receiver)
 	 *  - Not to be told not to (force_seq)
 	 *  - Not half-closed in the peer->guest direction
 	 *      With no data coming from the peer, we might not get events which
@@ -1059,19 +1113,36 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	 *      Data goes from socket to socket, with nothing meaningfully "in
 	 *      flight".
 	 *  - Not a pseudo-local connection (e.g. to a VM on the same host)
-	 *  - Large enough send buffer
-	 *      In these cases, there's not enough in flight to bother.
+	 *      If it is, there's not enough in flight to bother.
+	 *  - Sending buffer significantly larger than bandwidth * delay product
+	 *      Meaning we're not bandwidth-bound and this is likely to be
+	 *      interactive traffic where we want to preserve transparent
+	 *      connection behaviour and latency.
+	 *
+	 *      Otherwise, we probably want to maximise throughput, which needs
+	 *      sending buffer auto-tuning, triggered in turn by filling up the
+	 *      outbound socket queue.
 	 */
-	if (bytes_acked_cap && !force_seq &&
+	if (bytes_acked_cap && delivery_rate_cap && !force_seq &&
 	    !CONN_IS_CLOSING(conn) &&
-	    !(conn->flags & LOCAL) && !tcp_rtt_dst_low(conn) &&
-	    (unsigned)SNDBUF_GET(conn) >= SNDBUF_SMALL) {
+	    !(conn->flags & LOCAL) && !tcp_rtt_dst_low(conn)) {
 		if (!tinfo) {
 			tinfo = &tinfo_new;
 			if (getsockopt(s, SOL_TCP, TCP_INFO, tinfo, &sl))
 				return 0;
 		}
 
+		if ((unsigned)SNDBUF_GET(conn) > (long long)tinfo->tcpi_rtt *
+						 tinfo->tcpi_delivery_rate /
+						 1000 / 1000 *
+						 SNDBUF_TO_BW_DELAY_INTERACTIVE)
+			ack_everything = false;
+	}
+
+	if (ack_everything) {
+		/* Fall back to acknowledging everything we got */
+		conn->seq_ack_to_tap = conn->seq_from_tap;
+	} else {
 		/* This trips a cppcheck bug in some versions, including
 		 * cppcheck 2.18.3.
 		 * https://sourceforge.net/p/cppcheck/discussion/general/thread/fecde59085/
@@ -1079,9 +1150,6 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 		/* cppcheck-suppress [uninitvar,unmatchedSuppression] */
 		conn->seq_ack_to_tap = tinfo->tcpi_bytes_acked +
 		                       conn->seq_init_from_tap;
-	} else {
-		/* Fall back to acknowledging everything we got */
-		conn->seq_ack_to_tap = conn->seq_from_tap;
 	}
 
 	/* It's occasionally possible for us to go from using the fallback above
@@ -1112,9 +1180,40 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	if ((conn->flags & LOCAL) || tcp_rtt_dst_low(conn)) {
 		new_wnd_to_tap = tinfo->tcpi_snd_wnd;
 	} else {
+		uint32_t sendq;
+		int limit;
+
+		if (ioctl(s, SIOCOUTQ, &sendq)) {
+			debug_perror("SIOCOUTQ on socket %i, assuming 0", s);
+			sendq = 0;
+		}
 		tcp_get_sndbuf(conn);
-		new_wnd_to_tap = MIN((int)tinfo->tcpi_snd_wnd,
-				     SNDBUF_GET(conn));
+
+		if ((int)sendq > SNDBUF_GET(conn)) /* Due to memory pressure? */
+			limit = 0;
+		else if ((int)tinfo->tcpi_snd_wnd > SNDBUF_GET(conn))
+			limit = tcp_sndbuf_boost(conn, tinfo) - (int)sendq;
+		else
+			limit = SNDBUF_GET(conn) - (int)sendq;
+
+		/* If the sender uses mechanisms to prevent Silly Window
+		 * Syndrome (SWS, described in RFC 813 Section 3) it's critical
+		 * that, should the window ever become less than the MSS, we
+		 * advertise a new value once it increases again to be above it.
+		 *
+		 * The mechanism to avoid SWS in the kernel is, implicitly,
+		 * implemented by Nagle's algorithm (which was proposed after
+		 * RFC 813).
+		 *
+		 * To this end, for simplicity, approximate a window value below
+		 * the MSS to zero, as we already have mechanisms in place to
+		 * force updates after the window becomes zero. This matches the
+		 * suggestion from RFC 813, Section 4.
+		 */
+		if (limit < MSS_GET(conn))
+			limit = 0;
+
+		new_wnd_to_tap = MIN((int)tinfo->tcpi_snd_wnd, limit);
 	}
 
 	new_wnd_to_tap = MIN(new_wnd_to_tap, MAX_WINDOW);
@@ -1134,6 +1233,10 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 		conn_flag(c, conn, ACK_TO_TAP_DUE);
 
 out:
+	/* Opportunistically store RTT approximation on valid TCP_INFO data */
+	if (tinfo)
+		RTT_SET(conn, tinfo->tcpi_rtt);
+
 	return new_wnd_to_tap       != prev_wnd_to_tap ||
 	       conn->seq_ack_to_tap != prev_ack_to_tap;
 }
@@ -1255,7 +1358,8 @@ int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
 	th->fin = !!(flags & FIN);
 
 	if (th->ack) {
-		if (SEQ_GE(conn->seq_ack_to_tap, conn->seq_from_tap))
+		if (SEQ_GE(conn->seq_ack_to_tap, conn->seq_from_tap) &&
+		    conn->wnd_to_tap)
 			conn_flag(c, conn, ~ACK_TO_TAP_DUE);
 		else
 			conn_flag(c, conn, ACK_TO_TAP_DUE);
@@ -1916,20 +2020,17 @@ eintr:
 			goto eintr;
 
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			tcp_send_flag(c, conn, ACK_IF_NEEDED);
+			tcp_send_flag(c, conn, ACK | DUP_ACK);
 			return p->count - idx;
 
 		}
 		return -1;
 	}
 
-	if (n < (int)(seq_from_tap - conn->seq_from_tap)) {
+	if (n < (int)(seq_from_tap - conn->seq_from_tap))
 		partial_send = 1;
-		conn->seq_from_tap += n;
-		tcp_send_flag(c, conn, ACK_IF_NEEDED);
-	} else {
-		conn->seq_from_tap += n;
-	}
+
+	conn->seq_from_tap += n;
 
 out:
 	if (keep != -1 || partial_send) {

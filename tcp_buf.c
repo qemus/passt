@@ -96,6 +96,7 @@ void tcp_sock_iov_init(const struct ctx *c)
 		iov[TCP_IOV_TAP] = tap_hdr_iov(c, &tcp_payload_tap_hdr[i]);
 		iov[TCP_IOV_ETH].iov_len = sizeof(struct ethhdr);
 		iov[TCP_IOV_PAYLOAD].iov_base = &tcp_payload[i];
+		iov[TCP_IOV_ETH_PAD].iov_base = eth_pad;
 	}
 }
 
@@ -142,6 +143,22 @@ void tcp_payload_flush(const struct ctx *c)
 			       tcp_payload_used - m);
 	}
 	tcp_payload_used = 0;
+}
+
+/**
+ * tcp_l2_buf_pad() - Calculate padding to send out of padding (zero) buffer
+ * @iov:	Pointer to iovec of frame parts we're about to send
+ */
+static void tcp_l2_buf_pad(struct iovec *iov)
+{
+	size_t l2len = iov[TCP_IOV_ETH].iov_len +
+		       iov[TCP_IOV_IP].iov_len +
+		       iov[TCP_IOV_PAYLOAD].iov_len;
+
+	if (l2len < ETH_ZLEN)
+		iov[TCP_IOV_ETH_PAD].iov_len = ETH_ZLEN - l2len;
+	else
+		iov[TCP_IOV_ETH_PAD].iov_len = 0;
 }
 
 /**
@@ -212,6 +229,8 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	iov[TCP_IOV_PAYLOAD].iov_len = l4len;
 	tcp_l2_buf_fill_headers(c, conn, iov, NULL, seq, false);
 
+	tcp_l2_buf_pad(iov);
+
 	if (flags & DUP_ACK) {
 		struct iovec *dup_iov = tcp_l2_iov[tcp_payload_used];
 		tcp_frame_conns[tcp_payload_used++] = conn;
@@ -223,6 +242,7 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 		memcpy(dup_iov[TCP_IOV_PAYLOAD].iov_base,
 		       iov[TCP_IOV_PAYLOAD].iov_base, l4len);
 		dup_iov[TCP_IOV_PAYLOAD].iov_len = l4len;
+		dup_iov[TCP_IOV_ETH_PAD].iov_len = iov[TCP_IOV_ETH_PAD].iov_len;
 	}
 
 	if (tcp_payload_used > TCP_FRAMES_MEM - 2)
@@ -270,6 +290,9 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 	payload->th.psh = push;
 	iov[TCP_IOV_PAYLOAD].iov_len = dlen + sizeof(struct tcphdr);
 	tcp_l2_buf_fill_headers(c, conn, iov, check, seq, false);
+
+	tcp_l2_buf_pad(iov);
+
 	if (++tcp_payload_used > TCP_FRAMES_MEM - 1)
 		tcp_payload_flush(c);
 }

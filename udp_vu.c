@@ -72,8 +72,8 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 {
 	const struct vu_dev *vdev = c->vdev;
 	int iov_cnt, idx, iov_used;
+	size_t off, hdrlen, l2len;
 	struct msghdr msg  = { 0 };
-	size_t off, hdrlen;
 
 	ASSERT(!c->no_udp);
 
@@ -90,7 +90,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 		return 0;
 
 	/* reserve space for the headers */
-	ASSERT(iov_vu[0].iov_len >= hdrlen);
+	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN));
 	iov_vu[0].iov_base = (char *)iov_vu[0].iov_base + hdrlen;
 	iov_vu[0].iov_len -= hdrlen;
 
@@ -115,6 +115,10 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	if (idx < iov_cnt)
 		iov_vu[idx].iov_len = off;
 	iov_used = idx + !!off;
+
+	/* pad frame to 60 bytes: first buffer is at least ETH_ZLEN long */
+	l2len = *dlen + hdrlen - sizeof(struct virtio_net_hdr_mrg_rxbuf);
+	vu_pad(&iov_vu[0], l2len);
 
 	vu_set_vnethdr(vdev, iov_vu[0].iov_base, iov_used);
 

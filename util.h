@@ -17,6 +17,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <net/ethernet.h>
 
 #include "log.h"
 
@@ -152,6 +153,8 @@ void abort_with_msg(const char *fmt, ...)
 #define ntohll(x)		(be64toh((x)))
 #define htonll(x)		(htobe64((x)))
 
+extern uint8_t eth_pad[ETH_ZLEN];
+
 /**
  * ntohl_unaligned() - Read 32-bit BE value from a possibly unaligned address
  * @p:		Pointer to the BE value in memory
@@ -230,6 +233,7 @@ int output_file_open(const char *path, int flags);
 void pidfile_write(int fd, pid_t pid);
 int __daemon(int pidfile_fd, int devnull_fd);
 int fls(unsigned long x);
+int ilog2(unsigned long x);
 int write_file(const char *path, const char *buf);
 intmax_t read_file_integer(const char *path, intmax_t fallback);
 int write_all_buf(int fd, const void *buf, size_t len);
@@ -239,6 +243,7 @@ int read_remainder(int fd, const struct iovec *iov, size_t cnt, size_t skip);
 void close_open_files(int argc, char **argv);
 bool snprintf_check(char *str, size_t size, const char *format, ...);
 void fsync_pcap_and_log(void);
+long clamped_scale(long x, long y, long lo, long hi, long f);
 
 /**
  * af_name() - Return name of an address family

@@ -130,9 +130,18 @@ unsigned long tap_l2_max_len(const struct ctx *c)
  */
 void tap_send_single(const struct ctx *c, const void *data, size_t l2len)
 {
-	uint32_t vnet_len = htonl(l2len);
+	uint8_t padded[ETH_ZLEN] = { 0 };
 	struct iovec iov[2];
 	size_t iovcnt = 0;
+	uint32_t vnet_len;
+
+	if (l2len < ETH_ZLEN) {
+		memcpy(padded, data, l2len);
+		data = padded;
+		l2len = ETH_ZLEN;
+	}
+
+	vnet_len = htonl(l2len);
 
 	switch (c->mode) {
 	case MODE_PASST:

@@ -37,7 +37,7 @@ requiring any capabilities or privileges.
 %package		    selinux
 BuildArch:		    noarch
 Summary:		    SELinux support for passt and pasta
-%if 0%{?fedora} >= 43
+%if 0%{?fedora} > 43
 BuildRequires:      selinux-policy-devel
 %selinux_requires_min
 %else

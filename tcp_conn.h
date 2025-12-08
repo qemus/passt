@@ -49,6 +49,15 @@ struct tcp_tap_conn {
 #define MSS_SET(conn, mss)	(conn->tap_mss = (mss >> (16 - TCP_MSS_BITS)))
 #define MSS_GET(conn)		(conn->tap_mss << (16 - TCP_MSS_BITS))
 
+#define RTT_EXP_BITS			4
+	unsigned int	rtt_exp		:RTT_EXP_BITS;
+#define RTT_EXP_MAX			MAX_FROM_BITS(RTT_EXP_BITS)
+#define RTT_STORE_MIN			100 /* us, minimum representable */
+#define RTT_STORE_MAX			((long)(RTT_STORE_MIN << RTT_EXP_MAX))
+#define RTT_SET(conn, rtt)						\
+	(conn->rtt_exp = MIN(RTT_EXP_MAX, ilog2(MAX(1, rtt / RTT_STORE_MIN))))
+#define RTT_GET(conn)			(RTT_STORE_MIN << conn->rtt_exp)
+
 	int		sock		:FD_REF_BITS;
 
 	uint8_t		events;
