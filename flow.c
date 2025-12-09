@@ -359,7 +359,12 @@ bool flow_in_epoll(const struct flow_common *f)
  */
 int flow_epollfd(const struct flow_common *f)
 {
-	ASSERT(f->epollid < EPOLLFD_ID_MAX);
+	if (f->epollid >= EPOLLFD_ID_MAX) {
+		flow_log_(f, true, LOG_WARNING,
+			  "Invalid epollid %i for flow, assuming default",
+			  f->epollid);
+		return epoll_id_to_fd[EPOLLFD_ID_DEFAULT];
+	}
 
 	return epoll_id_to_fd[f->epollid];
 }
