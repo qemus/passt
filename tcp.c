@@ -626,11 +626,11 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 	}
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
-		flow_trace(conn, "timer expires in %llu.%03llums",
-			   (unsigned long)it.it_value.tv_sec * 1000 +
-			   (unsigned long long)it.it_value.tv_nsec %
-					       ((long)1000 * 1000),
-			   (unsigned long long)it.it_value.tv_nsec / 1000);
+		flow_trace(conn, "timer expires in %llu.%02llums",
+			   (unsigned long long)it.it_value.tv_sec * 1000 +
+			   it.it_value.tv_nsec / 1000 / 1000,
+			   (unsigned long long)it.it_value.tv_nsec
+			   / 1000 / 10 % 100);
 	} else {
 		flow_dbg(conn, "timer expires in %llu.%03llus",
 			 (unsigned long long)it.it_value.tv_sec,

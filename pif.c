@@ -50,10 +50,14 @@ void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
 		sa->sa_family = AF_INET6;
 		sa->sa6.sin6_addr = addr->a6;
 		sa->sa6.sin6_port = htons(port);
-		if (pif == PIF_HOST && IN6_IS_ADDR_LINKLOCAL(&addr->a6))
-			sa->sa6.sin6_scope_id = c->ifi6;
-		else
+		if (IN6_IS_ADDR_LINKLOCAL(&addr->a6)) {
+			if (pif == PIF_HOST)
+				sa->sa6.sin6_scope_id = c->ifi6;
+			else if (pif == PIF_SPLICE)
+				sa->sa6.sin6_scope_id = c->pasta_ifi;
+		} else {
 			sa->sa6.sin6_scope_id = 0;
+		}
 		sa->sa6.sin6_flowinfo = 0;
 	}
 }
