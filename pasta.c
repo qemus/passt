@@ -40,6 +40,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <net/ethernet.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <linux/magic.h>
 
@@ -70,15 +71,13 @@ void pasta_child_handler(int signal)
 	if (pasta_child_pid &&
 	    !waitid(P_PID, pasta_child_pid, &infop, WEXITED | WNOHANG)) {
 		if (infop.si_pid == pasta_child_pid) {
-			fsync_pcap_and_log();
-
 			if (infop.si_code == CLD_EXITED)
-				_exit(infop.si_status);
+				passt_exit(infop.si_status);
 
 			/* If killed by a signal, si_status is the number.
 			 * Follow common shell convention of returning it + 128.
 			 */
-			_exit(infop.si_status + 128);
+			passt_exit(infop.si_status + 128);
 
 			/* Nothing to do, detached PID namespace going away */
 		}
@@ -191,6 +190,10 @@ static int pasta_spawn_cmd(void *arg)
 	size_t conf_hostname_len;
 	sigset_t set;
 
+	/* If the parent dies with an error, so should we */
+	if (prctl(PR_SET_PDEATHSIG, SIGKILL))
+		die_perror("Couldn't set PR_SET_PDEATHSIG");
+
 	/* We run in a detached PID and mount namespace: mount /proc over */
 	if (mount("", "/proc", "proc", 0, NULL))
 		warn_perror("Couldn't mount /proc");
@@ -216,6 +219,12 @@ static int pasta_spawn_cmd(void *arg)
 	sigemptyset(&set);
 	sigaddset(&set, SIGUSR1);
 	sigwaitinfo(&set, NULL);
+
+	/* Once exec()ed this process is more valuable, and easier to see and
+	 * clean up.  Let us outlive our parent now.
+	 */
+	if (prctl(PR_SET_PDEATHSIG, 0))
+		die_perror("Couldn't clear PR_SET_PDEATHSIG");
 
 	execvp(a->exe, a->argv);
 
@@ -511,7 +520,7 @@ void pasta_netns_quit_inotify_handler(struct ctx *c, int inotify_fd)
 
 		if (!strncmp(ev->name, c->netns_base, sizeof(c->netns_base))) {
 			info("Namespace %s is gone, exiting", c->netns_base);
-			_exit(EXIT_SUCCESS);
+			passt_exit(EXIT_SUCCESS);
 		}
 	}
 }
@@ -539,7 +548,7 @@ void pasta_netns_quit_timer_handler(struct ctx *c, union epoll_ref ref)
 			return;
 
 		info("Namespace %s is gone, exiting", c->netns_base);
-		_exit(EXIT_SUCCESS);
+		passt_exit(EXIT_SUCCESS);
 	}
 
 	close(fd);

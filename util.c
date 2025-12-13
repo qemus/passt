@@ -35,6 +35,7 @@
 #include "log.h"
 #include "pcap.h"
 #include "epoll_ctl.h"
+#include "pasta.h"
 #ifdef HAS_GETRANDOM
 #include <sys/random.h>
 #endif
@@ -555,7 +556,7 @@ void pidfile_write(int fd, pid_t pid)
 
 	if (write(fd, pid_buf, n) < 0) {
 		perror("PID file write");
-		_exit(EXIT_FAILURE);
+		passt_exit(EXIT_FAILURE);
 	}
 
 	close(fd);
@@ -592,12 +593,12 @@ int __daemon(int pidfile_fd, int devnull_fd)
 
 	if (pid == -1) {
 		perror("fork");
-		_exit(EXIT_FAILURE);
+		passt_exit(EXIT_FAILURE);
 	}
 
 	if (pid) {
 		pidfile_write(pidfile_fd, pid);
-		_exit(EXIT_SUCCESS);
+		passt_exit(EXIT_SUCCESS);
 	}
 
 	if (setsid()				< 0 ||
@@ -605,7 +606,7 @@ int __daemon(int pidfile_fd, int devnull_fd)
 	    dup2(devnull_fd, STDOUT_FILENO)	< 0 ||
 	    dup2(devnull_fd, STDERR_FILENO)	< 0 ||
 	    close(devnull_fd))
-		_exit(EXIT_FAILURE);
+		passt_exit(EXIT_FAILURE);
 
 	return 0;
 }
@@ -1225,17 +1226,29 @@ void abort_with_msg(const char *fmt, ...)
 }
 
 /**
- * fsync_pcap_and_log() - Flush pcap and log files as needed
+ * passt_exit() - Perform vital cleanup and exit
+ *
+ * We don't use exit(3) because on some C library versions it can do unexpected
+ * things that hit our seccomp profile (e.g. futex() calls).  This is a bespoke
+ * wrapper around _exit(2) performing just the cleanup that we need.
  *
  * #syscalls fsync
  */
-void fsync_pcap_and_log(void)
+void passt_exit(int status)
 {
+	/* Make sure we don't leave the pcap file truncated */
 	if (pcap_fd != -1 && fsync(pcap_fd))
 		warn_perror("Failed to flush pcap file, it might be truncated");
 
+	/* Make sure we don't leave an incomplete log */
 	if (log_file != -1)
 		(void)fsync(log_file);
+
+	/* Make sure we don't leave any messages incomplete */
+	(void)fflush(stderr);
+	(void)fflush(stdout);
+	
+	_exit(status);
 }
 
 /**

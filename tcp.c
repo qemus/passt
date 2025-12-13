@@ -1132,6 +1132,11 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 				return 0;
 		}
 
+		/* This trips a cppcheck bug in some versions, including
+		 * cppcheck 2.18.3.
+		 * https://trac.cppcheck.net/ticket/14191
+		 */
+		/* cppcheck-suppress [uninitvar,unmatchedSuppression] */
 		if ((unsigned)SNDBUF_GET(conn) > (long long)tinfo->tcpi_rtt *
 						 tinfo->tcpi_delivery_rate /
 						 1000 / 1000 *
@@ -1143,10 +1148,7 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 		/* Fall back to acknowledging everything we got */
 		conn->seq_ack_to_tap = conn->seq_from_tap;
 	} else {
-		/* This trips a cppcheck bug in some versions, including
-		 * cppcheck 2.18.3.
-		 * https://sourceforge.net/p/cppcheck/discussion/general/thread/fecde59085/
-		 */
+		/* cppcheck bug 14191 again, see above */
 		/* cppcheck-suppress [uninitvar,unmatchedSuppression] */
 		conn->seq_ack_to_tap = tinfo->tcpi_bytes_acked +
 		                       conn->seq_init_from_tap;
@@ -2948,7 +2950,7 @@ int tcp_init(struct ctx *c)
 	tcp_info_size = tcp_probe_tcp_info();
 
 #define dbg_tcpi(f_)	debug("TCP_INFO tcpi_%s field%s supported",	\
-			      STRINGIFY(f_), tcp_info_cap(f_) ? " " : " not ")
+			      STRINGIFY(f_), tcp_info_cap(f_) ? "" : " not")
 	dbg_tcpi(snd_wnd);
 	dbg_tcpi(bytes_acked);
 	dbg_tcpi(min_rtt);

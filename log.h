@@ -9,6 +9,11 @@
 #include <stdbool.h>
 #include <syslog.h>
 
+/* This would make more sense in util.h, but because we use it in die(), that
+ * would cause awkward circular reference problems.
+ */
+void passt_exit(int status) __attribute__((noreturn));
+
 #define LOGFILE_SIZE_DEFAULT		(1024 * 1024UL)
 #define LOGFILE_CUT_RATIO		30	/* When full, cut ~30% size */
 #define LOGFILE_SIZE_MIN		(5UL * MAX(BUFSIZ, PAGE_SIZE))
@@ -32,13 +37,13 @@ void logmsg_perror(int pri, const char *format, ...)
 #define die(...)							\
 	do {								\
 		err(__VA_ARGS__);					\
-		_exit(EXIT_FAILURE);					\
+		passt_exit(EXIT_FAILURE);				\
 	} while (0)
 
 #define die_perror(...)							\
 	do {								\
 		err_perror(__VA_ARGS__);				\
-		_exit(EXIT_FAILURE);					\
+		passt_exit(EXIT_FAILURE);				\
 	} while (0)
 
 extern int log_file;

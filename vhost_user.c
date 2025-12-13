@@ -60,7 +60,7 @@ void vu_print_capabilities(void)
 	info("{");
 	info("  \"type\": \"net\"");
 	info("}");
-	_exit(EXIT_SUCCESS);
+	passt_exit(EXIT_SUCCESS);
 }
 
 /**
@@ -1202,7 +1202,7 @@ void vu_control_handler(struct vu_dev *vdev, int fd, uint32_t events)
 	    !vdev->context->migrate_target) {
 		if (vdev->context->migrate_exit) {
 			info("Migration complete, exiting");
-			_exit(EXIT_SUCCESS);
+			passt_exit(EXIT_SUCCESS);
 		}
 
 		info("Migration complete");
