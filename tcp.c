@@ -1211,8 +1211,21 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 		 * the MSS to zero, as we already have mechanisms in place to
 		 * force updates after the window becomes zero. This matches the
 		 * suggestion from RFC 813, Section 4.
+		 *
+		 * But don't do this if, either:
+		 *
+		 * - there's nothing in the outbound queue: the size of the
+		 *   sending buffer is limiting us, and it won't increase if we
+		 *   don't send data, so there's no point in waiting, or
+		 *
+		 * - we haven't sent data in a while (somewhat arbitrarily, ten
+		 *   times the RTT), as that might indicate that the receiver
+		 *   will only process data in batches that are large enough,
+		 *   but we won't send enough to fill one because we're stuck
+		 *   with pending data in the outbound queue
 		 */
-		if (limit < MSS_GET(conn))
+		if (limit < MSS_GET(conn) && sendq &&
+		    tinfo->tcpi_last_data_sent < tinfo->tcpi_rtt / 1000 * 10)
 			limit = 0;
 
 		new_wnd_to_tap = MIN((int)tinfo->tcpi_snd_wnd, limit);
