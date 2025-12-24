@@ -149,7 +149,7 @@ allow pasta_t root_t:dir mounton;
 manage_files_pattern(pasta_t, pasta_pid_t, pasta_pid_t)
 files_pid_filetrans(pasta_t, pasta_pid_t, file)
 
-allow pasta_t user_tmp_t:dir { add_name remove_name search write };
+allow pasta_t user_tmp_t:dir { add_name read remove_name search watch write };
 allow pasta_t user_tmp_t:fifo_file append;
 allow pasta_t user_tmp_t:file { create open write };
 allow pasta_t user_tmp_t:sock_file { create unlink };

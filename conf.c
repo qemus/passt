@@ -175,9 +175,9 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 		fwd->delta[i] = to - first;
 
 		if (optname == 't')
-			ret = tcp_sock_init(c, PIF_HOST, addr, ifname, i);
+			ret = tcp_listen(c, PIF_HOST, addr, ifname, i);
 		else if (optname == 'u')
-			ret = udp_sock_init(c, PIF_HOST, addr, ifname, i);
+			ret = udp_listen(c, PIF_HOST, addr, ifname, i);
 		else
 			/* No way to check in advance for -T and -U */
 			ret = 0;

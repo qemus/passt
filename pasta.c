@@ -348,6 +348,12 @@ void pasta_ns_conf(struct ctx *c)
 						 AF_INET);
 			}
 
+			if (c->ifi4 == -1 && rc == -ENOTSUP) {
+				warn("IPv4 not supported, disabling");
+				c->ifi4 = 0;
+				goto ipv4_done;
+			}
+
 			if (rc < 0) {
 				die("Couldn't set IPv4 address(es) in namespace: %s",
 				    strerror_(-rc));
@@ -367,6 +373,7 @@ void pasta_ns_conf(struct ctx *c)
 				    strerror_(-rc));
 			}
 		}
+ipv4_done:
 
 		if (c->ifi6) {
 			rc = nl_addr_get_ll(nl_sock_ns, c->pasta_ifi,
@@ -413,12 +420,19 @@ void pasta_ns_conf(struct ctx *c)
 						  AF_INET6);
 			}
 
+			if (c->ifi6 == -1 && rc == -ENOTSUP) {
+				warn("IPv6 not supported, disabling");
+				c->ifi6 = 0;
+				goto ipv6_done;
+			}
+
 			if (rc < 0) {
 				die("Couldn't set IPv6 route(s) in guest: %s",
 				    strerror_(-rc));
 			}
 		}
 	}
+ipv6_done:
 
 	proto_update_l2_buf(c->guest_mac);
 }

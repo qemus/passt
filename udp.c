@@ -1129,7 +1129,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 }
 
 /**
- * udp_sock_init() - Initialise listening socket for a given port
+ * udp_listen() - Initialise listening socket for a given port
  * @c:		Execution context
  * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
  * @addr:	Pointer to address for binding, NULL if not configured
@@ -1138,9 +1138,8 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
  *
  * Return: 0 on success, negative error code on failure
  */
-int udp_sock_init(const struct ctx *c, uint8_t pif,
-		  const union inany_addr *addr, const char *ifname,
-		  in_port_t port)
+int udp_listen(const struct ctx *c, uint8_t pif,
+	       const union inany_addr *addr, const char *ifname, in_port_t port)
 {
 	union udp_listen_epoll_ref uref = {
 		.pif = pif,
@@ -1150,12 +1149,13 @@ int udp_sock_init(const struct ctx *c, uint8_t pif,
 	int s;
 
 	ASSERT(!c->no_udp);
-	ASSERT(pif_is_socket(pif));
 
-	if (pif == PIF_HOST)
+	if (pif == PIF_HOST) {
 		socks = udp_splice_init;
-	else
+	} else {
+		ASSERT(pif == PIF_SPLICE);
 		socks = udp_splice_ns;
+	}
 
 	if (!c->ifi4) {
 		if (!addr)
@@ -1176,10 +1176,6 @@ int udp_sock_init(const struct ctx *c, uint8_t pif,
 
 	s = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, pif,
 			addr, ifname, port, uref.u32);
-	if (s > FD_REF_MAX) {
-		close(s);
-		s = -EIO;
-	}
 
 	if (!addr || inany_v4(addr))
 		socks[V4][port] = s < 0 ? -1 : s;
@@ -1210,23 +1206,23 @@ static void udp_splice_iov_init(void)
 }
 
 /**
- * udp_ns_sock_init() - Init socket to listen for spliced outbound connections
+ * udp_ns_listen() - Init socket to listen for spliced outbound connections
  * @c:		Execution context
  * @port:	Port, host order
  */
-static void udp_ns_sock_init(const struct ctx *c, in_port_t port)
+static void udp_ns_listen(const struct ctx *c, in_port_t port)
 {
 	ASSERT(!c->no_udp);
 
 	if (!c->no_bindtodevice) {
-		udp_sock_init(c, PIF_SPLICE, NULL, "lo", port);
+		udp_listen(c, PIF_SPLICE, NULL, "lo", port);
 		return;
 	}
 
 	if (c->ifi4)
-		udp_sock_init(c, PIF_SPLICE, &inany_loopback4, NULL, port);
+		udp_listen(c, PIF_SPLICE, &inany_loopback4, NULL, port);
 	if (c->ifi6)
-		udp_sock_init(c, PIF_SPLICE, &inany_loopback6, NULL, port);
+		udp_listen(c, PIF_SPLICE, &inany_loopback6, NULL, port);
 }
 
 /**
@@ -1261,9 +1257,9 @@ static void udp_port_rebind(struct ctx *c, bool outbound)
 		if ((c->ifi4 && socks[V4][port] == -1) ||
 		    (c->ifi6 && socks[V6][port] == -1)) {
 			if (outbound)
-				udp_ns_sock_init(c, port);
+				udp_ns_listen(c, port);
 			else
-				udp_sock_init(c, PIF_HOST, NULL, NULL, port);
+				udp_listen(c, PIF_HOST, NULL, NULL, port);
 		}
 	}
 }
