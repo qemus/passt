@@ -2,7 +2,9 @@ name: Build
 
 on:
   workflow_dispatch:
-
+  schedule:
+    - cron: '30 0 * * *'
+    
 concurrency:
   group: build
   cancel-in-progress: false
