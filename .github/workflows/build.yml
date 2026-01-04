@@ -26,20 +26,25 @@ jobs:
         run: |
           #!/bin/bash
           set -eu
-          git ls-remote --tags https://passt.top/passt >/dev/null
-          latest_branch=$(git ls-remote --tags --refs --sort="v:refname" https://passt.top/passt | tail -n1 | sed 's/.*\///' )
-          latest_tag="${latest_branch%%.*}"
-          echo "Found tag: \"${latest_tag}\"" 
-          echo "latest_tag=$latest_tag" >> $GITHUB_ENV
-          echo "latest_branch=$latest_branch" >> $GITHUB_ENV
+          echo "exists=true" >> $GITHUB_ENV
+          if git ls-remote --tags https://passt.top/passt >/dev/null; then
+            echo "exists=false" >> $GITHUB_ENV
+            latest_branch=$(git ls-remote --tags --refs --sort="v:refname" https://passt.top/passt | tail -n1 | sed 's/.*\///' )
+            latest_tag="${latest_branch%%.*}"
+            echo "Found tag: \"${latest_tag}\"" 
+            echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+            echo "latest_branch=$latest_branch" >> $GITHUB_ENV
+          fi
       - 
         name: Check if the tag exists locally
+        if: env.exists == 'false'
         uses: action-pack/tag-exists@v1
         id: checkTag
         with: 
           tag: 'v${{ env.latest_tag }}'
       -
         name: Finish when found
+        if: env.exists == 'false'
         run: |
           #!/bin/bash
           set -eu
