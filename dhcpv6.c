@@ -425,7 +425,9 @@ static size_t dhcpv6_dns_fill(const struct ctx *c, char *buf, int offset)
 	if (c->no_dhcp_dns)
 		goto search;
 
-	for (i = 0; !IN6_IS_ADDR_UNSPECIFIED(&c->ip6.dns[i]); i++) {
+	for (i = 0; i < ARRAY_SIZE(c->ip6.dns); i++) {
+		if (IN6_IS_ADDR_UNSPECIFIED(&c->ip6.dns[i]))
+			break;
 		if (!i) {
 			srv = (struct opt_dns_servers *)(buf + offset);
 			offset += sizeof(struct opt_hdr);

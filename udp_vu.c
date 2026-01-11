@@ -65,7 +65,8 @@ static size_t udp_vu_hdrlen(bool v6)
  * @v6:		Set for IPv6 connections
  * @dlen:	Size of received data (output)
  *
- * Return: number of iov entries used to store the datagram
+ * Return: number of iov entries used to store the datagram, 0 if the datagram
+ *         was discarded because the virtqueue is not ready, -1 on error
  */
 static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 			    bool v6, ssize_t *dlen)
@@ -77,6 +78,15 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 
 	ASSERT(!c->no_udp);
 
+	if (!vu_queue_enabled(vq) || !vu_queue_started(vq)) {
+		debug("Got UDP packet, but RX virtqueue not usable yet");
+
+		if (recvmsg(s, &msg, MSG_DONTWAIT) < 0)
+			debug_perror("Failed to discard datagram");
+
+		return 0;
+	}
+
 	/* compute L2 header length */
 	hdrlen = udp_vu_hdrlen(v6);
 
@@ -87,7 +97,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 			     sizeof(struct virtio_net_hdr_mrg_rxbuf),
 			     NULL);
 	if (iov_cnt == 0)
-		return 0;
+		return -1;
 
 	/* reserve space for the headers */
 	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN));
@@ -101,7 +111,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	*dlen = recvmsg(s, &msg, 0);
 	if (*dlen < 0) {
 		vu_queue_rewind(vq, iov_cnt);
-		return 0;
+		return -1;
 	}
 
 	/* restore the pointer to the headers address */
@@ -216,15 +226,17 @@ void udp_vu_sock_to_tap(const struct ctx *c, int s, int n, flow_sidx_t tosidx)
 		int iov_used;
 
 		iov_used = udp_vu_sock_recv(c, vq, s, v6, &dlen);
-		if (iov_used <= 0)
+		if (iov_used < 0)
 			break;
 
-		udp_vu_prepare(c, toside, dlen);
-		if (*c->pcap) {
-			udp_vu_csum(toside, iov_used);
-			pcap_iov(iov_vu, iov_used,
-				 sizeof(struct virtio_net_hdr_mrg_rxbuf));
+		if (iov_used > 0) {
+			udp_vu_prepare(c, toside, dlen);
+			if (*c->pcap) {
+				udp_vu_csum(toside, iov_used);
+				pcap_iov(iov_vu, iov_used,
+					sizeof(struct virtio_net_hdr_mrg_rxbuf));
+			}
+			vu_flush(vdev, vq, elem, iov_used);
 		}
-		vu_flush(vdev, vq, elem, iov_used);
 	}
 }

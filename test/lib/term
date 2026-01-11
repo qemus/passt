@@ -203,7 +203,7 @@ pane_wait() {
 
 	__done=0
 	while
-		__l="$(tail -1 ${LOGDIR}/pane_${__lc}.log | sed 's/[[][^a-zA-Z]*[a-zA-Z]//g')"
+		__l="$(tail -1 ${LOGDIR}/pane_${__lc}.log | sed 's/[[][^a-zA-Z]*[a-zA-Z]//g;s/[]][^]*[\]//g')"
 		case ${__l} in
 		*"$ " | *"# ") return ;;
 		esac
@@ -215,7 +215,7 @@ pane_wait() {
 pane_parse() {
 	__pane_lc="$(echo "${1}" | tr [A-Z] [a-z])"
 
-	__buf="$(tail -n2 ${LOGDIR}/pane_${__pane_lc}.log | head -n1 | sed 's/^[^\r]*\r\([^\r]\)/\1/' | tr -d '\r\n')"
+	__buf="$(tail -n2 ${LOGDIR}/pane_${__pane_lc}.log | head -n1 | sed 's/^[^\r]*\r\([^\r]\)/\1/;s/[]][^]*[\]//g' | tr -d '\r\n')"
 
 	[ "# $(eval printf '%s' \"\$${1}_LAST_CMD\")" != "${__buf}" ] && \
 	[ "$ $(eval printf '%s' \"\$${1}_LAST_CMD\")" != "${__buf}" ] &&

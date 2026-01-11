@@ -123,7 +123,6 @@ static const struct migrate_version versions[] = {
 	 * MSS and omitted timestamps, which meant it usually wouldn't work.
 	 * Therefore we don't attempt to support compatibility with it.
 	 */
-	{ 0 },
 };
 
 /* Current encoding version */
@@ -177,9 +176,9 @@ static int migrate_source(struct ctx *c, int fd)
  */
 static const struct migrate_version *migrate_target_read_header(int fd)
 {
-	const struct migrate_version *v;
 	struct migrate_header h;
 	uint32_t id, compat_id;
+	unsigned i;
 
 	if (read_all_buf(fd, &h, sizeof(h)))
 		return NULL;
@@ -196,9 +195,9 @@ static const struct migrate_version *migrate_target_read_header(int fd)
 		return NULL;
 	}
 
-	for (v = versions; v->id; v++)
-		if (v->id <= id && v->id >= compat_id)
-			return v;
+	for (i = 0; i < ARRAY_SIZE(versions); i++)
+		if (versions[i].id <= id && versions[i].id >= compat_id)
+			return &versions[i];
 
 	errno = ENOTSUP;
 	err("Unsupported device state version: %u", id);

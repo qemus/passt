@@ -16,6 +16,19 @@ struct flowside;
 void fwd_probe_ephemeral(void);
 bool fwd_port_is_ephemeral(in_port_t port);
 
+/**
+ * union fwd_listen_ref - information about a single listening socket
+ * @port:	Bound port number of the socket
+ * @pif:	pif in which the socket is listening
+ */
+union fwd_listen_ref {
+	struct {
+		in_port_t	port;
+		uint8_t		pif;
+	};
+	uint32_t u32;
+};
+
 enum fwd_ports_mode {
 	FWD_UNSET = 0,
 	FWD_SPEC = 1,

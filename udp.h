@@ -23,21 +23,6 @@ void udp_port_rebind_all(struct ctx *c);
 void udp_update_l2_buf(const unsigned char *eth_d);
 
 /**
- * union udp_listen_epoll_ref - epoll reference for "listening" UDP sockets
- * @port:		Source port for connected sockets, bound port otherwise
- * @pif:		pif for this socket
- * @u32:		Opaque u32 value of reference
- */
-union udp_listen_epoll_ref {
-	struct {
-		in_port_t	port;
-		uint8_t		pif;
-	};
-	uint32_t u32;
-};
-
-
-/**
  * struct udp_ctx - Execution context for UDP
  * @fwd_in:		Port forwarding configuration for inbound packets
  * @fwd_out:		Port forwarding configuration for outbound packets

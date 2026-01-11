@@ -74,7 +74,7 @@ enum passt_modes {
  *                      host's 127.0.0.1
  * @map_guest_addr:	Outbound connections to this address are NATted to the
  *                      guest's assigned address
- * @dns:		DNS addresses for DHCP, zero-terminated
+ * @dns:		DNS addresses for DHCP
  * @dns_match:		Forward DNS query if sent to this address
  * @our_tap_addr:	IPv4 address for passt's use on tap
  * @dns_host:		Use this DNS on the host for forwarding
@@ -91,7 +91,7 @@ struct ip4_ctx {
 	struct in_addr guest_gw;
 	struct in_addr map_host_loopback;
 	struct in_addr map_guest_addr;
-	struct in_addr dns[MAXNS + 1];
+	struct in_addr dns[MAXNS];
 	struct in_addr dns_match;
 	struct in_addr our_tap_addr;
 
@@ -115,7 +115,7 @@ struct ip4_ctx {
  *                      host's [::1]
  * @map_guest_addr:	Outbound connections to this address are NATted to the
  *                      guest's assigned address
- * @dns:		DNS addresses for DHCPv6 and NDP, zero-terminated
+ * @dns:		DNS addresses for DHCPv6 and NDP
  * @dns_match:		Forward DNS query if sent to this address
  * @our_tap_ll:		Link-local IPv6 address for passt's use on tap
  * @dns_host:		Use this DNS on the host for forwarding
@@ -132,7 +132,7 @@ struct ip6_ctx {
 	struct in6_addr guest_gw;
 	struct in6_addr map_host_loopback;
 	struct in6_addr map_guest_addr;
-	struct in6_addr dns[MAXNS + 1];
+	struct in6_addr dns[MAXNS];
 	struct in6_addr dns_match;
 	struct in6_addr our_tap_ll;
 

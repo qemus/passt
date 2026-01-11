@@ -715,7 +715,7 @@ static ssize_t read_file(const char *path, char *buf, size_t buf_size)
 
 	close(fd);
 
-	if (total_read == buf_size) {
+	if (total_read >= buf_size) {
 		buf[buf_size - 1] = '\0';
 		return -ENOBUFS;
 	}

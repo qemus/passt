@@ -430,7 +430,9 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	}
 
 	for (i = 0, opts[6].slen = 0;
-	     !c->no_dhcp_dns && !IN4_IS_ADDR_UNSPECIFIED(&c->ip4.dns[i]); i++) {
+	     !c->no_dhcp_dns && i < ARRAY_SIZE(c->ip4.dns); i++) {
+		if (IN4_IS_ADDR_UNSPECIFIED(&c->ip4.dns[i]))
+			break;
 		((struct in_addr *)opts[6].s)[i] = c->ip4.dns[i];
 		opts[6].slen += sizeof(uint32_t);
 	}

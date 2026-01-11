@@ -36,6 +36,10 @@
 
   @{PROC}/sys/net/ipv4/ip_local_port_range r,	# fwd_probe_ephemeral()
 
+  @{PROC}/sys/net/ipv4/tcp_syn_retries r,	# tcp_get_rto_params(), tcp.c
+  @{PROC}/sys/net/ipv4/tcp_syn_linear_timeouts r,
+  @{PROC}/sys/net/ipv4/tcp_rto_max_ms r,
+
   network netlink raw,				# nl_sock_init_do(), netlink.c
 
   network inet stream,				# tcp.c

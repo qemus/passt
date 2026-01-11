@@ -285,7 +285,9 @@ static void ndp_ra(const struct ctx *c, const struct in6_addr *dst)
 		size_t dns_s_len = 0;
 		int i, n;
 
-		for (n = 0; !IN6_IS_ADDR_UNSPECIFIED(&c->ip6.dns[n]); n++);
+		for (n = 0; n < ARRAY_SIZE(c->ip6.dns); n++)
+			if (IN6_IS_ADDR_UNSPECIFIED(&c->ip6.dns[n]))
+				break;
 		if (n) {
 			struct opt_rdnss *rdnss = (struct opt_rdnss *)ptr;
 			*rdnss = (struct opt_rdnss) {

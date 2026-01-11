@@ -24,6 +24,12 @@ for bin in /usr/lib/openssh/sshd-session /usr/lib/ssh/sshd-session \
 	command -v "${bin}" >/dev/null && PROGS="${PROGS} ${bin}"
 done
 
+# OpenSSH 10 adds sshd-auth as well
+for bin in /usr/lib/openssh/sshd-auth /usr/lib/ssh/sshd-auth \
+	   /usr/libexec/openssh/sshd-auth; do
+	command -v "${bin}" >/dev/null && PROGS="${PROGS} ${bin}"
+done
+
 KMODS="${KMODS:- virtio_net virtio_pci vmw_vsock_virtio_transport}"
 
 LINKS="${LINKS:-

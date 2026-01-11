@@ -2485,8 +2485,8 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 	 * address, record that as our address, as implemented for vhost-user
 	 * mode only, below.
 	 */
-	ini = flow_initiate_sa(flow, ref.tcp_listen.pif, &sa,
-			       NULL, ref.tcp_listen.port);
+	ini = flow_initiate_sa(flow, ref.listen.pif, &sa,
+			       NULL, ref.listen.port);
 
 	if (getsockname(s, &sa.sa, &sl) ||
 	    inany_from_sockaddr(&ini->oaddr, &ini->oport, &sa) < 0)
@@ -2685,7 +2685,7 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 int tcp_listen(const struct ctx *c, uint8_t pif,
 	       const union inany_addr *addr, const char *ifname, in_port_t port)
 {
-	union tcp_listen_epoll_ref tref = {
+	union fwd_listen_ref ref = {
 		.port = port,
 		.pif = pif,
 	};
@@ -2722,7 +2722,7 @@ int tcp_listen(const struct ctx *c, uint8_t pif,
 	}
 
 	s = pif_sock_l4(c, EPOLL_TYPE_TCP_LISTEN, pif, addr, ifname,
-			port, tref.u32);
+			port, ref.u32);
 
 	if (fwd->mode == FWD_AUTO) {
 		if (!addr || inany_v4(addr))

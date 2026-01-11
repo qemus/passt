@@ -928,7 +928,7 @@ void udp_listen_sock_handler(const struct ctx *c,
 			     const struct timespec *now)
 {
 	if (events & (EPOLLERR | EPOLLIN))
-		udp_sock_fwd(c, ref.fd, ref.udp.pif, ref.udp.port, now);
+		udp_sock_fwd(c, ref.fd, ref.listen.pif, ref.listen.port, now);
 }
 
 /**
@@ -1141,7 +1141,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 int udp_listen(const struct ctx *c, uint8_t pif,
 	       const union inany_addr *addr, const char *ifname, in_port_t port)
 {
-	union udp_listen_epoll_ref uref = {
+	union fwd_listen_ref ref = {
 		.pif = pif,
 		.port = port,
 	};
@@ -1175,7 +1175,7 @@ int udp_listen(const struct ctx *c, uint8_t pif,
 	}
 
 	s = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, pif,
-			addr, ifname, port, uref.u32);
+			addr, ifname, port, ref.u32);
 
 	if (!addr || inany_v4(addr))
 		socks[V4][port] = s < 0 ? -1 : s;

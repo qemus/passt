@@ -1159,7 +1159,9 @@ static void conf_print(const struct ctx *c)
 				       buf4, sizeof(buf4)));
 		}
 
-		for (i = 0; !IN4_IS_ADDR_UNSPECIFIED(&c->ip4.dns[i]); i++) {
+		for (i = 0; i < ARRAY_SIZE(c->ip4.dns); i++) {
+			if (IN4_IS_ADDR_UNSPECIFIED(&c->ip4.dns[i]))
+				break;
 			if (!i)
 				info("DNS:");
 			inet_ntop(AF_INET, &c->ip4.dns[i], buf4, sizeof(buf4));
@@ -1197,7 +1199,9 @@ static void conf_print(const struct ctx *c)
 			       buf6, sizeof(buf6)));
 
 dns6:
-		for (i = 0; !IN6_IS_ADDR_UNSPECIFIED(&c->ip6.dns[i]); i++) {
+		for (i = 0; i < ARRAY_SIZE(c->ip6.dns); i++) {
+			if (IN6_IS_ADDR_UNSPECIFIED(&c->ip6.dns[i]))
+			    break;
 			if (!i)
 				info("DNS:");
 			inet_ntop(AF_INET6, &c->ip6.dns[i], buf6, sizeof(buf6));
