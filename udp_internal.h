@@ -26,7 +26,7 @@ size_t udp_update_hdr4(struct iphdr *ip4h, struct udp_payload_t *bp,
 		       const struct flowside *toside, size_t dlen,
 		       bool no_udp_csum);
 size_t udp_update_hdr6(struct ipv6hdr *ip6h, struct udp_payload_t *bp,
-                       const struct flowside *toside, size_t dlen,
+		       const struct flowside *toside, size_t dlen,
 		       bool no_udp_csum);
 void udp_sock_fwd(const struct ctx *c, int s, uint8_t frompif,
 		  in_port_t port, const struct timespec *now);

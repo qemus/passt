@@ -99,7 +99,7 @@ static_assert(FLOW_NUM_STATES <= (1 << FLOW_STATE_BITS),
 
 extern const char *flow_state_str[];
 #define FLOW_STATE(f)							\
-        ((f)->state < FLOW_NUM_STATES ? flow_state_str[(f)->state] : "?")
+	((f)->state < FLOW_NUM_STATES ? flow_state_str[(f)->state] : "?")
 
 /**
  * enum flow_type - Different types of packet flows we track
@@ -126,7 +126,7 @@ static_assert(FLOW_NUM_TYPES <= (1 << FLOW_TYPE_BITS),
 
 extern const char *flow_type_str[];
 #define FLOW_TYPE(f)							\
-        ((f)->type < FLOW_NUM_TYPES ? flow_type_str[(f)->type] : "?")
+	((f)->type < FLOW_NUM_TYPES ? flow_type_str[(f)->type] : "?")
 
 extern const uint8_t flow_proto[];
 #define FLOW_PROTO(f)				\

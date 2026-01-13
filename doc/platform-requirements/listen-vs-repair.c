@@ -58,9 +58,9 @@ static void net_sandbox(void)
 		.nlh.nlmsg_len		= sizeof(req),
 		.nlh.nlmsg_seq		= 1,
 		.ifm.ifi_family		= AF_UNSPEC,
-                .ifm.ifi_index		= 1,
-                .ifm.ifi_flags		= IFF_UP,
-                .ifm.ifi_change		= IFF_UP,
+		.ifm.ifi_index		= 1,
+		.ifm.ifi_flags		= IFF_UP,
+		.ifm.ifi_change		= IFF_UP,
 	};
 	int nl;
 

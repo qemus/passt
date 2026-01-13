@@ -51,7 +51,7 @@ int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 	       size_t *collected);
 void vu_set_vnethdr(const struct vu_dev *vdev,
 		    struct virtio_net_hdr_mrg_rxbuf *vnethdr,
-                    int num_buffers);
+		    int num_buffers);
 void vu_flush(const struct vu_dev *vdev, struct vu_virtq *vq,
 	      struct vu_virtq_element *elem, int elem_cnt);
 void vu_kick_cb(struct vu_dev *vdev, union epoll_ref ref,

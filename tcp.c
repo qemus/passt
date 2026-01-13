@@ -301,8 +301,6 @@
 #include "ip.h"
 #include "passt.h"
 #include "tap.h"
-#include "siphash.h"
-#include "pcap.h"
 #include "tcp_splice.h"
 #include "log.h"
 #include "inany.h"

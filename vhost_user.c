@@ -652,9 +652,9 @@ static bool vu_set_vring_addr_exec(struct vu_dev *vdev,
 				   struct vhost_user_msg *vmsg)
 {
 	/* We need to copy the payload to vhost_vring_addr structure
-         * to access index because address of vmsg->payload.addr
-         * can be unaligned as it is packed.
-         */
+	 * to access index because address of vmsg->payload.addr
+	 * can be unaligned as it is packed.
+	 */
 	struct vhost_vring_addr addr = vmsg->payload.addr;
 	struct vu_virtq *vq = &vdev->vq[addr.index];
 

@@ -164,8 +164,8 @@ static inline uint16_t vring_avail_ring(const struct vu_virtq *vq, int i)
  */
 static inline uint16_t *virtq_used_event(const struct vu_virtq *vq)
 {
-        /* For backwards compat, used event index is at *end* of avail ring. */
-        return &vq->vring.avail->ring[vq->vring.num];
+	/* For backwards compat, used event index is at *end* of avail ring. */
+	return &vq->vring.avail->ring[vq->vring.num];
 }
 
 /**
@@ -356,8 +356,8 @@ void vu_queue_notify(const struct vu_dev *dev, struct vu_virtq *vq)
  */
 static inline uint16_t *virtq_avail_event(const struct vu_virtq *vq)
 {
-        /* For backwards compat, avail event index is at *end* of used ring. */
-        return (uint16_t *)&vq->vring.used->ring[vq->vring.num];
+	/* For backwards compat, avail event index is at *end* of used ring. */
+	return (uint16_t *)&vq->vring.used->ring[vq->vring.num];
 }
 
 /**
