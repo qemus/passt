@@ -177,7 +177,6 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 	union flow *flow = flow_alloc();
 	struct icmp_ping_flow *pingf;
 	const struct flowside *tgt;
-	union epoll_ref ref;
 
 	if (!flow)
 		return NULL;
@@ -211,13 +210,10 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 		goto cancel;
 
 	flow_epollid_set(&pingf->f, EPOLLFD_ID_DEFAULT);
-
-	ref.type = EPOLL_TYPE_PING;
-	ref.flowside = FLOW_SIDX(flow, TGTSIDE);
-	ref.fd = pingf->sock;
-
-	if (epoll_add(flow_epollfd(&pingf->f), EPOLLIN, ref) < 0) {
+	if (flow_epoll_set(&pingf->f, EPOLL_CTL_ADD, EPOLLIN, pingf->sock,
+			   TGTSIDE) < 0) {
 		close(pingf->sock);
+		flow_epollid_clear(&pingf->f);
 		goto cancel;
 	}
 

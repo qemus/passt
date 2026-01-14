@@ -11,7 +11,7 @@
 # Copyright (c) 2022 Red Hat GmbH
 # Author: Stefano Brivio <sbrivio@redhat.com>
 
-  abi <abi/3.0>,
+  abi <abi/4.0>,
 
   include <abstractions/base>
 
@@ -24,6 +24,7 @@
   capability setpcap,
   capability net_admin,
   capability sys_ptrace,
+  userns,
 
   /					r,	# isolate_prefork(), isolation.c
   mount options=(rw, runbindable) -> /,

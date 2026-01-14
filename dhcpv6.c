@@ -320,7 +320,7 @@ static bool dhcpv6_opt(struct iov_tail *data, uint16_t type)
 static bool dhcpv6_ia_notonlink(struct iov_tail *data,
 				struct in6_addr *la)
 {
-	int ia_types[2] = { OPT_IA_NA, OPT_IA_TA }, *ia_type;
+	int ia_types[2] = { OPT_IA_NA, OPT_IA_TA };
 	struct opt_ia_addr opt_addr_storage;
 	const struct opt_ia_addr *opt_addr;
 	struct iov_tail current, ia_base;
@@ -330,6 +330,7 @@ static bool dhcpv6_ia_notonlink(struct iov_tail *data,
 	struct in6_addr req_addr;
 	struct opt_hdr h_storage;
 	const struct opt_hdr *h;
+	const int *ia_type;
 
 	foreach(ia_type, ia_types) {
 		current = *data;

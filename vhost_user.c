@@ -442,7 +442,7 @@ static bool vu_set_mem_table_exec(struct vu_dev *vdev,
 	for (i = 0; i < vdev->memory.nregions; i++) {
 		struct vhost_user_memory_region *msg_region = &memory->regions[i];
 		struct vu_dev_region *dev_region = &vdev->memory.regions[i];
-		void *mmap_addr;
+		const void *mmap_addr;
 
 		debug("vhost-user region %d", i);
 		debug("    guest_phys_addr: 0x%016"PRIx64,

@@ -265,6 +265,8 @@ bool flow_in_epoll(const struct flow_common *f);
 int flow_epollfd(const struct flow_common *f);
 void flow_epollid_set(struct flow_common *f, int epollid);
 void flow_epollid_clear(struct flow_common *f);
+int flow_epoll_set(const struct flow_common *f, int command, uint32_t events,
+		   int fd, unsigned int sidei);
 void flow_epollid_register(int epollid, int epollfd);
 void flow_defer_handler(const struct ctx *c, const struct timespec *now);
 int flow_migrate_source_early(struct ctx *c, const struct migrate_stage *stage,

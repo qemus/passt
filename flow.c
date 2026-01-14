@@ -20,6 +20,7 @@
 #include "flow.h"
 #include "flow_table.h"
 #include "repair.h"
+#include "epoll_ctl.h"
 
 const char *flow_state_str[] = {
 	[FLOW_STATE_FREE]	= "FREE",
@@ -52,6 +53,16 @@ const uint8_t flow_proto[] = {
 };
 static_assert(ARRAY_SIZE(flow_proto) == FLOW_NUM_TYPES,
 	      "flow_proto[] doesn't match enum flow_type");
+
+static const enum epoll_type flow_epoll[] = {
+	[FLOW_TCP]		= EPOLL_TYPE_TCP,
+	[FLOW_TCP_SPLICE]	= EPOLL_TYPE_TCP_SPLICE,
+	[FLOW_PING4]		= EPOLL_TYPE_PING,
+	[FLOW_PING6]		= EPOLL_TYPE_PING,
+	[FLOW_UDP]		= EPOLL_TYPE_UDP,
+};
+static_assert(ARRAY_SIZE(flow_epoll) == FLOW_NUM_TYPES,
+	      "flow_epoll[] doesn't match enum flow_type");
 
 #define foreach_established_tcp_flow(flow)				\
 	flow_foreach_of_type((flow), FLOW_TCP)				\
@@ -388,6 +399,32 @@ void flow_epollid_set(struct flow_common *f, int epollid)
 void flow_epollid_clear(struct flow_common *f)
 {
 	f->epollid = EPOLLFD_ID_INVALID;
+}
+
+/**
+ * flow_epoll_set() - Add or modify epoll registration for a flow socket
+ * @f:		Flow to register socket for
+ * @command:	epoll_ctl() command: EPOLL_CTL_ADD or EPOLL_CTL_MOD
+ * @events:	epoll events to watch for
+ * @fd:		File descriptor to register
+ * @sidei:	Side index of the flow
+ *
+ * Return: 0 on success, -1 on error (from epoll_ctl())
+ */
+int flow_epoll_set(const struct flow_common *f, int command, uint32_t events,
+		   int fd, unsigned int sidei)
+{
+	struct epoll_event ev;
+	union epoll_ref ref;
+
+	ref.fd = fd;
+	ref.type = flow_epoll[f->type];
+	ref.flowside = flow_sidx(f, sidei);
+
+	ev.events = events;
+	ev.data.u64 = ref.u64;
+
+	return epoll_ctl(flow_epollfd(f), command, fd, &ev);
 }
 
 /**

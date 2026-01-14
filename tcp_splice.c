@@ -114,63 +114,52 @@ static struct tcp_splice_conn *conn_at_sidx(flow_sidx_t sidx)
  * @events:	Connection event flags
  * @ev:		Events to fill in, 0 is accepted socket, 1 is connecting socket
  */
-static void tcp_splice_conn_epoll_events(uint16_t events,
-					 struct epoll_event ev[])
+static uint32_t tcp_splice_conn_epoll_events(uint16_t events, unsigned sidei)
 {
-	unsigned sidei;
-
-	flow_foreach_sidei(sidei)
-		ev[sidei].events = 0;
+	uint32_t e = 0;
 
 	if (events & SPLICE_ESTABLISHED) {
-		flow_foreach_sidei(sidei) {
-			if (!(events & FIN_SENT(!sidei)))
-				ev[sidei].events = EPOLLIN | EPOLLRDHUP;
-		}
-	} else if (events & SPLICE_CONNECT) {
-		ev[1].events = EPOLLOUT;
+		if (!(events & FIN_SENT(!sidei)))
+			e = EPOLLIN | EPOLLRDHUP;
+	} else if (sidei == 1 && events & SPLICE_CONNECT) {
+		e = EPOLLOUT;
 	}
 
-	flow_foreach_sidei(sidei) {
-		if (events & OUT_WAIT(sidei)) {
-			ev[sidei].events |= EPOLLOUT;
-			ev[!sidei].events &= ~EPOLLIN;
-		}
-	}
+	if (events & OUT_WAIT(sidei))
+		e |= EPOLLOUT;
+	if (events & OUT_WAIT(!sidei))
+		e &= ~EPOLLIN;
+
+	return e;
 }
 
 /**
  * tcp_splice_epoll_ctl() - Add/modify/delete epoll state from connection events
- * @c:		Execution context
  * @conn:	Connection pointer
  *
  * Return: 0 on success, negative error code on failure (not on deletion)
  */
-static int tcp_splice_epoll_ctl(const struct ctx *c,
-				struct tcp_splice_conn *conn)
+static int tcp_splice_epoll_ctl(struct tcp_splice_conn *conn)
 {
-	int epollfd = flow_in_epoll(&conn->f) ? flow_epollfd(&conn->f)
-					      : c->epollfd;
-	int m = flow_in_epoll(&conn->f) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-	const union epoll_ref ref[SIDES] = {
-		{ .type = EPOLL_TYPE_TCP_SPLICE, .fd = conn->s[0],
-		  .flowside = FLOW_SIDX(conn, 0) },
-		{ .type = EPOLL_TYPE_TCP_SPLICE, .fd = conn->s[1],
-		  .flowside = FLOW_SIDX(conn, 1) }
-	};
-	struct epoll_event ev[SIDES] = { { .data.u64 = ref[0].u64 },
-					 { .data.u64 = ref[1].u64 } };
+	uint32_t events[2];
+	int m;
 
-	tcp_splice_conn_epoll_events(conn->events, ev);
+	if (flow_in_epoll(&conn->f)) {
+		m = EPOLL_CTL_MOD;
+	} else {
+		flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+		m = EPOLL_CTL_ADD;
+	}
 
+	events[0] = tcp_splice_conn_epoll_events(conn->events, 0);
+	events[1] = tcp_splice_conn_epoll_events(conn->events, 1);
 
-	if (epoll_ctl(epollfd, m, conn->s[0], &ev[0]) ||
-	    epoll_ctl(epollfd, m, conn->s[1], &ev[1])) {
+	if (flow_epoll_set(&conn->f, m, events[0], conn->s[0], 0) ||
+	    flow_epoll_set(&conn->f, m, events[1], conn->s[1], 1)) {
 		int ret = -errno;
 		flow_perror(conn, "ERROR on epoll_ctl()");
 		return ret;
 	}
-	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 
 	return 0;
 }
@@ -210,7 +199,7 @@ static void conn_flag_do(struct tcp_splice_conn *conn,
 	}
 }
 
-#define conn_flag(c, conn, flag)					\
+#define conn_flag(conn, flag)					\
 	do {								\
 		flow_trace(conn, "flag at %s:%i", __func__, __LINE__);	\
 		conn_flag_do(conn, flag);				\
@@ -218,12 +207,10 @@ static void conn_flag_do(struct tcp_splice_conn *conn,
 
 /**
  * conn_event_do() - Set and log connection events, update epoll state
- * @c:		Execution context
  * @conn:	Connection pointer
  * @event:	Connection event
  */
-static void conn_event_do(const struct ctx *c, struct tcp_splice_conn *conn,
-			  unsigned long event)
+static void conn_event_do(struct tcp_splice_conn *conn, unsigned long event)
 {
 	if (event & (event - 1)) {
 		int flag_index = fls(~event);
@@ -245,14 +232,14 @@ static void conn_event_do(const struct ctx *c, struct tcp_splice_conn *conn,
 			flow_dbg(conn, "%s", tcp_splice_event_str[flag_index]);
 	}
 
-	if (tcp_splice_epoll_ctl(c, conn))
-		conn_flag(c, conn, CLOSING);
+	if (tcp_splice_epoll_ctl(conn))
+		conn_flag(conn, CLOSING);
 }
 
-#define conn_event(c, conn, event)					\
+#define conn_event(conn, event)					\
 	do {								\
 		flow_trace(conn, "event at %s:%i",__func__, __LINE__);	\
-		conn_event_do(c, conn, event);				\
+		conn_event_do(conn, event);				\
 	} while (0)
 
 
@@ -320,7 +307,7 @@ static int tcp_splice_connect_finish(const struct ctx *c,
 			if (pipe2(conn->pipe[sidei], O_NONBLOCK | O_CLOEXEC)) {
 				flow_perror(conn, "cannot create %d->%d pipe",
 					    sidei, !sidei);
-				conn_flag(c, conn, CLOSING);
+				conn_flag(conn, CLOSING);
 				return -EIO;
 			}
 
@@ -334,7 +321,7 @@ static int tcp_splice_connect_finish(const struct ctx *c,
 	}
 
 	if (!(conn->events & SPLICE_ESTABLISHED))
-		conn_event(c, conn, SPLICE_ESTABLISHED);
+		conn_event(conn, SPLICE_ESTABLISHED);
 
 	return 0;
 }
@@ -381,7 +368,7 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 
 	pif_sockaddr(c, &sa, tgtpif, &tgt->eaddr, tgt->eport);
 
-	conn_event(c, conn, SPLICE_CONNECT);
+	conn_event(conn, SPLICE_CONNECT);
 
 	if (connect(conn->s[1], &sa.sa, socklen_inany(&sa))) {
 		if (errno != EINPROGRESS) {
@@ -390,7 +377,7 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 			return -errno;
 		}
 	} else {
-		conn_event(c, conn, SPLICE_ESTABLISHED);
+		conn_event(conn, SPLICE_ESTABLISHED);
 		return tcp_splice_connect_finish(c, conn);
 	}
 
@@ -450,7 +437,7 @@ void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0)
 		flow_trace(conn, "failed to set TCP_QUICKACK on %i", s0);
 
 	if (tcp_splice_connect(c, conn))
-		conn_flag(c, conn, CLOSING);
+		conn_flag(conn, CLOSING);
 
 	FLOW_ACTIVATE(conn);
 }
@@ -499,14 +486,14 @@ void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
 
 	if (events & EPOLLOUT) {
 		fromsidei = !evsidei;
-		conn_event(c, conn, ~OUT_WAIT(evsidei));
+		conn_event(conn, ~OUT_WAIT(evsidei));
 	} else {
 		fromsidei = evsidei;
 	}
 
 	if (events & EPOLLRDHUP)
 		/* For side 0 this is fake, but implied */
-		conn_event(c, conn, FIN_RCVD(evsidei));
+		conn_event(conn, FIN_RCVD(evsidei));
 
 swap:
 	eof = 0;
@@ -541,7 +528,7 @@ retry:
 				more = SPLICE_F_MORE;
 
 			if (conn->flags & lowat_set_flag)
-				conn_flag(c, conn, lowat_act_flag);
+				conn_flag(conn, lowat_act_flag);
 		}
 
 		do
@@ -573,8 +560,8 @@ retry:
 						   "Setting SO_RCVLOWAT %i: %s",
 						   lowat, strerror_(errno));
 				} else {
-					conn_flag(c, conn, lowat_set_flag);
-					conn_flag(c, conn, lowat_act_flag);
+					conn_flag(conn, lowat_set_flag);
+					conn_flag(conn, lowat_act_flag);
 				}
 			}
 
@@ -588,7 +575,7 @@ retry:
 			if (conn->read[fromsidei] == conn->written[fromsidei])
 				break;
 
-			conn_event(c, conn, OUT_WAIT(!fromsidei));
+			conn_event(conn, OUT_WAIT(!fromsidei));
 			break;
 		}
 
@@ -610,7 +597,7 @@ retry:
 			if ((conn->events & FIN_RCVD(sidei)) &&
 			    !(conn->events & FIN_SENT(!sidei))) {
 				shutdown(conn->s[!sidei], SHUT_WR);
-				conn_event(c, conn, FIN_SENT(!sidei));
+				conn_event(conn, FIN_SENT(!sidei));
 			}
 		}
 	}
@@ -631,7 +618,7 @@ retry:
 	return;
 
 close:
-	conn_flag(c, conn, CLOSING);
+	conn_flag(conn, CLOSING);
 }
 
 /**
@@ -767,10 +754,10 @@ void tcp_splice_timer(struct tcp_splice_conn *conn)
 				flow_trace(conn, "can't set SO_RCVLOWAT on %d",
 					   conn->s[sidei]);
 			}
-			conn_flag(c, conn, ~RCVLOWAT_SET(sidei));
+			conn_flag(conn, ~RCVLOWAT_SET(sidei));
 		}
 	}
 
 	flow_foreach_sidei(sidei)
-		conn_flag(c, conn, ~RCVLOWAT_ACT(sidei));
+		conn_flag(conn, ~RCVLOWAT_ACT(sidei));
 }

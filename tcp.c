@@ -521,45 +521,43 @@ static uint32_t tcp_conn_epoll_events(uint8_t events, uint8_t conn_flags)
 
 /**
  * tcp_epoll_ctl() - Add/modify/delete epoll state from connection events
- * @c:		Execution context
  * @conn:	Connection pointer
  *
  * Return: 0 on success, negative error code on failure (not on deletion)
  */
-static int tcp_epoll_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
+static int tcp_epoll_ctl(struct tcp_tap_conn *conn)
 {
-	int m = flow_in_epoll(&conn->f) ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-	union epoll_ref ref = { .type = EPOLL_TYPE_TCP, .fd = conn->sock,
-		                .flowside = FLOW_SIDX(conn, !TAPSIDE(conn)), };
-	struct epoll_event ev = { .data.u64 = ref.u64 };
-	int epollfd = flow_in_epoll(&conn->f) ? flow_epollfd(&conn->f)
-					      : c->epollfd;
+	uint32_t events;
+	int m;
 
 	if (conn->events == CLOSED) {
-		if (flow_in_epoll(&conn->f))
+		if (flow_in_epoll(&conn->f)) {
+			int epollfd = flow_epollfd(&conn->f);
+
 			epoll_del(epollfd, conn->sock);
-		if (conn->timer != -1)
-			epoll_del(epollfd, conn->timer);
+			if (conn->timer != -1)
+				epoll_del(epollfd, conn->timer);
+		}
+
 		return 0;
 	}
 
-	ev.events = tcp_conn_epoll_events(conn->events, conn->flags);
+	events = tcp_conn_epoll_events(conn->events, conn->flags);
 
-	if (epoll_ctl(epollfd, m, conn->sock, &ev))
-		return -errno;
+	if (flow_in_epoll(&conn->f)) {
+		m = EPOLL_CTL_MOD;
+	} else {
+		flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+		m = EPOLL_CTL_ADD;
+	}
 
-	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+	if (flow_epoll_set(&conn->f, m, events, conn->sock,
+			   !TAPSIDE(conn)) < 0) {
+		int ret = -errno;
 
-	if (conn->timer != -1) {
-		union epoll_ref ref_t = { .type = EPOLL_TYPE_TCP_TIMER,
-					  .fd = conn->timer,
-					  .flow = FLOW_IDX(conn) };
-		struct epoll_event ev_t = { .data.u64 = ref_t.u64,
-					    .events = EPOLLIN | EPOLLET };
-
-		if (epoll_ctl(flow_epollfd(&conn->f), EPOLL_CTL_MOD,
-			      conn->timer, &ev_t))
-			return -errno;
+		if (m == EPOLL_CTL_ADD)
+			flow_epollid_clear(&conn->f);
+		return ret;
 	}
 
 	return 0;
@@ -579,30 +577,32 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		return;
 
 	if (conn->timer == -1) {
-		union epoll_ref ref = { .type = EPOLL_TYPE_TCP_TIMER,
-					.flow = FLOW_IDX(conn) };
-		struct epoll_event ev = { .data.u64 = ref.u64,
-					  .events = EPOLLIN | EPOLLET };
-		int epollfd = flow_epollfd(&conn->f);
+		union epoll_ref ref;
 		int fd;
 
 		fd = timerfd_create(CLOCK_MONOTONIC, 0);
-		if (fd == -1 || fd > FD_REF_MAX) {
+		if (fd == -1) {
 			flow_dbg_perror(conn, "failed to get timer");
-			if (fd > -1)
-				close(fd);
-			conn->timer = -1;
 			return;
 		}
-		conn->timer = fd;
-		ref.fd = conn->timer;
+		if (fd > FD_REF_MAX) {
+			flow_dbg(conn, "timer fd overflow (%d > %d)",
+				 fd, FD_REF_MAX);
+			close(fd);
+			return;
+		}
 
-		if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn->timer, &ev)) {
-			flow_dbg_perror(conn, "failed to add timer");
-			close(conn->timer);
-			conn->timer = -1;
+		ref.type = EPOLL_TYPE_TCP_TIMER;
+		ref.flow = FLOW_IDX(conn);
+		ref.fd = fd;
+		if (epoll_add(flow_epollfd(&conn->f), EPOLLIN | EPOLLET,
+			      ref) < 0) {
+			flow_dbg(conn, "failed to add timer");
+			close(fd);
 			return;
 		}
+
+		conn->timer = fd;
 	}
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
@@ -679,7 +679,7 @@ void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
 	}
 
 	if (flag == STALLED || flag == ~STALLED)
-		tcp_epoll_ctl(c, conn);
+		tcp_epoll_ctl(conn);
 
 	if (flag == ACK_FROM_TAP_DUE || flag == ACK_TO_TAP_DUE		  ||
 	    (flag == ~ACK_FROM_TAP_DUE && (conn->flags & ACK_TO_TAP_DUE)) ||
@@ -736,7 +736,7 @@ void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
 	} else {
 		if (event == CLOSED)
 			flow_hash_remove(c, TAP_SIDX(conn));
-		tcp_epoll_ctl(c, conn);
+		tcp_epoll_ctl(conn);
 	}
 
 	if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED))
@@ -1180,6 +1180,7 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	if ((conn->flags & LOCAL) || tcp_rtt_dst_low(conn)) {
 		new_wnd_to_tap = tinfo->tcpi_snd_wnd;
 	} else {
+		unsigned rtt_ms_ceiling = DIV_ROUND_UP(tinfo->tcpi_rtt, 1000);
 		uint32_t sendq;
 		int limit;
 
@@ -1223,7 +1224,7 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 		 *   with pending data in the outbound queue
 		 */
 		if (limit < MSS_GET(conn) && sendq &&
-		    tinfo->tcpi_last_data_sent < tinfo->tcpi_rtt / 1000 * 10)
+		    tinfo->tcpi_last_data_sent < rtt_ms_ceiling * 10)
 			limit = 0;
 
 		new_wnd_to_tap = MIN((int)tinfo->tcpi_snd_wnd, limit);
@@ -1752,7 +1753,7 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 		conn_event(c, conn, TAP_SYN_ACK_SENT);
 	}
 
-	tcp_epoll_ctl(c, conn);
+	tcp_epoll_ctl(conn);
 
 	if (c->mode == MODE_VU) { /* To rebind to same oport after migration */
 		socklen_t sl = sizeof(sa);
@@ -2678,7 +2679,7 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
  * @ifname:	Name of interface to bind to, NULL for any
  * @port:	Port, host order
  *
- * Return: 0 on success, negative error code on failure
+ * Return: socket fd on success, negative error code on failure
  */
 int tcp_listen(const struct ctx *c, uint8_t pif,
 	       const union inany_addr *addr, const char *ifname, in_port_t port)
@@ -2698,16 +2699,14 @@ int tcp_listen(const struct ctx *c, uint8_t pif,
 			/* Restrict to v6 only */
 			addr = &inany_any6;
 		else if (inany_v4(addr))
-			/* Nothing to do */
-			return 0;
+			return -EAFNOSUPPORT;
 	}
 	if (!c->ifi6) {
 		if (!addr)
 			/* Restrict to v4 only */
 			addr = &inany_any4;
 		else if (!inany_v4(addr))
-			/* Nothing to do */
-			return 0;
+			return -EAFNOSUPPORT;
 	}
 
 	if (pif == PIF_HOST) {
@@ -2729,10 +2728,7 @@ int tcp_listen(const struct ctx *c, uint8_t pif,
 			socks[port][V6] = s < 0 ? -1 : s;
 	}
 
-	if (s < 0)
-		return s;
-
-	return 0;
+	return s;
 }
 
 /**
@@ -3994,7 +3990,7 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 	tcp_send_flag(c, conn, ACK);
 	tcp_data_from_sock(c, conn);
 
-	if ((rc = tcp_epoll_ctl(c, conn))) {
+	if ((rc = tcp_epoll_ctl(conn))) {
 		flow_dbg(conn,
 			 "Failed to subscribe to epoll for migrated socket: %s",
 			 strerror_(-rc));

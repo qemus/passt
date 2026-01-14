@@ -17,6 +17,7 @@
 
 /**
  * union epoll_ref - Breakdown of reference for epoll fd bookkeeping
+ * @u64:	Opaque reference for epoll_ctl() and epoll_wait()
  * @type:	Type of fd (tells us what to do with events)
  * @fd:		File descriptor number (implies < 2^24 total descriptors)
  * @flow:	Index of the flow this fd is linked to
@@ -25,9 +26,9 @@
  * @data:	Data handled by protocol handlers
  * @nsdir_fd:	netns dirfd for fallback timer checking if namespace is gone
  * @queue:	vhost-user queue index for this fd
- * @u64:	Opaque reference for epoll_ctl() and epoll_wait()
  */
 union epoll_ref {
+	uint64_t u64;
 	struct {
 		enum epoll_type type:8;
 		int32_t		  fd:FD_REF_BITS;
@@ -40,7 +41,6 @@ union epoll_ref {
 			int queue;
 		};
 	};
-	uint64_t u64;
 };
 static_assert(sizeof(union epoll_ref) <= sizeof(union epoll_data),
 	      "epoll_ref must have same size as epoll_data");

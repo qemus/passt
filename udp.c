@@ -1136,7 +1136,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
  * @ifname:	Name of interface to bind to, NULL if not configured
  * @port:	Port, host order
  *
- * Return: 0 on success, negative error code on failure
+ * Return: socket fd on success, negative error code on failure
  */
 int udp_listen(const struct ctx *c, uint8_t pif,
 	       const union inany_addr *addr, const char *ifname, in_port_t port)
@@ -1162,16 +1162,14 @@ int udp_listen(const struct ctx *c, uint8_t pif,
 			/* Restrict to v6 only */
 			addr = &inany_any6;
 		else if (inany_v4(addr))
-			/* Nothing to do */
-			return 0;
+			return -EAFNOSUPPORT;
 	}
 	if (!c->ifi6) {
 		if (!addr)
 			/* Restrict to v4 only */
 			addr = &inany_any4;
 		else if (!inany_v4(addr))
-			/* Nothing to do */
-			return 0;
+			return -EAFNOSUPPORT;
 	}
 
 	s = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, pif,
@@ -1182,7 +1180,7 @@ int udp_listen(const struct ctx *c, uint8_t pif,
 	if (!addr || !inany_v4(addr))
 		socks[V6][port] = s < 0 ? -1 : s;
 
-	return s < 0 ? s : 0;
+	return s;
 }
 
 /**
