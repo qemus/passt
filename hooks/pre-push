@@ -62,7 +62,7 @@ ssh "${USER_HOST}" 				"rm -f ${BIN}/*.deb"
 ssh "${USER_HOST}"				"rm -f ${BIN}/*.rpm"
 scp *.deb *.rpm					"${USER_HOST}:${BIN}/"
 
-man2html -M "/" passt.1 > passt.1.html
+mandoc -Thtml passt.1 > passt.1.html
 scp passt.1.html				"${USER_HOST}:${WEB}/"
 
 for pic in passt_overview pasta_overview; do
