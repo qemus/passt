@@ -182,7 +182,7 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 		return NULL;
 
 	flow_initiate_af(flow, PIF_TAP, af, saddr, id, daddr, id);
-	if (!(tgt = flow_target(c, flow, proto)))
+	if (!(tgt = flow_target(c, flow, FWD_NO_HINT, proto)))
 		goto cancel;
 
 	if (flow->f.pif[TGTSIDE] != PIF_HOST) {

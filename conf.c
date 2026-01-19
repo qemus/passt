@@ -135,9 +135,9 @@ static int parse_port_range(const char *s, char **endptr,
  * @ifname:	Listening interface
  * @first:	First port to forward
  * @last:	Last port to forward
- * @exclude:	Bitmap of ports to exclude
+ * @exclude:	Bitmap of ports to exclude (may be NULL)
  * @to:		Port to translate @first to when forwarding
- * @weak:	Ignore errors, as long as at least one port is mapped
+ * @flags:	Flags for forwarding entries
  */
 static void conf_ports_range_except(const struct ctx *c, char optname,
 				    const char *optarg, struct fwd_ports *fwd,
@@ -145,20 +145,13 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 				    const char *ifname,
 				    uint16_t first, uint16_t last,
 				    const uint8_t *exclude, uint16_t to,
-				    bool weak)
+				    uint8_t flags)
 {
-	bool bound_one = false;
-	unsigned i;
-	int fd;
+	unsigned delta = to - first;
+	unsigned base, i;
 
 	if (first == 0) {
 		die("Can't forward port 0 for option '-%c %s'",
-		    optname, optarg);
-	}
-
-	if (ifname && c->no_bindtodevice) {
-		die(
-"Device binding for '-%c %s' unsupported (requires kernel 5.7+)",
 		    optname, optarg);
 	}
 
@@ -172,41 +165,38 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 		}
 	}
 
-	for (i = first; i <= last; i++) {
-		if (bitmap_isset(exclude, i))
+	for (base = first; base <= last; base++) {
+		if (exclude && bitmap_isset(exclude, base))
 			continue;
 
-		if (bitmap_isset(fwd->map, i)) {
+		for (i = base; i <= last; i++) {
+			if (exclude && bitmap_isset(exclude, i))
+				break;
+		}
+
+		if ((optname == 'T' || optname == 'U') && c->no_bindtodevice) {
+			/* FIXME: Once the fwd bitmaps are removed, move this
+			 * workaround to the caller
+			 */
+			ASSERT(!addr && ifname && !strcmp(ifname, "lo"));
 			warn(
-"Altering mapping of already mapped port number: %s", optarg);
+"SO_BINDTODEVICE unavailable, forwarding only 127.0.0.1 and ::1 for '-%c %s'",
+			     optname, optarg);
+
+			if (c->ifi4) {
+				fwd_rule_add(fwd, flags, &inany_loopback4, NULL,
+					     base, i - 1, base + delta);
+			}
+			if (c->ifi6) {
+				fwd_rule_add(fwd, flags, &inany_loopback6, NULL,
+					     base, i - 1, base + delta);
+			}
+		} else {
+			fwd_rule_add(fwd, flags, addr, ifname,
+				     base, i - 1, base + delta);
 		}
-
-		bitmap_set(fwd->map, i);
-		fwd->delta[i] = to - first;
-
-		if (optname == 't')
-			fd = tcp_listen(c, PIF_HOST, addr, ifname, i);
-		else if (optname == 'u')
-			fd = udp_listen(c, PIF_HOST, addr, ifname, i);
-		else
-			/* No way to check in advance for -T and -U */
-			fd = 0;
-
-		if (fd == -ENFILE || fd == -EMFILE) {
-			die("Can't open enough sockets for port specifier: %s",
-			    optarg);
-		}
-
-		if (fd >= 0) {
-			bound_one = true;
-		} else if (!weak) {
-			die("Failed to bind port %u (%s) for option '-%c %s'",
-			    i, strerror_(-fd), optname, optarg);
-		}
+		base = i - 1;
 	}
-
-	if (!bound_one)
-		die("Failed to bind any port for '-%c %s'", optname, optarg);
 }
 
 /**
@@ -272,7 +262,7 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		conf_ports_range_except(c, optname, optarg, fwd,
 					NULL, NULL,
 					1, NUM_PORTS - 1, exclude,
-					1, true);
+					1, FWD_WEAK);
 		return;
 	}
 
@@ -348,6 +338,15 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		}
 	} while ((p = next_chunk(p, ',')));
 
+	if (ifname && c->no_bindtodevice) {
+		die(
+"Device binding for '-%c %s' unsupported (requires kernel 5.7+)",
+		    optname, optarg);
+	}
+	/* Outbound forwards come from guest loopback */
+	if ((optname == 'T' || optname == 'U') && !ifname)
+		ifname = "lo";
+
 	if (exclude_only) {
 		/* Exclude ephemeral ports */
 		for (i = 0; i < NUM_PORTS; i++)
@@ -357,7 +356,7 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		conf_ports_range_except(c, optname, optarg, fwd,
 					addr, ifname,
 					1, NUM_PORTS - 1, exclude,
-					1, true);
+					1, FWD_WEAK);
 		return;
 	}
 
@@ -390,7 +389,7 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 					addr, ifname,
 					orig_range.first, orig_range.last,
 					exclude,
-					mapped_range.first, false);
+					mapped_range.first, 0);
 	} while ((p = next_chunk(p, ',')));
 
 	return;
@@ -1224,6 +1223,17 @@ dns6:
 			info("    %s", c->dns_search[i].n);
 		}
 	}
+
+	info("Inbound TCP forwarding:");
+	fwd_rules_print(&c->tcp.fwd_in);
+	info("Inbound UDP forwarding:");
+	fwd_rules_print(&c->udp.fwd_in);
+	if (c->mode == MODE_PASTA) {
+		info("Outbound TCP forwarding:");
+		fwd_rules_print(&c->tcp.fwd_out);
+		info("Outbound UDP forwarding:");
+		fwd_rules_print(&c->udp.fwd_out);
+	}
 }
 
 /**
@@ -2046,7 +2056,6 @@ void conf(struct ctx *c, int argc, char **argv)
 	 * settings
 	 */
 	fwd_probe_ephemeral();
-	udp_portmap_clear();
 	optind = 0;
 	do {
 		name = getopt_long(argc, argv, optstring, options, NULL);
@@ -2157,6 +2166,27 @@ void conf(struct ctx *c, int argc, char **argv)
 		c->udp.fwd_in.mode = fwd_default;
 	if (!c->udp.fwd_out.mode)
 		c->udp.fwd_out.mode = fwd_default;
+
+	if (c->tcp.fwd_in.mode == FWD_AUTO) {
+		conf_ports_range_except(c, 't', "auto", &c->tcp.fwd_in,
+					NULL, NULL, 1, NUM_PORTS - 1,
+					NULL, 1, FWD_SCAN);
+	}
+	if (c->tcp.fwd_out.mode == FWD_AUTO) {
+		conf_ports_range_except(c, 'T', "auto", &c->tcp.fwd_out,
+					NULL, "lo", 1, NUM_PORTS - 1,
+					NULL, 1, FWD_SCAN);
+	}
+	if (c->udp.fwd_in.mode == FWD_AUTO) {
+		conf_ports_range_except(c, 'u', "auto", &c->udp.fwd_in,
+					NULL, NULL, 1, NUM_PORTS - 1,
+					NULL, 1, FWD_SCAN);
+	}
+	if (c->udp.fwd_out.mode == FWD_AUTO) {
+		conf_ports_range_except(c, 'U', "auto", &c->udp.fwd_out,
+					NULL, "lo", 1, NUM_PORTS - 1,
+					NULL, 1, FWD_SCAN);
+	}
 
 	if (!c->quiet)
 		conf_print(c);

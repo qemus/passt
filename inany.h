@@ -293,6 +293,7 @@ static inline void inany_siphash_feed(struct siphash_state *state,
 
 #define INANY_ADDRSTRLEN	MAX(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)
 
+bool inany_matches(const union inany_addr *a, const union inany_addr *b);
 const char *inany_ntop(const union inany_addr *src, char *dst, socklen_t size);
 int inany_pton(const char *src, union inany_addr *dst);
 

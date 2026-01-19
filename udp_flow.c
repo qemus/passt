@@ -131,6 +131,7 @@ static int udp_flow_sock(const struct ctx *c,
  * udp_flow_new() - Common setup for a new UDP flow
  * @c:		Execution context
  * @flow:	Initiated flow
+ * @rule_hint:	Index of forwarding rule, or -1 if unknown
  * @now:	Timestamp
  *
  * Return: sidx for the target side of the new UDP flow, or FLOW_SIDX_NONE
@@ -139,13 +140,13 @@ static int udp_flow_sock(const struct ctx *c,
  * #syscalls getsockname
  */
 static flow_sidx_t udp_flow_new(const struct ctx *c, union flow *flow,
-				const struct timespec *now)
+				int rule_hint, const struct timespec *now)
 {
 	struct udp_flow *uflow = NULL;
 	const struct flowside *tgt;
 	unsigned sidei;
 
-	if (!(tgt = flow_target(c, flow, IPPROTO_UDP)))
+	if (!(tgt = flow_target(c, flow, rule_hint, IPPROTO_UDP)))
 		goto cancel;
 
 	uflow = FLOW_SET_TYPE(flow, FLOW_UDP, udp);
@@ -208,6 +209,7 @@ cancel:
  * @dst:	Our (local) address to which the datagram is arriving
  * @port:	Our (local) port number to which the datagram is arriving
  * @s_in:	Source socket address, filled in by recvmmsg()
+ * @rule_hint:	Index of forwarding rule, or -1 if unknown
  * @now:	Timestamp
  *
  * #syscalls fcntl arm:fcntl64 ppc64:fcntl64|fcntl i686:fcntl64
@@ -218,7 +220,7 @@ cancel:
 flow_sidx_t udp_flow_from_sock(const struct ctx *c, uint8_t pif,
 			       const union inany_addr *dst, in_port_t port,
 			       const union sockaddr_inany *s_in,
-			       const struct timespec *now)
+			       int rule_hint, const struct timespec *now)
 {
 	const struct flowside *ini;
 	struct udp_flow *uflow;
@@ -252,7 +254,7 @@ flow_sidx_t udp_flow_from_sock(const struct ctx *c, uint8_t pif,
 		return FLOW_SIDX_NONE;
 	}
 
-	return udp_flow_new(c, flow, now);
+	return udp_flow_new(c, flow, rule_hint, now);
 }
 
 /**
@@ -308,7 +310,7 @@ flow_sidx_t udp_flow_from_tap(const struct ctx *c,
 		return FLOW_SIDX_NONE;
 	}
 
-	return udp_flow_new(c, flow, now);
+	return udp_flow_new(c, flow, FWD_NO_HINT, now);
 }
 
 /**
@@ -324,7 +326,7 @@ static void udp_flush_flow(const struct ctx *c,
 {
 	/* We don't know exactly where the datagrams will come from, but we know
 	 * they'll have an interface and oport matching this flow */
-	udp_sock_fwd(c, uflow->s[sidei], uflow->f.pif[sidei],
+	udp_sock_fwd(c, uflow->s[sidei], -1, uflow->f.pif[sidei],
 		     uflow->f.side[sidei].oport, now);
 }
 

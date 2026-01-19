@@ -519,17 +519,20 @@ struct flowside *flow_initiate_sa(union flow *flow, uint8_t pif,
  * flow_target() - Determine where flow should forward to, and move to TGT
  * @c:		Execution context
  * @flow:	Flow to forward
+ * @rule_hint:	Index of relevant forwarding rule, or -1 if unknown
  * @proto:	Protocol
  *
  * Return: pointer to the target flowside information
  */
 struct flowside *flow_target(const struct ctx *c, union flow *flow,
-			     uint8_t proto)
+			     int rule_hint, uint8_t proto)
 {
-	char estr[INANY_ADDRSTRLEN], fstr[INANY_ADDRSTRLEN];
+	char estr[INANY_ADDRSTRLEN], ostr[INANY_ADDRSTRLEN];
 	struct flow_common *f = &flow->f;
 	const struct flowside *ini = &f->side[INISIDE];
 	struct flowside *tgt = &f->side[TGTSIDE];
+	const struct fwd_rule *rule = NULL;
+	const struct fwd_ports *fwd;
 	uint8_t tgtpif = PIF_NONE;
 
 	ASSERT(flow_new_entry == flow && f->state == FLOW_STATE_INI);
@@ -544,29 +547,57 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 		break;
 
 	case PIF_SPLICE:
-		tgtpif = fwd_nat_from_splice(c, proto, ini, tgt);
+		if (proto == IPPROTO_TCP)
+			fwd = &c->tcp.fwd_out;
+		else if (proto == IPPROTO_UDP)
+			fwd = &c->udp.fwd_out;
+		else
+			goto nofwd;
+
+		if (!(rule = fwd_rule_search(fwd, ini, rule_hint)))
+			goto norule;
+
+		tgtpif = fwd_nat_from_splice(rule, proto, ini, tgt);
 		break;
 
 	case PIF_HOST:
-		tgtpif = fwd_nat_from_host(c, proto, ini, tgt);
+		if (proto == IPPROTO_TCP)
+			fwd = &c->tcp.fwd_in;
+		else if (proto == IPPROTO_UDP)
+			fwd = &c->udp.fwd_in;
+		else
+			goto nofwd;
+
+		if (!(rule = fwd_rule_search(fwd, ini, rule_hint)))
+			goto norule;
+
+		tgtpif = fwd_nat_from_host(c, rule, proto, ini, tgt);
 		fwd_neigh_mac_get(c, &tgt->oaddr, f->tap_omac);
 		break;
-
 	default:
-		flow_err(flow, "No rules to forward %s [%s]:%hu -> [%s]:%hu",
-			 pif_name(f->pif[INISIDE]),
-			 inany_ntop(&ini->eaddr, estr, sizeof(estr)),
-			 ini->eport,
-			 inany_ntop(&ini->oaddr, fstr, sizeof(fstr)),
-			 ini->oport);
+		goto nofwd;
 	}
 
 	if (tgtpif == PIF_NONE)
-		return NULL;
+		goto nofwd;
 
 	f->pif[TGTSIDE] = tgtpif;
 	flow_set_state(f, FLOW_STATE_TGT);
 	return tgt;
+
+norule:
+	/* This shouldn't happen, because if there's no rule for it we should
+	 * have no listening socket that would let us get here
+	 */
+	flow_dbg(flow, "Missing forward rule");
+	flow_log_details_(f, LOG_DEBUG, f->state);
+
+nofwd:
+	flow_err(flow, "No rules to forward %s %s [%s]:%hu -> [%s]:%hu",
+		 pif_name(f->pif[INISIDE]), ipproto_name(proto),
+		 inany_ntop(&ini->eaddr, estr, sizeof(estr)), ini->eport,
+		 inany_ntop(&ini->oaddr, ostr, sizeof(ostr)), ini->oport);
+	return NULL;
 }
 
 /**

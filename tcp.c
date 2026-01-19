@@ -412,10 +412,6 @@ static const char *tcp_flag_str[] __attribute((__unused__)) = {
 	"ACK_FROM_TAP_DUE", "ACK_FROM_TAP_BLOCKS", "SYN_RETRIED",
 };
 
-/* Listening sockets, used for automatic port forwarding in pasta mode only */
-static int tcp_sock_init_ext	[NUM_PORTS][IP_VERSIONS];
-static int tcp_sock_ns		[NUM_PORTS][IP_VERSIONS];
-
 /* Table of our guest side addresses with very low RTT (assumed to be local to
  * the host), LRU
  */
@@ -1660,7 +1656,7 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	ini = flow_initiate_af(flow, PIF_TAP,
 			       af, saddr, srcport, daddr, dstport);
 
-	if (!(tgt = flow_target(c, flow, IPPROTO_TCP)))
+	if (!(tgt = flow_target(c, flow, FWD_NO_HINT, IPPROTO_TCP)))
 		goto cancel;
 
 	if (flow->f.pif[TGTSIDE] != PIF_HOST) {
@@ -2499,7 +2495,7 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 		goto cancel;
 	}
 
-	if (!flow_target(c, flow, IPPROTO_TCP))
+	if (!flow_target(c, flow, ref.listen.rule, IPPROTO_TCP))
 		goto cancel;
 
 	switch (flow->f.pif[TGTSIDE]) {
@@ -2675,21 +2671,21 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
  * tcp_listen() - Create listening socket
  * @c:		Execution context
  * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
+ * @rule:	Index of relevant forwarding rule
  * @addr:	Pointer to address for binding, NULL for any
  * @ifname:	Name of interface to bind to, NULL for any
  * @port:	Port, host order
  *
  * Return: socket fd on success, negative error code on failure
  */
-int tcp_listen(const struct ctx *c, uint8_t pif,
+int tcp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 	       const union inany_addr *addr, const char *ifname, in_port_t port)
 {
 	union fwd_listen_ref ref = {
 		.port = port,
 		.pif = pif,
+		.rule = rule,
 	};
-	const struct fwd_ports *fwd;
-	int (*socks)[IP_VERSIONS];
 	int s;
 
 	ASSERT(!c->no_tcp);
@@ -2709,70 +2705,10 @@ int tcp_listen(const struct ctx *c, uint8_t pif,
 			return -EAFNOSUPPORT;
 	}
 
-	if (pif == PIF_HOST) {
-		fwd = &c->tcp.fwd_in;
-		socks = tcp_sock_init_ext;
-	} else {
-		ASSERT(pif == PIF_SPLICE);
-		fwd = &c->tcp.fwd_out;
-		socks = tcp_sock_ns;
-	}
-
 	s = pif_sock_l4(c, EPOLL_TYPE_TCP_LISTEN, pif, addr, ifname,
 			port, ref.u32);
 
-	if (fwd->mode == FWD_AUTO) {
-		if (!addr || inany_v4(addr))
-			socks[port][V4] = s < 0 ? -1 : s;
-		if (!addr || !inany_v4(addr))
-			socks[port][V6] = s < 0 ? -1 : s;
-	}
-
 	return s;
-}
-
-/**
- * tcp_ns_listen() - Init socket to listen for spliced outbound connections
- * @c:		Execution context
- * @port:	Port, host order
- */
-static void tcp_ns_listen(const struct ctx *c, in_port_t port)
-{
-	ASSERT(!c->no_tcp);
-
-	if (!c->no_bindtodevice) {
-		tcp_listen(c, PIF_SPLICE, NULL, "lo", port);
-		return;
-	}
-
-	if (c->ifi4)
-		tcp_listen(c, PIF_SPLICE, &inany_loopback4, NULL, port);
-	if (c->ifi6)
-		tcp_listen(c, PIF_SPLICE, &inany_loopback6, NULL, port);
-}
-
-/**
- * tcp_ns_socks_init() - Bind sockets in namespace for outbound connections
- * @arg:	Execution context
- *
- * Return: 0
- */
-/* cppcheck-suppress [constParameterCallback, unmatchedSuppression] */
-static int tcp_ns_socks_init(void *arg)
-{
-	const struct ctx *c = (const struct ctx *)arg;
-	unsigned port;
-
-	ns_enter(c);
-
-	for (port = 0; port < NUM_PORTS; port++) {
-		if (!bitmap_isset(c->tcp.fwd_out.map, port))
-			continue;
-
-		tcp_ns_listen(c, port);
-	}
-
-	return 0;
 }
 
 /**
@@ -2901,7 +2837,7 @@ static void tcp_get_rto_params(struct ctx *c)
  * tcp_init() - Get initial sequence, hash secret, initialise per-socket data
  * @c:		Execution context
  *
- * Return: 0, doesn't return on failure
+ * Return: 0 on success, -1 on failure
  */
 int tcp_init(struct ctx *c)
 {
@@ -2913,15 +2849,16 @@ int tcp_init(struct ctx *c)
 
 	memset(init_sock_pool4,		0xff,	sizeof(init_sock_pool4));
 	memset(init_sock_pool6,		0xff,	sizeof(init_sock_pool6));
-	memset(tcp_sock_init_ext,	0xff,	sizeof(tcp_sock_init_ext));
-	memset(tcp_sock_ns,		0xff,	sizeof(tcp_sock_ns));
 
 	tcp_sock_refill_init(c);
 
+	if (fwd_listen_sync(c, &c->tcp.fwd_in, PIF_HOST, IPPROTO_TCP) < 0)
+		return -1;
 	if (c->mode == MODE_PASTA) {
 		tcp_splice_init(c);
-
-		NS_CALL(tcp_ns_socks_init, c);
+		if (fwd_listen_sync(c, &c->tcp.fwd_out,
+				    PIF_SPLICE, IPPROTO_TCP) < 0)
+			return -1;
 	}
 
 	peek_offset_cap = (!c->ifi4 || tcp_probe_peek_offset_cap(AF_INET)) &&
@@ -2938,77 +2875,6 @@ int tcp_init(struct ctx *c)
 #undef dbg_tcpi
 
 	return 0;
-}
-
-/**
- * tcp_port_rebind() - Rebind ports to match forward maps
- * @c:		Execution context
- * @outbound:	True to remap outbound forwards, otherwise inbound
- *
- * Must be called in namespace context if @outbound is true.
- */
-static void tcp_port_rebind(struct ctx *c, bool outbound)
-{
-	const uint8_t *fmap = outbound ? c->tcp.fwd_out.map : c->tcp.fwd_in.map;
-	int (*socks)[IP_VERSIONS] = outbound ? tcp_sock_ns : tcp_sock_init_ext;
-	unsigned port;
-
-	for (port = 0; port < NUM_PORTS; port++) {
-		if (!bitmap_isset(fmap, port)) {
-			if (socks[port][V4] >= 0) {
-				close(socks[port][V4]);
-				socks[port][V4] = -1;
-			}
-
-			if (socks[port][V6] >= 0) {
-				close(socks[port][V6]);
-				socks[port][V6] = -1;
-			}
-
-			continue;
-		}
-
-		if ((c->ifi4 && socks[port][V4] == -1) ||
-		    (c->ifi6 && socks[port][V6] == -1)) {
-			if (outbound)
-				tcp_ns_listen(c, port);
-			else
-				tcp_listen(c, PIF_HOST, NULL, NULL, port);
-		}
-	}
-}
-
-/**
- * tcp_port_rebind_outbound() - Rebind ports in namespace
- * @arg:	Execution context
- *
- * Called with NS_CALL()
- *
- * Return: 0
- */
-static int tcp_port_rebind_outbound(void *arg)
-{
-	struct ctx *c = (struct ctx *)arg;
-
-	ns_enter(c);
-	tcp_port_rebind(c, true);
-
-	return 0;
-}
-
-/**
- * tcp_port_rebind_all() - Rebind ports to match forward maps (in host & ns)
- * @c:		Execution context
- */
-void tcp_port_rebind_all(struct ctx *c)
-{
-	ASSERT(c->mode == MODE_PASTA && !c->no_tcp);
-
-	if (c->tcp.fwd_out.mode == FWD_AUTO)
-		NS_CALL(tcp_port_rebind_outbound, c);
-
-	if (c->tcp.fwd_in.mode == FWD_AUTO)
-		tcp_port_rebind(c, false);
 }
 
 /**

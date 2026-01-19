@@ -67,3 +67,29 @@ found:
 	*proto = nh;
 	return true;
 }
+
+/**
+ * ipproto_name() - Get IP protocol name from number
+ * @proto:	IP protocol number
+ *
+ * Return: pointer to name of protocol @proto
+ *
+ * Usually this would be done with getprotobynumber(3) but that reads
+ * /etc/protocols and might allocate, which isn't possible for us once
+ * self-isolated.
+ */
+const char *ipproto_name(uint8_t proto)
+{
+	switch (proto) {
+	case IPPROTO_ICMP:
+		return "ICMP";
+	case IPPROTO_TCP:
+		return "TCP";
+	case IPPROTO_UDP:
+		return "UDP";
+	case IPPROTO_ICMPV6:
+		return "ICMPv6";
+	default:
+		return "<unknown protocol>";
+	}
+}
