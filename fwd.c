@@ -1132,6 +1132,9 @@ uint8_t fwd_nat_from_host(const struct ctx *c,
 		return PIF_SPLICE;
 	}
 
+	if (c->splice_only)
+		return PIF_NONE;
+
 	if (!nat_inbound(c, &ini->eaddr, &tgt->oaddr)) {
 		if (inany_v4(&ini->eaddr)) {
 			if (IN4_IS_ADDR_UNSPECIFIED(&c->ip4.our_tap_addr))

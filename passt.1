@@ -755,6 +755,11 @@ Default is to let the tap driver build a pseudorandom hardware address.
 Disable the bypass path for inbound, local traffic. See the section \fBHandling
 of local traffic in pasta\fR in the \fBNOTES\fR for more details.
 
+.TP
+.BR \-\-splice-only
+Do not create a tap device in the namespace. In this mode, \fIpasta\fR only
+forwards loopback traffic between namespaces.
+
 .SH EXAMPLES
 
 .SS \fBpasta

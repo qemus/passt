@@ -316,6 +316,9 @@ void pasta_ns_conf(struct ctx *c)
 		die("Couldn't bring up loopback interface in namespace: %s",
 		    strerror_(-rc));
 
+	if (c->splice_only)
+		return;
+
 	/* Get or set MAC in target namespace */
 	if (MAC_IS_ZERO(c->guest_mac))
 		nl_link_get_mac(nl_sock_ns, c->pasta_ifi, c->guest_mac);

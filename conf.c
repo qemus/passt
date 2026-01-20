@@ -1058,7 +1058,8 @@ pasta_opts:
 		"  --no-copy-addrs	DEPRECATED:\n"
 		"			Don't copy all addresses to namespace\n"
 		"  --ns-mac-addr ADDR	Set MAC address on tap interface\n"
-		"  --no-splice		Disable inbound socket splicing\n");
+		"  --no-splice		Disable inbound socket splicing\n"
+		"  --splice-only	Only enable loopback forwarding\n");
 
 	passt_exit(status);
 }
@@ -1141,7 +1142,7 @@ static void conf_print(const struct ctx *c)
 		     inet_ntop(AF_INET6, &c->ip6.addr_out, buf6, sizeof(buf6)));
 	}
 
-	if (c->mode == MODE_PASTA)
+	if (c->mode == MODE_PASTA && !c->splice_only)
 		info("Namespace interface: %s", c->pasta_ifn);
 
 	info("MAC:");
@@ -1475,6 +1476,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"no-ndp",	no_argument,		&c->no_ndp,	1 },
 		{"no-ra",	no_argument,		&c->no_ra,	1 },
 		{"no-splice",	no_argument,		&c->no_splice,	1 },
+		{"splice-only",	no_argument,		&c->splice_only, 1 },
 		{"freebind",	no_argument,		&c->freebind,	1 },
 		{"no-map-gw",	no_argument,		&no_map_gw,	1 },
 		{"ipv4-only",	no_argument,		NULL,		'4' },
@@ -1971,14 +1973,27 @@ void conf(struct ctx *c, int argc, char **argv)
 		}
 	} while (name != -1);
 
-	if (c->mode != MODE_PASTA)
+	if (c->mode != MODE_PASTA) {
 		c->no_splice = 1;
+		if (c->splice_only)
+			die("--splice-only is for pasta mode only");
+	}
 
 	if (c->mode == MODE_PASTA && !c->pasta_conf_ns) {
 		if (copy_routes_opt)
 			die("--no-copy-routes needs --config-net");
 		if (copy_addrs_opt)
 			die("--no-copy-addrs needs --config-net");
+	}
+
+	if (c->mode == MODE_PASTA && c->splice_only) {
+		if (c->no_splice)
+			die("--splice-only is incompatible with --no-splice");
+
+		c->host_lo_to_ns_lo = 1;
+		c->no_icmp = 1;
+		c->no_dns = 1;
+		c->no_dns_search = 1;
 	}
 
 	if (!ifi4 && *c->ip4.ifname_out)
@@ -2004,9 +2019,9 @@ void conf(struct ctx *c, int argc, char **argv)
 	log_conf_parsed = true;		/* Stop printing everything */
 
 	nl_sock_init(c, false);
-	if (!v6_only)
+	if (!v6_only && !c->splice_only)
 		c->ifi4 = conf_ip4(ifi4, &c->ip4);
-	if (!v4_only)
+	if (!v4_only && !c->splice_only)
 		c->ifi6 = conf_ip6(ifi6, &c->ip6);
 
 	if (c->ifi4 && c->mtu < IPV4_MIN_MTU) {
@@ -2028,16 +2043,18 @@ void conf(struct ctx *c, int argc, char **argv)
 	}
 
 	if (!c->ifi4 && !v6_only) {
-		info("IPv4: no external interface as template, use local mode");
-
-		conf_ip4_local(&c->ip4);
+		if (!c->splice_only) {
+			info("IPv4: no external interface as template, use local mode");
+			conf_ip4_local(&c->ip4);
+		}
 		c->ifi4 = -1;
 	}
 
 	if (!c->ifi6 && !v4_only) {
-		info("IPv6: no external interface as template, use local mode");
-
-		conf_ip6_local(&c->ip6);
+		if (!c->splice_only) {
+			info("IPv6: no external interface as template, use local mode");
+			conf_ip6_local(&c->ip6);
+		}
 		c->ifi6 = -1;
 	}
 

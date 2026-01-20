@@ -1491,13 +1491,16 @@ static int tap_ns_tun(void *arg)
  */
 static void tap_sock_tun_init(struct ctx *c)
 {
-	NS_CALL(tap_ns_tun, c);
-	if (c->fd_tap == -1)
-		die("Failed to set up tap device in namespace");
+	if (!c->splice_only) {
+		NS_CALL(tap_ns_tun, c);
+		if (c->fd_tap == -1)
+			die("Failed to set up tap device in namespace");
+	}
 
 	pasta_ns_conf(c);
 
-	tap_start_connection(c);
+	if (!c->splice_only)
+		tap_start_connection(c);
 }
 
 /**
