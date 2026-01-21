@@ -142,20 +142,12 @@ static uint32_t tcp_splice_conn_epoll_events(uint16_t events, unsigned sidei)
 static int tcp_splice_epoll_ctl(struct tcp_splice_conn *conn)
 {
 	uint32_t events[2];
-	int m;
-
-	if (flow_in_epoll(&conn->f)) {
-		m = EPOLL_CTL_MOD;
-	} else {
-		flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
-		m = EPOLL_CTL_ADD;
-	}
 
 	events[0] = tcp_splice_conn_epoll_events(conn->events, 0);
 	events[1] = tcp_splice_conn_epoll_events(conn->events, 1);
 
-	if (flow_epoll_set(&conn->f, m, events[0], conn->s[0], 0) ||
-	    flow_epoll_set(&conn->f, m, events[1], conn->s[1], 1)) {
+	if (flow_epoll_set(&conn->f, EPOLL_CTL_MOD, events[0], conn->s[0], 0) ||
+	    flow_epoll_set(&conn->f, EPOLL_CTL_MOD, events[1], conn->s[1], 1)) {
 		int ret = -errno;
 		flow_perror(conn, "ERROR on epoll_ctl()");
 		return ret;
@@ -367,6 +359,14 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 	}
 
 	pif_sockaddr(c, &sa, tgtpif, &tgt->eaddr, tgt->eport);
+
+	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->s[0], 0) ||
+	    flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->s[1], 1)) {
+		int ret = -errno;
+		flow_perror(conn, "Cannot register to epollfd");
+		return ret;
+	}
 
 	conn_event(conn, SPLICE_CONNECT);
 

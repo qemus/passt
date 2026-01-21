@@ -127,7 +127,7 @@ static_assert(ARRAY_SIZE(flow_epoll) == FLOW_NUM_TYPES,
 unsigned flow_first_free;
 union flow flowtab[FLOW_MAX];
 static const union flow *flow_new_entry; /* = NULL */
-static int epoll_id_to_fd[EPOLLFD_ID_MAX];
+static int epoll_id_to_fd[EPOLLFD_ID_SIZE];
 
 /* Hash table to index it */
 #define FLOW_HASH_LOAD		70		/* % */
@@ -352,17 +352,6 @@ static void flow_set_state(struct flow_common *f, enum flow_state state)
 }
 
 /**
- * flow_in_epoll() - Check if flow is registered with an epoll instance
- * @f:		Flow to check
- *
- * Return: true if flow is registered with epoll, false otherwise
- */
-bool flow_in_epoll(const struct flow_common *f)
-{
-	return f->epollid != EPOLLFD_ID_INVALID;
-}
-
-/**
  * flow_epollfd() - Get the epoll file descriptor for a flow
  * @f:		Flow to query
  *
@@ -370,13 +359,6 @@ bool flow_in_epoll(const struct flow_common *f)
  */
 int flow_epollfd(const struct flow_common *f)
 {
-	if (f->epollid >= EPOLLFD_ID_MAX) {
-		flow_log_(f, true, LOG_WARNING,
-			  "Invalid epollid %i for flow, assuming default",
-			  f->epollid);
-		return epoll_id_to_fd[EPOLLFD_ID_DEFAULT];
-	}
-
 	return epoll_id_to_fd[f->epollid];
 }
 
@@ -387,18 +369,9 @@ int flow_epollfd(const struct flow_common *f)
  */
 void flow_epollid_set(struct flow_common *f, int epollid)
 {
-	ASSERT(epollid < EPOLLFD_ID_MAX);
+	ASSERT(epollid < EPOLLFD_ID_SIZE);
 
 	f->epollid = epollid;
-}
-
-/**
- * flow_epollid_clear() - Clear the flow epoll id
- * @f:		Flow to update
- */
-void flow_epollid_clear(struct flow_common *f)
-{
-	f->epollid = EPOLLFD_ID_INVALID;
 }
 
 /**
@@ -434,7 +407,7 @@ int flow_epoll_set(const struct flow_common *f, int command, uint32_t events,
  */
 void flow_epollid_register(int epollid, int epollfd)
 {
-	ASSERT(epollid < EPOLLFD_ID_MAX);
+	ASSERT(epollid < EPOLLFD_ID_SIZE);
 
 	epoll_id_to_fd[epollid] = epollfd;
 }
@@ -673,7 +646,6 @@ union flow *flow_alloc(void)
 
 	flow_new_entry = flow;
 	memset(flow, 0, sizeof(*flow));
-	flow_epollid_clear(&flow->f);
 	flow_set_state(&flow->f, FLOW_STATE_NEW);
 
 	return flow;

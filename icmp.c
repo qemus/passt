@@ -213,7 +213,6 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 	if (flow_epoll_set(&pingf->f, EPOLL_CTL_ADD, EPOLLIN, pingf->sock,
 			   TGTSIDE) < 0) {
 		close(pingf->sock);
-		flow_epollid_clear(&pingf->f);
 		goto cancel;
 	}
 

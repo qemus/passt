@@ -178,7 +178,7 @@ int flowside_connect(const struct ctx *c, int s,
  * @pif[]:	Interface for each side of the flow
  * @side[]:	Information for each side of the flow
  * @tap_omac:	MAC address of remote endpoint as seen from the guest
- * @epollid:	epollfd identifier, or EPOLLFD_ID_INVALID
+ * @epollid:	epollfd identifier
  */
 struct flow_common {
 #ifdef __GNUC__
@@ -203,8 +203,6 @@ struct flow_common {
 
 #define EPOLLFD_ID_DEFAULT	0
 #define EPOLLFD_ID_SIZE		(1 << EPOLLFD_ID_BITS)
-#define EPOLLFD_ID_MAX		(EPOLLFD_ID_SIZE - 1)
-#define EPOLLFD_ID_INVALID	EPOLLFD_ID_MAX
 
 #define FLOW_INDEX_BITS		17	/* 128k - 1 */
 #define FLOW_MAX		MAX_FROM_BITS(FLOW_INDEX_BITS)
@@ -261,10 +259,8 @@ flow_sidx_t flow_lookup_sa(const struct ctx *c, uint8_t proto, uint8_t pif,
 union flow;
 
 void flow_init(void);
-bool flow_in_epoll(const struct flow_common *f);
 int flow_epollfd(const struct flow_common *f);
 void flow_epollid_set(struct flow_common *f, int epollid);
-void flow_epollid_clear(struct flow_common *f);
 int flow_epoll_set(const struct flow_common *f, int command, uint32_t events,
 		   int fd, unsigned int sidei);
 void flow_epollid_register(int epollid, int epollfd);

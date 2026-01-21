@@ -86,7 +86,6 @@ static int udp_flow_sock(const struct ctx *c,
 	flow_epollid_set(&uflow->f, EPOLLFD_ID_DEFAULT);
 	if (flow_epoll_set(&uflow->f, EPOLL_CTL_ADD, EPOLLIN, s, sidei) < 0) {
 		rc = -errno;
-		flow_epollid_clear(&uflow->f);
 		close(s);
 		return rc;
 	}

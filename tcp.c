@@ -524,37 +524,22 @@ static uint32_t tcp_conn_epoll_events(uint8_t events, uint8_t conn_flags)
 static int tcp_epoll_ctl(struct tcp_tap_conn *conn)
 {
 	uint32_t events;
-	int m;
 
 	if (conn->events == CLOSED) {
-		if (flow_in_epoll(&conn->f)) {
-			int epollfd = flow_epollfd(&conn->f);
+		int epollfd = flow_epollfd(&conn->f);
 
-			epoll_del(epollfd, conn->sock);
-			if (conn->timer != -1)
-				epoll_del(epollfd, conn->timer);
-		}
+		epoll_del(epollfd, conn->sock);
+		if (conn->timer != -1)
+			epoll_del(epollfd, conn->timer);
 
 		return 0;
 	}
 
 	events = tcp_conn_epoll_events(conn->events, conn->flags);
 
-	if (flow_in_epoll(&conn->f)) {
-		m = EPOLL_CTL_MOD;
-	} else {
-		flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
-		m = EPOLL_CTL_ADD;
-	}
-
-	if (flow_epoll_set(&conn->f, m, events, conn->sock,
-			   !TAPSIDE(conn)) < 0) {
-		int ret = -errno;
-
-		if (m == EPOLL_CTL_ADD)
-			flow_epollid_clear(&conn->f);
-		return ret;
-	}
+	if (flow_epoll_set(&conn->f, EPOLL_CTL_MOD, events, conn->sock,
+			   !TAPSIDE(conn)) < 0)
+		return -errno;
 
 	return 0;
 }
@@ -1706,6 +1691,11 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	conn->sock = s;
 	conn->timer = -1;
 	conn->listening_sock = -1;
+	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, s, TGTSIDE) < 0) {
+		flow_perror(flow, "Can't register with epoll");
+		goto cancel;
+	}
 	conn_event(c, conn, TAP_SYN_RCVD);
 
 	conn->wnd_to_tap = WINDOW_DEFAULT;
@@ -2429,6 +2419,15 @@ static void tcp_tap_conn_from_sock(const struct ctx *c, union flow *flow,
 	conn->sock = s;
 	conn->timer = -1;
 	conn->ws_to_tap = conn->ws_from_tap = 0;
+
+	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, s, INISIDE) < 0) {
+		flow_perror(flow, "Can't register with epoll");
+		conn_flag(c, conn, CLOSING);
+		FLOW_ACTIVATE(conn);
+		return;
+	}
+
 	conn_event(c, conn, SOCK_ACCEPTED);
 
 	hash = flow_hash_insert(c, TAP_SIDX(conn));
@@ -3626,7 +3625,6 @@ static int tcp_flow_repair_connect(const struct ctx *c,
 		return rc;
 	}
 
-	flow_epollid_clear(&conn->f);
 	conn->timer = -1;
 	conn->listening_sock = -1;
 
@@ -3690,6 +3688,9 @@ int tcp_flow_migrate_target(struct ctx *c, int fd)
 		FLOW_ACTIVATE(conn);
 		return 0;
 	}
+
+	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
+	flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->sock, !TAPSIDE(conn));
 
 	flow_hash_insert(c, TAP_SIDX(conn));
 	FLOW_ACTIVATE(conn);
