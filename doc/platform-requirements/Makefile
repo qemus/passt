@@ -3,8 +3,10 @@
 # Copyright Red Hat
 # Author: David Gibson <david@gibson.dropbear.id.au>
 
-TARGETS = reuseaddr-priority recv-zero udp-close-dup listen-vs-repair
-SRCS = reuseaddr-priority.c recv-zero.c udp-close-dup.c listen-vs-repair.c
+TARGETS = reuseaddr-priority recv-zero udp-close-dup listen-vs-repair \
+	tcp-close-rst
+SRCS = reuseaddr-priority.c recv-zero.c udp-close-dup.c listen-vs-repair.c \
+	tcp-close-rst.c
 CFLAGS = -Wall
 
 all: cppcheck clang-tidy $(TARGETS:%=check-%)
@@ -25,6 +27,7 @@ clang-tidy:
 	clang-tidy --checks=*,\
 	-altera-id-dependent-backward-branch,\
 	-altera-unroll-loops,\
+	-android-cloexec-accept,\
 	-bugprone-easily-swappable-parameters,\
 	-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,\
 	-concurrency-mt-unsafe,\
@@ -37,6 +40,7 @@ clang-tidy:
 	-misc-include-cleaner,\
 	-modernize-macro-to-enum,\
 	-readability-braces-around-statements,\
+	-readability-function-cognitive-complexity,\
 	-readability-identifier-length,\
 	-readability-isolate-declaration \
 	$(SRCS)

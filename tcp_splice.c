@@ -234,6 +234,37 @@ static void conn_event_do(struct tcp_splice_conn *conn, unsigned long event)
 		conn_event_do(conn, event);				\
 	} while (0)
 
+/**
+ * tcp_splice_rst() - Close spliced connection forcing RST on each side
+ * @conn:	Connection pointer
+ */
+static void tcp_splice_rst(struct tcp_splice_conn *conn)
+{
+	const struct linger linger0 = {
+		.l_onoff = 1,
+		.l_linger = 0,
+	};
+	unsigned sidei;
+
+	if (conn->flags & CLOSING)
+		return; /* Nothing to do */
+
+	/* Force RST on sockets to inform the peer
+	 *
+	 * We do this by setting SO_LINGER with 0 timeout, which means that
+	 * close() will send an RST (unless the connection is already closed in
+	 * both directions).
+	 */
+	flow_foreach_sidei(sidei) {
+		if (setsockopt(conn->s[sidei], SOL_SOCKET,
+			       SO_LINGER, &linger0, sizeof(linger0)) < 0) {
+			flow_dbg_perror(conn,
+"SO_LINGER failed, may not send RST to peer");
+		}
+	}
+
+	conn_flag(conn, CLOSING);
+}
 
 /**
  * tcp_splice_flow_defer() - Deferred per-flow handling (clean up closed)
@@ -299,7 +330,7 @@ static int tcp_splice_connect_finish(const struct ctx *c,
 			if (pipe2(conn->pipe[sidei], O_NONBLOCK | O_CLOEXEC)) {
 				flow_perror(conn, "cannot create %d->%d pipe",
 					    sidei, !sidei);
-				conn_flag(conn, CLOSING);
+				tcp_splice_rst(conn);
 				return -EIO;
 			}
 
@@ -437,7 +468,7 @@ void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0)
 		flow_trace(conn, "failed to set TCP_QUICKACK on %i", s0);
 
 	if (tcp_splice_connect(c, conn))
-		conn_flag(conn, CLOSING);
+		tcp_splice_rst(conn);
 
 	FLOW_ACTIVATE(conn);
 }
@@ -474,14 +505,14 @@ void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
 			flow_trace(conn, "Error event on socket: %s",
 				   strerror_(err));
 
-		goto close;
+		goto reset;
 	}
 
 	if (conn->events == SPLICE_CONNECT) {
 		if (!(events & EPOLLOUT))
-			goto close;
+			goto reset;
 		if (tcp_splice_connect_finish(c, conn))
-			goto close;
+			goto reset;
 	}
 
 	if (events & EPOLLOUT) {
@@ -515,7 +546,7 @@ retry:
 		while (readlen < 0 && errno == EINTR);
 
 		if (readlen < 0 && errno != EAGAIN)
-			goto close;
+			goto reset;
 
 		flow_trace(conn, "%zi from read-side call", readlen);
 
@@ -539,7 +570,7 @@ retry:
 		while (written < 0 && errno == EINTR);
 
 		if (written < 0 && errno != EAGAIN)
-			goto close;
+			goto reset;
 
 		flow_trace(conn, "%zi from write-side call (passed %zi)",
 			   written, c->tcp.pipe_size);
@@ -602,8 +633,11 @@ retry:
 		}
 	}
 
-	if (CONN_HAS(conn, FIN_SENT(0) | FIN_SENT(1)))
-		goto close;
+	if (CONN_HAS(conn, FIN_SENT(0) | FIN_SENT(1))) {
+		/* Clean close, no reset */
+		conn_flag(conn, CLOSING);
+		return;
+	}
 
 	if ((events & (EPOLLIN | EPOLLOUT)) == (EPOLLIN | EPOLLOUT)) {
 		events = EPOLLIN;
@@ -613,12 +647,12 @@ retry:
 	}
 
 	if (events & EPOLLHUP)
-		goto close;
+		goto reset;
 
 	return;
 
-close:
-	conn_flag(conn, CLOSING);
+reset:
+	tcp_splice_rst(conn);
 }
 
 /**

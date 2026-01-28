@@ -1388,7 +1388,34 @@ static int tcp_send_flag(const struct ctx *c, struct tcp_tap_conn *conn,
 }
 
 /**
- * tcp_rst_do() - Reset a tap connection: send RST segment to tap, close socket
+ * tcp_sock_rst() - Close TCP connection forcing RST on socket side
+ * @c:		Execution context
+ * @conn:	Connection pointer
+ */
+static void tcp_sock_rst(const struct ctx *c, struct tcp_tap_conn *conn)
+{
+	const struct linger linger0 = {
+		.l_onoff = 1,
+		.l_linger = 0,
+	};
+
+	/* Force RST on socket to inform the peer
+	 *
+	 * We do this by setting SO_LINGER with 0 timeout, which means that
+	 * close() will send an RST (unless the connection is already closed in
+	 * both directions).
+	 */
+	if (setsockopt(conn->sock, SOL_SOCKET,
+		       SO_LINGER, &linger0, sizeof(linger0)) < 0) {
+		flow_dbg_perror(conn,
+				"SO_LINGER failed, may not send RST to peer");
+	}
+
+	conn_event(c, conn, CLOSED);
+}
+
+/**
+ * tcp_rst_do() - Reset a tap connection: send RST segment on both sides, close
  * @c:		Execution context
  * @conn:	Connection pointer
  */
@@ -1397,8 +1424,10 @@ void tcp_rst_do(const struct ctx *c, struct tcp_tap_conn *conn)
 	if (conn->events == CLOSED)
 		return;
 
+	/* Send RST on tap */
 	tcp_send_flag(c, conn, RST);
-	conn_event(c, conn, CLOSED);
+
+	tcp_sock_rst(c, conn);
 }
 
 /**
@@ -1874,7 +1903,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 			return -1;
 
 		if (th->rst) {
-			conn_event(c, conn, CLOSED);
+			tcp_sock_rst(c, conn);
 			return 1;
 		}
 
@@ -2238,7 +2267,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	flow_trace(conn, "packet length %zu from tap", l4len);
 
 	if (th->rst) {
-		conn_event(c, conn, CLOSED);
+		tcp_sock_rst(c, conn);
 		return 1;
 	}
 
@@ -3684,17 +3713,19 @@ int tcp_flow_migrate_target(struct ctx *c, int fd)
 
 	if ((rc = tcp_flow_repair_socket(c, conn))) {
 		flow_err(flow, "Can't set up socket: %s, drop", strerror_(-rc));
-		/* Can't leave the flow in an incomplete state */
-		FLOW_ACTIVATE(conn);
-		return 0;
+		goto out;
 	}
 
 	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
-	flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->sock, !TAPSIDE(conn));
+	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->sock,
+			   !TAPSIDE(conn)))
+		goto out; /* tcp_flow_migrate_target_ext() will clean this up */
 
 	flow_hash_insert(c, TAP_SIDX(conn));
-	FLOW_ACTIVATE(conn);
 
+out:
+	/* Never leave the flow in an incomplete state */
+	FLOW_ACTIVATE(conn);
 	return 0;
 }
 
