@@ -190,11 +190,6 @@
  * - RTO_INIT_AFTER_SYN_RETRIES: if SYN retries happened during handshake and
  *   RTO is less than this, re-initialise RTO to this for data retransmissions
  *
- * - FIN_TIMEOUT: if a FIN segment was acknowledged by tap/guest and a FIN
- *   segment (write shutdown) was sent via socket (events SOCK_FIN_SENT and
- *   TAP_FIN_ACKED), but no socket activity is detected from the socket within
- *   this time, reset the connection
- *
  * - ACT_TIMEOUT, in the presence of any event: if no activity is detected on
  *   either side, the connection is reset
  *
@@ -341,7 +336,6 @@ enum {
 
 #define RTO_INIT			1		/* s, RFC 6298 */
 #define RTO_INIT_AFTER_SYN_RETRIES	3		/* s, RFC 6298 */
-#define FIN_TIMEOUT			60
 #define ACT_TIMEOUT			7200
 
 #define LOW_RTT_TABLE_SIZE		8
@@ -594,8 +588,6 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 			timeout = MAX(timeout, RTO_INIT_AFTER_SYN_RETRIES);
 		timeout <<= MAX(exp, 0);
 		it.it_value.tv_sec = MIN(timeout, c->tcp.rto_max);
-	} else if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED)) {
-		it.it_value.tv_sec = FIN_TIMEOUT;
 	} else {
 		it.it_value.tv_sec = ACT_TIMEOUT;
 	}
@@ -715,9 +707,6 @@ void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
 			flow_hash_remove(c, TAP_SIDX(conn));
 		tcp_epoll_ctl(conn);
 	}
-
-	if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED))
-		tcp_timer_ctl(c, conn);
 }
 
 /**
@@ -2590,9 +2579,6 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 				conn_flag(c, conn, SYN_RETRIED);
 				tcp_timer_ctl(c, conn);
 			}
-		} else if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED)) {
-			flow_dbg(conn, "FIN timeout");
-			tcp_rst(c, conn);
 		} else if (conn->retries == TCP_MAX_RETRIES) {
 			flow_dbg(conn, "retransmissions count exceeded");
 			tcp_rst(c, conn);
