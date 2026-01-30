@@ -2284,7 +2284,11 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		if (th->fin) {
 			conn->seq_from_tap++;
 
-			shutdown(conn->sock, SHUT_WR);
+			if (shutdown(conn->sock, SHUT_WR) < 0) {
+				flow_dbg_perror(conn, "shutdown() failed");
+				goto reset;
+			}
+
 			tcp_send_flag(c, conn, ACK);
 			conn_event(c, conn, SOCK_FIN_SENT);
 
@@ -2359,7 +2363,11 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		socklen_t sl;
 		struct tcp_info tinfo;
 
-		shutdown(conn->sock, SHUT_WR);
+		if (shutdown(conn->sock, SHUT_WR) < 0) {
+			flow_dbg_perror(conn, "shutdown() failed");
+			goto reset;
+		}
+
 		conn_event(c, conn, SOCK_FIN_SENT);
 		tcp_send_flag(c, conn, ACK);
 		ack_due = 0;
@@ -3831,10 +3839,15 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 		int v;
 
 		v = TCP_SEND_QUEUE;
-		if (setsockopt(s, SOL_TCP, TCP_REPAIR_QUEUE, &v, sizeof(v)))
+		if (setsockopt(s, SOL_TCP, TCP_REPAIR_QUEUE, &v, sizeof(v))) {
 			flow_perror(conn, "Selecting repair queue");
-		else
-			shutdown(s, SHUT_WR);
+		} else {
+			if (shutdown(s, SHUT_WR) < 0) {
+				flow_perror(conn,
+					    "Repair mode shutdown() failed");
+				goto fail;
+			}
+		}
 	}
 
 	if (tcp_flow_repair_wnd(conn, &t))
@@ -3861,8 +3874,12 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 	 * Call shutdown(x, SHUT_WR) *not* in repair mode, which moves us to
 	 * TCP_FIN_WAIT1.
 	 */
-	if (t.tcpi_state == TCP_FIN_WAIT1)
-		shutdown(s, SHUT_WR);
+	if (t.tcpi_state == TCP_FIN_WAIT1) {
+		if (shutdown(s, SHUT_WR) < 0) {
+			flow_perror(conn, "Post-repair shutdown() failed");
+			goto fail;
+		}
+	}
 
 	if (tcp_set_peek_offset(conn, peek_offset))
 		goto fail;
