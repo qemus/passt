@@ -407,6 +407,7 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 			}
 
 			conn_event(c, conn, TAP_FIN_SENT);
+			conn_flag(c, conn, ACK_FROM_TAP_DUE);
 		}
 
 		return 0;

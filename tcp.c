@@ -190,10 +190,6 @@
  * - RTO_INIT_AFTER_SYN_RETRIES: if SYN retries happened during handshake and
  *   RTO is less than this, re-initialise RTO to this for data retransmissions
  *
- * - FIN_TIMEOUT: if a FIN segment was sent to tap/guest (flag ACK_FROM_TAP_DUE
- *   with TAP_FIN_SENT event), and no ACK is received within this time, reset
- *   the connection
- *
  * - FIN_TIMEOUT: if a FIN segment was acknowledged by tap/guest and a FIN
  *   segment (write shutdown) was sent via socket (events SOCK_FIN_SENT and
  *   TAP_FIN_ACKED), but no socket activity is detected from the socket within
