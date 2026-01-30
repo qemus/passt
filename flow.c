@@ -1023,6 +1023,9 @@ static int flow_migrate_source_rollback(struct ctx *c, unsigned bound, int ret)
 
 	debug("...roll back migration");
 
+	if (fwd_listen_sync(c, &c->tcp.fwd_in, PIF_HOST, IPPROTO_TCP) < 0)
+		die("Failed to re-establish listening sockets");
+
 	foreach_established_tcp_flow(flow) {
 		if (FLOW_IDX(flow) >= bound)
 			break;
@@ -1146,6 +1149,15 @@ int flow_migrate_source(struct ctx *c, const struct migrate_stage *stage,
 		err_perror("Can't send flow count (%u)", ntohl(count));
 		return flow_migrate_source_rollback(c, FLOW_MAX, rc);
 	}
+
+	/* HACK: A local to local migrate will fail if the origin passt has the
+	 * listening sockets still open when the destination passt tries to bind
+	 * them.  This does mean there's a window where we lost our listen()s,
+	 * even if the migration is rolled back later.  The only way to really
+	 * fix that is to not allow local to local migration, which arguably we
+	 * should (use namespaces for testing instead). */
+	debug("Stop listen()s");
+	fwd_listen_close(&c->tcp.fwd_in);
 
 	debug("Sending %u flows", ntohl(count));
 

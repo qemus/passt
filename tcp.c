@@ -1704,7 +1704,6 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 
 	conn->sock = s;
 	conn->timer = -1;
-	conn->listening_sock = -1;
 	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, s, TGTSIDE) < 0) {
 		flow_perror(flow, "Can't register with epoll");
@@ -2476,7 +2475,6 @@ static void tcp_tap_conn_from_sock(const struct ctx *c, union flow *flow,
 void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 			const struct timespec *now)
 {
-	struct tcp_tap_conn *conn;
 	union sockaddr_inany sa;
 	socklen_t sl = sizeof(sa);
 	struct flowside *ini;
@@ -2491,9 +2489,6 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 	s = accept4(ref.fd, &sa.sa, &sl, SOCK_NONBLOCK);
 	if (s < 0)
 		goto cancel;
-
-	conn = (struct tcp_tap_conn *)flow;
-	conn->listening_sock = ref.fd;
 
 	tcp_sock_set_nodelay(s);
 
@@ -3393,7 +3388,7 @@ static int tcp_flow_repair_opt(const struct tcp_tap_conn *conn,
 }
 
 /**
- * tcp_flow_migrate_source() - Send data (flow table) for flow, close listening
+ * tcp_flow_migrate_source() - Send data (flow table) for flow
  * @fd:		Descriptor for state migration
  * @conn:	Pointer to the TCP connection structure
  *
@@ -3432,9 +3427,6 @@ int tcp_flow_migrate_source(int fd, struct tcp_tap_conn *conn)
 		err_perror("Can't write migration data, socket %i", conn->sock);
 		return rc;
 	}
-
-	if (conn->listening_sock != -1 && !fcntl(conn->listening_sock, F_GETFD))
-		close(conn->listening_sock);
 
 	return 0;
 }
@@ -3645,7 +3637,6 @@ static int tcp_flow_repair_connect(const struct ctx *c,
 	}
 
 	conn->timer = -1;
-	conn->listening_sock = -1;
 
 	return 0;
 }

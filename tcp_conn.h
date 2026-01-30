@@ -18,7 +18,6 @@
  * @tap_mss:		MSS advertised by tap/guest, rounded to 2 ^ TCP_MSS_BITS
  * @sock:		Socket descriptor number
  * @events:		Connection events, implying connection states
- * @listening_sock:	Listening socket this socket was accept()ed from, or -1
  * @timer:		timerfd descriptor for timeout events
  * @flags:		Connection flags representing internal attributes
  * @sndbuf:		Sending buffer in kernel, rounded to 2 ^ SNDBUF_BITS
@@ -74,8 +73,6 @@ struct tcp_tap_conn {
 
 #define	CONN_STATE_BITS		/* Setting these clears other flags */	\
 	(SOCK_ACCEPTED | TAP_SYN_RCVD | ESTABLISHED)
-
-	int		listening_sock;
 
 	int		timer		:FD_REF_BITS;
 
