@@ -118,6 +118,7 @@ void fwd_scan_ports_timer(struct ctx * c, const struct timespec *now);
 
 int fwd_listen_sync(const struct ctx *c, const struct fwd_ports *fwd,
 		    uint8_t pif, uint8_t proto);
+void fwd_listen_close(const struct fwd_ports *fwd);
 
 bool nat_inbound(const struct ctx *c, const union inany_addr *addr,
 		 union inany_addr *translated);

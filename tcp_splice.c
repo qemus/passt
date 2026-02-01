@@ -627,7 +627,8 @@ retry:
 		flow_foreach_sidei(sidei) {
 			if ((conn->events & FIN_RCVD(sidei)) &&
 			    !(conn->events & FIN_SENT(!sidei))) {
-				shutdown(conn->s[!sidei], SHUT_WR);
+				if (shutdown(conn->s[!sidei], SHUT_WR) < 0)
+					goto reset;
 				conn_event(conn, FIN_SENT(!sidei));
 			}
 		}

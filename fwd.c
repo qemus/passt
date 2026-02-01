@@ -654,6 +654,27 @@ int fwd_listen_sync(const struct ctx *c, const struct fwd_ports *fwd,
 	return 0;
 }
 
+/** fwd_listen_close() - Close all listening sockets
+ * @fwd:	Forwarding information
+ */
+void fwd_listen_close(const struct fwd_ports *fwd)
+{
+	unsigned i;
+
+	for (i = 0; i < fwd->count; i++) {
+		const struct fwd_rule *rule = &fwd->rules[i];
+		unsigned port;
+
+		for (port = rule->first; port <= rule->last; port++) {
+			int *fdp = &rule->socks[port - rule->first];
+			if (*fdp >= 0) {
+				close(*fdp);
+				*fdp = -1;
+			}
+		}
+	}
+}
+
 /* See enum in kernel's include/net/tcp_states.h */
 #define UDP_LISTEN	0x07
 #define TCP_LISTEN	0x0a

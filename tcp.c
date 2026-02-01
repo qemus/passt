@@ -190,15 +190,6 @@
  * - RTO_INIT_AFTER_SYN_RETRIES: if SYN retries happened during handshake and
  *   RTO is less than this, re-initialise RTO to this for data retransmissions
  *
- * - FIN_TIMEOUT: if a FIN segment was sent to tap/guest (flag ACK_FROM_TAP_DUE
- *   with TAP_FIN_SENT event), and no ACK is received within this time, reset
- *   the connection
- *
- * - FIN_TIMEOUT: if a FIN segment was acknowledged by tap/guest and a FIN
- *   segment (write shutdown) was sent via socket (events SOCK_FIN_SENT and
- *   TAP_FIN_ACKED), but no socket activity is detected from the socket within
- *   this time, reset the connection
- *
  * - ACT_TIMEOUT, in the presence of any event: if no activity is detected on
  *   either side, the connection is reset
  *
@@ -345,7 +336,6 @@ enum {
 
 #define RTO_INIT			1		/* s, RFC 6298 */
 #define RTO_INIT_AFTER_SYN_RETRIES	3		/* s, RFC 6298 */
-#define FIN_TIMEOUT			60
 #define ACT_TIMEOUT			7200
 
 #define LOW_RTT_TABLE_SIZE		8
@@ -598,8 +588,6 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 			timeout = MAX(timeout, RTO_INIT_AFTER_SYN_RETRIES);
 		timeout <<= MAX(exp, 0);
 		it.it_value.tv_sec = MIN(timeout, c->tcp.rto_max);
-	} else if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED)) {
-		it.it_value.tv_sec = FIN_TIMEOUT;
 	} else {
 		it.it_value.tv_sec = ACT_TIMEOUT;
 	}
@@ -719,9 +707,6 @@ void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
 			flow_hash_remove(c, TAP_SIDX(conn));
 		tcp_epoll_ctl(conn);
 	}
-
-	if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED))
-		tcp_timer_ctl(c, conn);
 }
 
 /**
@@ -1719,7 +1704,6 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 
 	conn->sock = s;
 	conn->timer = -1;
-	conn->listening_sock = -1;
 	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, s, TGTSIDE) < 0) {
 		flow_perror(flow, "Can't register with epoll");
@@ -2299,7 +2283,11 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		if (th->fin) {
 			conn->seq_from_tap++;
 
-			shutdown(conn->sock, SHUT_WR);
+			if (shutdown(conn->sock, SHUT_WR) < 0) {
+				flow_dbg_perror(conn, "shutdown() failed");
+				goto reset;
+			}
+
 			tcp_send_flag(c, conn, ACK);
 			conn_event(c, conn, SOCK_FIN_SENT);
 
@@ -2374,7 +2362,11 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		socklen_t sl;
 		struct tcp_info tinfo;
 
-		shutdown(conn->sock, SHUT_WR);
+		if (shutdown(conn->sock, SHUT_WR) < 0) {
+			flow_dbg_perror(conn, "shutdown() failed");
+			goto reset;
+		}
+
 		conn_event(c, conn, SOCK_FIN_SENT);
 		tcp_send_flag(c, conn, ACK);
 		ack_due = 0;
@@ -2483,7 +2475,6 @@ static void tcp_tap_conn_from_sock(const struct ctx *c, union flow *flow,
 void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 			const struct timespec *now)
 {
-	struct tcp_tap_conn *conn;
 	union sockaddr_inany sa;
 	socklen_t sl = sizeof(sa);
 	struct flowside *ini;
@@ -2498,9 +2489,6 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 	s = accept4(ref.fd, &sa.sa, &sl, SOCK_NONBLOCK);
 	if (s < 0)
 		goto cancel;
-
-	conn = (struct tcp_tap_conn *)flow;
-	conn->listening_sock = ref.fd;
 
 	tcp_sock_set_nodelay(s);
 
@@ -2594,9 +2582,6 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 				conn_flag(c, conn, SYN_RETRIED);
 				tcp_timer_ctl(c, conn);
 			}
-		} else if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED)) {
-			flow_dbg(conn, "FIN timeout");
-			tcp_rst(c, conn);
 		} else if (conn->retries == TCP_MAX_RETRIES) {
 			flow_dbg(conn, "retransmissions count exceeded");
 			tcp_rst(c, conn);
@@ -3403,7 +3388,7 @@ static int tcp_flow_repair_opt(const struct tcp_tap_conn *conn,
 }
 
 /**
- * tcp_flow_migrate_source() - Send data (flow table) for flow, close listening
+ * tcp_flow_migrate_source() - Send data (flow table) for flow
  * @fd:		Descriptor for state migration
  * @conn:	Pointer to the TCP connection structure
  *
@@ -3442,9 +3427,6 @@ int tcp_flow_migrate_source(int fd, struct tcp_tap_conn *conn)
 		err_perror("Can't write migration data, socket %i", conn->sock);
 		return rc;
 	}
-
-	if (conn->listening_sock != -1 && !fcntl(conn->listening_sock, F_GETFD))
-		close(conn->listening_sock);
 
 	return 0;
 }
@@ -3655,7 +3637,6 @@ static int tcp_flow_repair_connect(const struct ctx *c,
 	}
 
 	conn->timer = -1;
-	conn->listening_sock = -1;
 
 	return 0;
 }
@@ -3849,10 +3830,15 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 		int v;
 
 		v = TCP_SEND_QUEUE;
-		if (setsockopt(s, SOL_TCP, TCP_REPAIR_QUEUE, &v, sizeof(v)))
+		if (setsockopt(s, SOL_TCP, TCP_REPAIR_QUEUE, &v, sizeof(v))) {
 			flow_perror(conn, "Selecting repair queue");
-		else
-			shutdown(s, SHUT_WR);
+		} else {
+			if (shutdown(s, SHUT_WR) < 0) {
+				flow_perror(conn,
+					    "Repair mode shutdown() failed");
+				goto fail;
+			}
+		}
 	}
 
 	if (tcp_flow_repair_wnd(conn, &t))
@@ -3879,8 +3865,12 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 	 * Call shutdown(x, SHUT_WR) *not* in repair mode, which moves us to
 	 * TCP_FIN_WAIT1.
 	 */
-	if (t.tcpi_state == TCP_FIN_WAIT1)
-		shutdown(s, SHUT_WR);
+	if (t.tcpi_state == TCP_FIN_WAIT1) {
+		if (shutdown(s, SHUT_WR) < 0) {
+			flow_perror(conn, "Post-repair shutdown() failed");
+			goto fail;
+		}
+	}
 
 	if (tcp_set_peek_offset(conn, peek_offset))
 		goto fail;
