@@ -198,6 +198,13 @@
  *   TCP_INFO, with a representable range from RTT_STORE_MIN (100 us) to
  *   RTT_STORE_MAX (3276.8 ms). The timeout value is clamped accordingly.
  *
+ * We also use a global interval timer for an activity timeout which doesn't
+ * require precision:
+ *
+ * - INACTIVITY_INTERVAL: if a connection has had no activity for an entire
+ *   interval, close and reset it.  This means that idle connections (without
+ *   keepalives) will be removed between INACTIVITY_INTERVAL s and
+ *   2*INACTIVITY_INTERVAL s after the last activity.
  *
  * Summary of data flows (with ESTABLISHED event)
  * ----------------------------------------------
@@ -333,7 +340,8 @@ enum {
 
 #define RTO_INIT			1		/* s, RFC 6298 */
 #define RTO_INIT_AFTER_SYN_RETRIES	3		/* s, RFC 6298 */
-#define ACT_TIMEOUT			7200
+
+#define INACTIVITY_INTERVAL		7200		/* s */
 
 #define LOW_RTT_TABLE_SIZE		8
 #define LOW_RTT_THRESHOLD		10 /* us */
@@ -2256,6 +2264,8 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		return 1;
 	}
 
+	conn->inactive = false;
+
 	if (th->ack && !(conn->events & ESTABLISHED))
 		tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq));
 
@@ -2624,6 +2634,8 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 		return;
 	}
 
+	conn->inactive = false;
+
 	if ((conn->events & TAP_FIN_ACKED) && (events & EPOLLHUP)) {
 		conn_event(c, conn, CLOSED);
 		return;
@@ -2875,17 +2887,49 @@ int tcp_init(struct ctx *c)
 }
 
 /**
+ * tcp_inactivity() - Scan for and close long-inactive connections
+ * @:	Execution context
+ */
+static void tcp_inactivity(struct ctx *c, const struct timespec *now)
+{
+	union flow *flow;
+
+	if (now->tv_sec - c->tcp.inactivity_run < INACTIVITY_INTERVAL)
+		return;
+
+	debug("TCP inactivity scan");
+	c->tcp.inactivity_run = now->tv_sec;
+
+	flow_foreach(flow) {
+		struct tcp_tap_conn *conn = &flow->tcp;
+
+		if (flow->f.type != FLOW_TCP)
+			continue;
+
+		if (conn->inactive) {
+			/* No activity in this interval, reset */
+			flow_dbg(conn, "Inactive for at least %us, resetting",
+				 INACTIVITY_INTERVAL);
+			tcp_rst(c, conn);
+		}
+
+		/* Ready to check fot next interval */
+		conn->inactive = true;
+	}
+}
+
+/**
  * tcp_timer() - Periodic tasks: port detection, closed connections, pool refill
  * @c:		Execution context
  * @now:	Current timestamp
  */
-void tcp_timer(const struct ctx *c, const struct timespec *now)
+void tcp_timer(struct ctx *c, const struct timespec *now)
 {
-	(void)now;
-
 	tcp_sock_refill_init(c);
 	if (c->mode == MODE_PASTA)
 		tcp_splice_refill(c);
+
+	tcp_inactivity(c, now);
 }
 
 /**

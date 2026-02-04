@@ -21,7 +21,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 int tcp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 	       const union inany_addr *addr, const char *ifname, in_port_t port);
 int tcp_init(struct ctx *c);
-void tcp_timer(const struct ctx *c, const struct timespec *now);
+void tcp_timer(struct ctx *c, const struct timespec *now);
 void tcp_defer_handler(struct ctx *c);
 
 void tcp_update_l2_buf(const unsigned char *eth_d);
@@ -38,6 +38,7 @@ extern bool peek_offset_cap;
  * @rto_max:		Maximum retry timeout (in s)
  * @syn_retries:	SYN retries using exponential backoff timeout
  * @syn_linear_timeouts: SYN retries before using exponential backoff timeout
+ * @inactivity_run:	Time we last scanned for inactive connections
  */
 struct tcp_ctx {
 	struct fwd_ports fwd_in;
@@ -47,6 +48,7 @@ struct tcp_ctx {
 	int rto_max;
 	uint8_t syn_retries;
 	uint8_t syn_linear_timeouts;
+	time_t inactivity_run;
 };
 
 #endif /* TCP_H */
