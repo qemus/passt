@@ -190,9 +190,6 @@
  * - RTO_INIT_AFTER_SYN_RETRIES: if SYN retries happened during handshake and
  *   RTO is less than this, re-initialise RTO to this for data retransmissions
  *
- * - ACT_TIMEOUT, in the presence of any event: if no activity is detected on
- *   either side, the connection is reset
- *
  * - RTT / 2 elapsed after data segment received from tap without having
  *   sent an ACK segment, or zero-sized window advertised to tap/guest (flag
  *   ACK_TO_TAP_DUE): forcibly check if an ACK segment can be sent.
@@ -589,7 +586,9 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		timeout <<= MAX(exp, 0);
 		it.it_value.tv_sec = MIN(timeout, c->tcp.rto_max);
 	} else {
-		it.it_value.tv_sec = ACT_TIMEOUT;
+		/* Disarm */
+		it.it_value.tv_sec = 0;
+		it.it_value.tv_nsec = 0;
 	}
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
@@ -2599,23 +2598,6 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 
 			tcp_data_from_sock(c, conn);
 			tcp_timer_ctl(c, conn);
-		}
-	} else {
-		struct itimerspec new = { { 0 }, { ACT_TIMEOUT, 0 } };
-		struct itimerspec old = { { 0 }, { 0 } };
-
-		/* Activity timeout: if it was already set, reset the
-		 * connection, otherwise, it was a left-over from ACK_TO_TAP_DUE
-		 * or ACK_FROM_TAP_DUE, so just set the long timeout in that
-		 * case. This avoids having to preemptively reset the timer on
-		 * ~ACK_TO_TAP_DUE or ~ACK_FROM_TAP_DUE.
-		 */
-		if (timerfd_settime(conn->timer, 0, &new, &old))
-			flow_perror(conn, "failed to set timer");
-
-		if (old.it_value.tv_sec == ACT_TIMEOUT) {
-			flow_dbg(conn, "activity timeout");
-			tcp_rst(c, conn);
 		}
 	}
 }
