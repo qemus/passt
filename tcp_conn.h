@@ -16,6 +16,7 @@
  * @ws_from_tap:	Window scaling factor advertised from tap/guest
  * @ws_to_tap:		Window scaling factor advertised to tap/guest
  * @tap_mss:		MSS advertised by tap/guest, rounded to 2 ^ TCP_MSS_BITS
+ * @tapinactive:	No tao activity within the current KEEPALIVE_INTERVAL
  * @inactive:		No activity within the current INACTIVITY_INTERVAL
  * @sock:		Socket descriptor number
  * @events:		Connection events, implying connection states
@@ -58,6 +59,7 @@ struct tcp_tap_conn {
 	(conn->rtt_exp = MIN(RTT_EXP_MAX, ilog2(MAX(1, rtt / RTT_STORE_MIN))))
 #define RTT_GET(conn)			(RTT_STORE_MIN << conn->rtt_exp)
 
+	bool		tap_inactive	:1;
 	bool		inactive	:1;
 
 	int		sock		:FD_REF_BITS;

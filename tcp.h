@@ -38,6 +38,7 @@ extern bool peek_offset_cap;
  * @rto_max:		Maximum retry timeout (in s)
  * @syn_retries:	SYN retries using exponential backoff timeout
  * @syn_linear_timeouts: SYN retries before using exponential backoff timeout
+ * @keepalive_run:	Time we last issued tap-side keepalives
  * @inactivity_run:	Time we last scanned for inactive connections
  */
 struct tcp_ctx {
@@ -48,6 +49,7 @@ struct tcp_ctx {
 	int rto_max;
 	uint8_t syn_retries;
 	uint8_t syn_linear_timeouts;
+	time_t keepalive_run;
 	time_t inactivity_run;
 };
 

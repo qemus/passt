@@ -206,6 +206,12 @@
  *   keepalives) will be removed between INACTIVITY_INTERVAL s and
  *   2*INACTIVITY_INTERVAL s after the last activity.
  *
+ * - KEEPALIVE_INTERVAL: if a connection has had no tap-side activity for an
+ *   entire interval, send a tap-side keepalive.  If the endpoint is no longer
+ *   aware of the connection (due to a reboot, or a kernel timeout in FIN_WAIT_2
+ *   state) that should trigger an RST, so we won't keep track of connections
+ *   that the guest endpoint no longer cares about.
+ *
  * Summary of data flows (with ESTABLISHED event)
  * ----------------------------------------------
  *
@@ -342,6 +348,7 @@ enum {
 #define RTO_INIT_AFTER_SYN_RETRIES	3		/* s, RFC 6298 */
 
 #define INACTIVITY_INTERVAL		7200		/* s */
+#define	KEEPALIVE_INTERVAL		30		/* s */
 
 #define LOW_RTT_TABLE_SIZE		8
 #define LOW_RTT_THRESHOLD		10 /* us */
@@ -2265,6 +2272,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	}
 
 	conn->inactive = false;
+	conn->tap_inactive = false;
 
 	if (th->ack && !(conn->events & ESTABLISHED))
 		tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq));
@@ -2887,6 +2895,36 @@ int tcp_init(struct ctx *c)
 }
 
 /**
+ * tcp_keepalive() - Send keepalives for connections which need it
+ * @:	Execution context
+ */
+static void tcp_keepalive(struct ctx *c, const struct timespec *now)
+{
+	union flow *flow;
+
+	if (now->tv_sec - c->tcp.keepalive_run < KEEPALIVE_INTERVAL)
+		return;
+
+	c->tcp.keepalive_run = now->tv_sec;
+
+	flow_foreach(flow) {
+		struct tcp_tap_conn *conn = &flow->tcp;
+
+		if (flow->f.type != FLOW_TCP)
+			continue;
+
+		if (conn->tap_inactive) {
+			flow_dbg(conn, "No tap activity for least %us, send keepalive",
+				 KEEPALIVE_INTERVAL);
+			tcp_send_flag(c, conn, KEEPALIVE);
+		}
+
+		/* Ready to check fot next interval */
+		conn->tap_inactive = true;
+	}
+}
+
+/**
  * tcp_inactivity() - Scan for and close long-inactive connections
  * @:	Execution context
  */
@@ -2929,6 +2967,7 @@ void tcp_timer(struct ctx *c, const struct timespec *now)
 	if (c->mode == MODE_PASTA)
 		tcp_splice_refill(c);
 
+	tcp_keepalive(c, now);
 	tcp_inactivity(c, now);
 }
 
