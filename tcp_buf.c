@@ -229,6 +229,10 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	tcp_frame_conns[tcp_payload_used++] = conn;
 	l4len = optlen + sizeof(struct tcphdr);
 	iov[TCP_IOV_PAYLOAD].iov_len = l4len;
+
+	if (flags & KEEPALIVE)
+		seq--;
+
 	tcp_l2_buf_fill_headers(c, conn, iov, NULL, seq, false);
 
 	tcp_l2_buf_pad(iov);

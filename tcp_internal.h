@@ -38,6 +38,8 @@
 
 /* Flags for internal usage */
 #define DUP_ACK		(1 << 5)
+#define KEEPALIVE	(1 << 6)
+
 #define OPT_EOL		0
 #define OPT_NOP		1
 #define OPT_MSS		2
