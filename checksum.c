@@ -281,7 +281,7 @@ void csum_icmp6(struct icmp6hdr *icmp6hr,
 	icmp6hr->icmp6_cksum = csum(payload, dlen, psum);
 }
 
-#ifdef __AVX2__
+#if defined(__AVX2__)
 #include <immintrin.h>
 
 /**
@@ -479,7 +479,111 @@ uint32_t csum_unfolded(const void *buf, size_t len, uint32_t init)
 
 	return init;
 }
-#else /* __AVX2__ */
+#elif defined(__POWER9_VECTOR__) || defined(__POWER8_VECTOR__)
+#include <altivec.h>
+
+/**
+ * csum_vsx() - Compute 32-bit checksum using VSX SIMD instructions
+ * @buf:	Input buffer
+ * @len:	Input length
+ * @init:	Initial 32-bit checksum, 0 for no pre-computed checksum
+ *
+ * Return: 32-bit checksum, not complemented, not folded
+ */
+/* NOLINTNEXTLINE(clang-diagnostic-unknown-attributes) */
+__attribute__((optimize("-fno-strict-aliasing")))	/* See csum_16b() */
+static uint32_t csum_vsx(const void *buf, size_t len, uint32_t init)
+{
+	const uint8_t *p = buf;
+	vector unsigned int sum_even = vec_splat_u32(0);
+	vector unsigned int sum_odd = vec_splat_u32(0);
+	const vector unsigned short ones = vec_splat_u16(1);
+	uint64_t sum64 = init;
+
+#ifdef __POWER9_VECTOR__
+	while (len >= 64) {
+		vector unsigned char v0b = vec_vsx_ld(0, p);
+		vector unsigned char v1b = vec_vsx_ld(16, p);
+		vector unsigned char v2b = vec_vsx_ld(32, p);
+		vector unsigned char v3b = vec_vsx_ld(48, p);
+		vector unsigned short v0 = (vector unsigned short)v0b;
+		vector unsigned short v1 = (vector unsigned short)v1b;
+		vector unsigned short v2 = (vector unsigned short)v2b;
+		vector unsigned short v3 = (vector unsigned short)v3b;
+
+		sum_even = vec_add(sum_even, vec_mule(v0, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v0, ones));
+		sum_even = vec_add(sum_even, vec_mule(v1, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v1, ones));
+		sum_even = vec_add(sum_even, vec_mule(v2, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v2, ones));
+		sum_even = vec_add(sum_even, vec_mule(v3, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v3, ones));
+
+		p += 64;
+		len -= 64;
+	}
+#endif
+
+	while (len >= 32) {
+		vector unsigned char v0b = vec_vsx_ld(0, p);
+		vector unsigned char v1b = vec_vsx_ld(16, p);
+		vector unsigned short v0 = (vector unsigned short)v0b;
+		vector unsigned short v1 = (vector unsigned short)v1b;
+
+		sum_even = vec_add(sum_even, vec_mule(v0, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v0, ones));
+		sum_even = vec_add(sum_even, vec_mule(v1, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v1, ones));
+
+		p += 32;
+		len -= 32;
+	}
+
+	while (len >= 16) {
+		vector unsigned char v0b = vec_vsx_ld(0, p);
+		vector unsigned short v0 = (vector unsigned short)v0b;
+
+		sum_even = vec_add(sum_even, vec_mule(v0, ones));
+		sum_odd = vec_add(sum_odd, vec_mulo(v0, ones));
+
+		p += 16;
+		len -= 16;
+	}
+
+	{
+		vector unsigned int sum32 = vec_add(sum_even, sum_odd);
+		uint32_t partial[4] __attribute__((aligned(16)));
+
+		vec_st(sum32, 0, partial);
+		sum64 += (uint64_t)partial[0] + partial[1] +
+			 partial[2] + partial[3];
+	}
+
+	sum64 += sum_16b(p, len);
+
+	sum64 = (sum64 >> 32) + (sum64 & 0xffffffff);
+	sum64 += sum64 >> 32;
+
+	return (uint32_t)sum64;
+}
+
+/**
+ * csum_unfolded() - Calculate the unfolded checksum of a data buffer.
+ *
+ * @buf:   Input buffer
+ * @len:   Input length
+ * @init:  Initial 32-bit checksum, 0 for no pre-computed checksum
+ *
+ * Return: 32-bit unfolded checksum
+ */
+/* NOLINTNEXTLINE(clang-diagnostic-unknown-attributes) */
+__attribute__((optimize("-fno-strict-aliasing")))	/* See csum_16b() */
+uint32_t csum_unfolded(const void *buf, size_t len, uint32_t init)
+{
+	return csum_vsx(buf, len, init);
+}
+#else /* !__AVX2__ && !__POWER9_VECTOR__ && !__POWER8_VECTOR__ */
 /**
  * csum_unfolded() - Calculate the unfolded checksum of a data buffer.
  *
@@ -495,7 +599,7 @@ uint32_t csum_unfolded(const void *buf, size_t len, uint32_t init)
 {
 	return sum_16b(buf, len) + init;
 }
-#endif /* !__AVX2__ */
+#endif /* !__AVX2__ && !__POWER9_VECTOR__ && !__POWER8_VECTOR__ */
 
 /**
  * csum_iov_tail() - Calculate unfolded checksum for the tail of an IO vector
