@@ -924,7 +924,6 @@ static void tcp_fill_header(struct tcphdr *th,
  * tcp_fill_headers() - Fill 802.3, IP, TCP headers
  * @c:			Execution context
  * @conn:		Connection pointer
- * @taph:		tap backend specific header
  * @eh:		Pointer to Ethernet header
  * @ip4h:		Pointer to IPv4 header, or NULL
  * @ip6h:		Pointer to IPv6 header, or NULL
@@ -933,12 +932,15 @@ static void tcp_fill_header(struct tcphdr *th,
  * @ip4_check:		IPv4 checksum, if already known
  * @seq:		Sequence number for this segment
  * @no_tcp_csum:	Do not set TCP checksum
+ *
+ * Return: frame length (including L2 headers)
  */
-void tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
-		      struct tap_hdr *taph, struct ethhdr *eh,
-		      struct iphdr *ip4h, struct ipv6hdr *ip6h,
-		      struct tcphdr *th, struct iov_tail *payload,
-		      const uint16_t *ip4_check, uint32_t seq, bool no_tcp_csum)
+size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
+			struct ethhdr *eh,
+			struct iphdr *ip4h, struct ipv6hdr *ip6h,
+			struct tcphdr *th, struct iov_tail *payload,
+			const uint16_t *ip4_check, uint32_t seq,
+			bool no_tcp_csum)
 {
 	const struct flowside *tapside = TAPFLOW(conn);
 	size_t l4len = iov_tail_size(payload) + sizeof(*th);
@@ -1004,7 +1006,7 @@ void tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 	else
 		tcp_update_csum(psum, th, payload);
 
-	tap_hdr_update(taph, MAX(l3len + sizeof(struct ethhdr), ETH_ZLEN));
+	return MAX(l3len + sizeof(struct ethhdr), ETH_ZLEN);
 }
 
 /**

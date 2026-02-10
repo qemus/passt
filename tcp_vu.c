@@ -135,7 +135,7 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	flags_elem[0].in_sg[0].iov_len = hdrlen + optlen;
 	payload = IOV_TAIL(flags_elem[0].in_sg, 1, hdrlen);
 
-	tcp_fill_headers(c, conn, NULL, eh, ip4h, ip6h, th, &payload,
+	tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &payload,
 			 NULL, seq, !*c->pcap);
 
 	vu_pad(&flags_elem[0].in_sg[0], hdrlen + optlen);
@@ -335,7 +335,7 @@ static void tcp_vu_prepare(const struct ctx *c, struct tcp_tap_conn *conn,
 	th->ack = 1;
 	th->psh = push;
 
-	tcp_fill_headers(c, conn, NULL, eh, ip4h, ip6h, th, &payload,
+	tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &payload,
 			 *check, conn->seq_to_tap, no_tcp_csum);
 	if (ip4h)
 		*check = &ip4h->check;

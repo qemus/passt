@@ -183,14 +183,16 @@ static void tcp_l2_buf_fill_headers(const struct ctx *c,
 	struct ethhdr *eh = iov[TCP_IOV_ETH].iov_base;
 	struct ipv6hdr *ip6h = NULL;
 	struct iphdr *ip4h = NULL;
+	size_t l2len;
 
 	if (a4)
 		ip4h = iov[TCP_IOV_IP].iov_base;
 	else
 		ip6h = iov[TCP_IOV_IP].iov_base;
 
-	tcp_fill_headers(c, conn, taph, eh, ip4h, ip6h, th, &tail,
-			 check, seq, no_tcp_csum);
+	l2len = tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &tail, check, seq,
+				 no_tcp_csum);
+	tap_hdr_update(taph, l2len);
 }
 
 /**
