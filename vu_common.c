@@ -261,7 +261,7 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 
 	vu_init_elem(elem, in_sg, VIRTQUEUE_MAX_SIZE);
 
-	size += sizeof(struct virtio_net_hdr_mrg_rxbuf);
+	size += VNET_HLEN;
 	elem_cnt = vu_collect(vdev, vq, elem, VIRTQUEUE_MAX_SIZE, size, &total);
 	if (total < size) {
 		debug("vu_send_single: no space to send the data "
@@ -271,16 +271,13 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 
 	vu_set_vnethdr(vdev, in_sg[0].iov_base, elem_cnt);
 
-	total -= sizeof(struct virtio_net_hdr_mrg_rxbuf);
+	total -= VNET_HLEN;
 
 	/* copy data from the buffer to the iovec */
-	iov_from_buf(in_sg, elem_cnt, sizeof(struct virtio_net_hdr_mrg_rxbuf),
-		     buf, total);
+	iov_from_buf(in_sg, elem_cnt, VNET_HLEN, buf, total);
 
-	if (*c->pcap) {
-		pcap_iov(in_sg, elem_cnt,
-			 sizeof(struct virtio_net_hdr_mrg_rxbuf));
-	}
+	if (*c->pcap)
+		pcap_iov(in_sg, elem_cnt, VNET_HLEN);
 
 	vu_flush(vdev, vq, elem, elem_cnt);
 

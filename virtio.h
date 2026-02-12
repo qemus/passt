@@ -15,6 +15,8 @@
 /* Maximum size of a virtqueue */
 #define VIRTQUEUE_MAX_SIZE 1024
 
+#define VNET_HLEN	(sizeof(struct virtio_net_hdr_mrg_rxbuf))
+
 /**
  * struct vu_ring - Virtqueue rings
  * @num:		Size of the queue
