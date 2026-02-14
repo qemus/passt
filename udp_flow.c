@@ -17,8 +17,6 @@
 #include "udp_internal.h"
 #include "epoll_ctl.h"
 
-#define UDP_CONN_TIMEOUT	180 /* s, timeout for ephemeral or local bind */
-
 /**
  * udp_at_sidx() - Get UDP specific flow at given sidx
  * @sidx:    Flow and side to retrieve
@@ -152,6 +150,8 @@ static flow_sidx_t udp_flow_new(const struct ctx *c, union flow *flow,
 	uflow->ts = now->tv_sec;
 	uflow->s[INISIDE] = uflow->s[TGTSIDE] = -1;
 	uflow->ttl[INISIDE] = uflow->ttl[TGTSIDE] = 0;
+	uflow->activity[INISIDE] = 1;
+	uflow->activity[TGTSIDE] = 0;
 
 	flow_foreach_sidei(sidei) {
 		if (pif_is_socket(uflow->f.pif[sidei]))
@@ -228,7 +228,7 @@ flow_sidx_t udp_flow_from_sock(const struct ctx *c, uint8_t pif,
 
 	sidx = flow_lookup_sa(c, IPPROTO_UDP, pif, s_in, dst, port);
 	if ((uflow = udp_at_sidx(sidx))) {
-		uflow->ts = now->tv_sec;
+		udp_flow_activity(uflow, sidx.sidei, now);
 		return flow_sidx_opposite(sidx);
 	}
 
@@ -285,7 +285,7 @@ flow_sidx_t udp_flow_from_tap(const struct ctx *c,
 	sidx = flow_lookup_af(c, IPPROTO_UDP, pif, af, saddr, daddr,
 			      srcport, dstport);
 	if ((uflow = udp_at_sidx(sidx))) {
-		uflow->ts = now->tv_sec;
+		udp_flow_activity(uflow, sidx.sidei, now);
 		return flow_sidx_opposite(sidx);
 	}
 
@@ -362,9 +362,29 @@ bool udp_flow_defer(const struct ctx *c, struct udp_flow *uflow,
 bool udp_flow_timer(const struct ctx *c, struct udp_flow *uflow,
 		    const struct timespec *now)
 {
-	if (now->tv_sec - uflow->ts <= UDP_CONN_TIMEOUT)
+	int timeout = c->udp.timeout;
+
+	if (uflow->activity[TGTSIDE] &&
+	    (uflow->activity[INISIDE] > 1 || uflow->activity[TGTSIDE] > 1))
+		timeout = c->udp.stream_timeout;
+
+	if (now->tv_sec - uflow->ts <= timeout)
 		return false;
 
 	udp_flow_close(c, uflow);
 	return true;
+}
+
+/**
+ * udp_flow_activity() - Track activity of a UDP flow
+ * @uflow:	UDP flow
+ * @sidei:	Side index of the flow (INISIDE or TGTSIDE)
+ * @now:	Current timestamp
+ */
+void udp_flow_activity(struct udp_flow *uflow, unsigned int sidei,
+		       const struct timespec *now)
+{
+	uflow->ts = now->tv_sec;
+	if (uflow->activity[sidei] < UINT8_MAX)
+		uflow->activity[sidei]++;
 }

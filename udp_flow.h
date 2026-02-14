@@ -16,6 +16,7 @@
  * @flush1:	@s[1] may have datagrams queued for other flows
  * @ts:		Activity timestamp
  * @s:		Socket fd (or -1) for each side of the flow
+ * @activity:	Packets seen from each side of the flow, up to UINT8_MAX
  */
 struct udp_flow {
 	/* Must be first element */
@@ -29,6 +30,7 @@ struct udp_flow {
 
 	time_t ts;
 	int s[SIDES];
+	uint8_t activity[SIDES];
 };
 
 struct udp_flow *udp_at_sidx(flow_sidx_t sidx);
@@ -46,5 +48,7 @@ bool udp_flow_defer(const struct ctx *c, struct udp_flow *uflow,
 		    const struct timespec *now);
 bool udp_flow_timer(const struct ctx *c, struct udp_flow *uflow,
 		    const struct timespec *now);
+void udp_flow_activity(struct udp_flow *uflow, unsigned int sidei,
+		       const struct timespec *now);
 
 #endif /* UDP_FLOW_H */
