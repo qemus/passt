@@ -11,7 +11,7 @@
 
 static inline void *vu_eth(void *base)
 {
-	return ((char *)base + sizeof(struct virtio_net_hdr_mrg_rxbuf));
+	return ((char *)base + VNET_HLEN);
 }
 
 static inline void *vu_ip(void *base)

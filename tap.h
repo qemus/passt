@@ -65,8 +65,7 @@ static inline struct iovec tap_hdr_iov(const struct ctx *c,
  */
 static inline void tap_hdr_update(struct tap_hdr *thdr, size_t l2len)
 {
-	if (thdr)
-		thdr->vnet_len = htonl(l2len);
+	thdr->vnet_len = htonl(l2len);
 }
 
 unsigned long tap_l2_max_len(const struct ctx *c);

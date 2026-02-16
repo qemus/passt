@@ -49,8 +49,7 @@ static size_t tcp_vu_hdrlen(bool v6)
 {
 	size_t hdrlen;
 
-	hdrlen = sizeof(struct virtio_net_hdr_mrg_rxbuf) +
-		 sizeof(struct ethhdr) + sizeof(struct tcphdr);
+	hdrlen = VNET_HLEN + sizeof(struct ethhdr) + sizeof(struct tcphdr);
 
 	if (v6)
 		hdrlen += sizeof(struct ipv6hdr);
@@ -135,15 +134,13 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	flags_elem[0].in_sg[0].iov_len = hdrlen + optlen;
 	payload = IOV_TAIL(flags_elem[0].in_sg, 1, hdrlen);
 
-	tcp_fill_headers(c, conn, NULL, eh, ip4h, ip6h, th, &payload,
+	tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &payload,
 			 NULL, seq, !*c->pcap);
 
 	vu_pad(&flags_elem[0].in_sg[0], hdrlen + optlen);
 
-	if (*c->pcap) {
-		pcap_iov(&flags_elem[0].in_sg[0], 1,
-			 sizeof(struct virtio_net_hdr_mrg_rxbuf));
-	}
+	if (*c->pcap)
+		pcap_iov(&flags_elem[0].in_sg[0], 1, VNET_HLEN);
 	nb_ack = 1;
 
 	if (flags & DUP_ACK) {
@@ -159,10 +156,8 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 			       flags_elem[0].in_sg[0].iov_len);
 			nb_ack++;
 
-			if (*c->pcap) {
-				pcap_iov(&flags_elem[1].in_sg[0], 1,
-					 sizeof(struct virtio_net_hdr_mrg_rxbuf));
-			}
+			if (*c->pcap)
+				pcap_iov(&flags_elem[1].in_sg[0], 1, VNET_HLEN);
 		}
 	}
 
@@ -335,7 +330,7 @@ static void tcp_vu_prepare(const struct ctx *c, struct tcp_tap_conn *conn,
 	th->ack = 1;
 	th->psh = push;
 
-	tcp_fill_headers(c, conn, NULL, eh, ip4h, ip6h, th, &payload,
+	tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &payload,
 			 *check, conn->seq_to_tap, no_tcp_csum);
 	if (ip4h)
 		*check = &ip4h->check;
@@ -464,10 +459,8 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 		/* Pad first/single buffer only, it's at least ETH_ZLEN long */
 		vu_pad(iov, dlen + hdrlen);
 
-		if (*c->pcap) {
-			pcap_iov(iov, buf_cnt,
-				 sizeof(struct virtio_net_hdr_mrg_rxbuf));
-		}
+		if (*c->pcap)
+			pcap_iov(iov, buf_cnt, VNET_HLEN);
 
 		conn->seq_to_tap += dlen;
 	}

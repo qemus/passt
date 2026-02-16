@@ -41,6 +41,10 @@
   @{PROC}/sys/net/ipv4/tcp_syn_linear_timeouts r,
   @{PROC}/sys/net/ipv4/tcp_rto_max_ms r,
 
+  # udp_get_timeout_params(), udp.c
+  @{PROC}/sys/net/netfilter/nf_conntrack_udp_timeout r,
+  @{PROC}/sys/net/netfilter/nf_conntrack_udp_timeout_stream r,
+
   network netlink raw,				# nl_sock_init_do(), netlink.c
 
   network inet stream,				# tcp.c

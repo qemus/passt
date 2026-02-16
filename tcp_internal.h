@@ -176,11 +176,12 @@ void tcp_rst_do(const struct ctx *c, struct tcp_tap_conn *conn);
 
 struct tcp_info_linux;
 
-void tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
-		      struct tap_hdr *taph, struct ethhdr *eh,
-		      struct iphdr *ip4h, struct ipv6hdr *ip6h,
-		      struct tcphdr *th, struct iov_tail *payload,
-		      const uint16_t *ip4_check, uint32_t seq, bool no_tcp_csum);
+size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
+			struct ethhdr *eh,
+			struct iphdr *ip4h, struct ipv6hdr *ip6h,
+			struct tcphdr *th, struct iov_tail *payload,
+			const uint16_t *ip4_check, uint32_t seq,
+			bool no_tcp_csum);
 
 int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 			  bool force_seq, struct tcp_info_linux *tinfo);

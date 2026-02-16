@@ -46,8 +46,7 @@ static size_t udp_vu_hdrlen(bool v6)
 {
 	size_t hdrlen;
 
-	hdrlen = sizeof(struct virtio_net_hdr_mrg_rxbuf) +
-		 sizeof(struct ethhdr) + sizeof(struct udphdr);
+	hdrlen = VNET_HLEN + sizeof(struct ethhdr) + sizeof(struct udphdr);
 
 	if (v6)
 		hdrlen += sizeof(struct ipv6hdr);
@@ -93,9 +92,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	vu_init_elem(elem, iov_vu, VIRTQUEUE_MAX_SIZE);
 
 	iov_cnt = vu_collect(vdev, vq, elem, VIRTQUEUE_MAX_SIZE,
-			     IP_MAX_MTU + ETH_HLEN +
-			     sizeof(struct virtio_net_hdr_mrg_rxbuf),
-			     NULL);
+			     IP_MAX_MTU + ETH_HLEN + VNET_HLEN, NULL);
 	if (iov_cnt == 0)
 		return -1;
 
@@ -127,7 +124,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	iov_used = idx + !!off;
 
 	/* pad frame to 60 bytes: first buffer is at least ETH_ZLEN long */
-	l2len = *dlen + hdrlen - sizeof(struct virtio_net_hdr_mrg_rxbuf);
+	l2len = *dlen + hdrlen - VNET_HLEN;
 	vu_pad(&iov_vu[0], l2len);
 
 	vu_set_vnethdr(vdev, iov_vu[0].iov_base, iov_used);
@@ -233,8 +230,7 @@ void udp_vu_sock_to_tap(const struct ctx *c, int s, int n, flow_sidx_t tosidx)
 			udp_vu_prepare(c, toside, dlen);
 			if (*c->pcap) {
 				udp_vu_csum(toside, iov_used);
-				pcap_iov(iov_vu, iov_used,
-					sizeof(struct virtio_net_hdr_mrg_rxbuf));
+				pcap_iov(iov_vu, iov_used, VNET_HLEN);
 			}
 			vu_flush(vdev, vq, elem, iov_used);
 		}

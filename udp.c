@@ -26,7 +26,10 @@
  *
  * We track pseudo-connections of this type as flow table entries of type
  * FLOW_UDP.  We store the time of the last traffic on the flow in uflow->ts,
- * and let the flow expire if there is no traffic for UDP_CONN_TIMEOUT seconds.
+ * and let the flow expire if there is no traffic for UDP_TIMEOUT seconds for
+ * unidirectional flows and flows with only one datagram and one reply, or
+ * UDP_TIMEOUT_STREAM seconds for bidirectional flows with more than one
+ * datagram on either side.
  *
  * NOTE: This won't handle multicast protocols, or some protocols with different
  * port usage.  We'll need specific logic if we want to handle those.
@@ -117,6 +120,13 @@
 #include "epoll_ctl.h"
 
 #define UDP_MAX_FRAMES		32  /* max # of frames to receive at once */
+
+#define UDP_TIMEOUT	"/proc/sys/net/netfilter/nf_conntrack_udp_timeout"
+#define UDP_TIMEOUT_STREAM	\
+	"/proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream"
+
+#define UDP_TIMEOUT_DEFAULT		30	/* s */
+#define UDP_TIMEOUT_STREAM_DEFAULT	120	/* s */
 
 /* Maximum UDP data to be returned in ICMP messages */
 #define ICMP4_MAX_DLEN 8
@@ -953,7 +963,7 @@ void udp_sock_handler(const struct ctx *c, union epoll_ref ref,
 		int s = ref.fd;
 
 		flow_trace(uflow, "Received data on reply socket");
-		uflow->ts = now->tv_sec;
+		udp_flow_activity(uflow, !tosidx.sidei, now);
 
 		if (pif_is_socket(topif)) {
 			udp_sock_to_sock(c, ref.fd, n, tosidx);
@@ -1180,6 +1190,24 @@ static void udp_splice_iov_init(void)
 }
 
 /**
+ * udp_get_timeout_params() - Get host kernel UDP timeout parameters
+ * @c:		Execution context
+ */
+static void udp_get_timeout_params(struct ctx *c)
+{
+	intmax_t v;
+
+	v = read_file_integer(UDP_TIMEOUT, UDP_TIMEOUT_DEFAULT);
+	c->udp.timeout = v;
+
+	v = read_file_integer(UDP_TIMEOUT_STREAM, UDP_TIMEOUT_STREAM_DEFAULT);
+	c->udp.stream_timeout = v;
+
+	debug("Using UDP timeout parameters, timeout: %d, stream_timeout: %d",
+	      c->udp.timeout, c->udp.stream_timeout);
+}
+
+/**
  * udp_init() - Initialise per-socket data, and sockets in namespace
  * @c:		Execution context
  *
@@ -1188,6 +1216,8 @@ static void udp_splice_iov_init(void)
 int udp_init(struct ctx *c)
 {
 	ASSERT(!c->no_udp);
+
+	udp_get_timeout_params(c);
 
 	udp_iov_init(c);
 
