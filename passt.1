@@ -156,10 +156,16 @@ By default, the advertised MTU is 65520 bytes, that is, the maximum 802.3 MTU
 minus the length of a 802.3 header, rounded to 32 bits (IPv4 words).
 
 .TP
-.BR \-a ", " \-\-address " " \fIaddr
+.BR \-a ", " \-\-address " " \fIaddr\fR[/\fIprefix_len\fR]
 Assign IPv4 \fIaddr\fR via DHCP (\fByiaddr\fR), or \fIaddr\fR via DHCPv6 (option
 5) and an \fIaddr\fR-based prefix via NDP Router Advertisement (option type 3)
 for an IPv6 \fIaddr\fR.
+An optional /\fIprefix_len\fR (0-32 for IPv4, 0-128 for IPv6) can be
+appended in CIDR notation (e.g. 192.0.2.1/24). This is an alternative to
+using the \fB-n\fR, \fB--netmask\fR option. Mixing CIDR notation with
+\fB-n\fR results in an error.
+If a prefix length is assigned to an IPv6 address using this method, it will
+in the current code version be overridden by the default value of 64.
 This option can be specified zero (for defaults) to two times (once for IPv4,
 once for IPv6).
 By default, assigned IPv4 and IPv6 addresses are taken from the host interfaces
@@ -172,10 +178,13 @@ is assigned for IPv4, and no additional address will be assigned for IPv6.
 .TP
 .BR \-n ", " \-\-netmask " " \fImask
 Assign IPv4 netmask \fImask\fR, expressed as dot-decimal or number of bits, via
-DHCP (option 1).
-By default, the netmask associated to the host address matching the assigned one
-is used. If there's no matching address on the host, the netmask is determined
-according to the CIDR block of the assigned address (RFC 4632).
+DHCP (option 1). Alternatively, the prefix length can be specified using CIDR
+notation with the \fB-a\fR, \fB--address\fR option (e.g. \fB-a\fR 192.0.2.1/24).
+Mixing \fB-n\fR with CIDR notation results in an error.
+If no address is indicated, the netmask associated with the adopted host address,
+if any, is used. If an address is indicated, but without a prefix length, the
+netmask is determined based on the corresponding network class. In all other
+cases, the netmask is determined by using the indicated prefix length.
 
 .TP
 .BR \-M ", " \-\-mac-addr " " \fIaddr

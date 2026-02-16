@@ -96,6 +96,19 @@ static inline struct in_addr *inany_v4(const union inany_addr *addr)
 	return (struct in_addr *)&addr->v4mapped.a4;
 }
 
+/** inany_default_prefix_len() - Get default prefix length for address
+ * @addr:	IPv4 or iPv6 address
+ *
+ * Return: Class-based prefix length for IPv4 (in IPv6 format: 104-128),
+ *         or 64 for IPv6
+ */
+static inline int inany_default_prefix_len(const union inany_addr *addr)
+{
+	const struct in_addr *v4 = inany_v4(addr);
+
+	return v4 ? ip4_class_prefix_len(v4) + 96 : 64;
+}
+
 /** inany_equals - Compare two IPv[46] addresses
  * @a, @b:	IPv[46] addresses
  *
@@ -296,5 +309,7 @@ static inline void inany_siphash_feed(struct siphash_state *state,
 bool inany_matches(const union inany_addr *a, const union inany_addr *b);
 const char *inany_ntop(const union inany_addr *src, char *dst, socklen_t size);
 int inany_pton(const char *src, union inany_addr *dst);
+int inany_prefix_pton(const char *src, union inany_addr *dst,
+		      uint8_t *prefix_len);
 
 #endif /* INANY_H */

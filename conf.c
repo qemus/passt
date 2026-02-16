@@ -691,7 +691,7 @@ static int conf_ip4_prefix(const char *arg)
 			return -1;
 	} else {
 		errno = 0;
-		len = strtoul(optarg, NULL, 0);
+		len = strtoul(arg, NULL, 0);
 		if (len > 32 || errno)
 			return -1;
 	}
@@ -905,7 +905,7 @@ static void usage(const char *name, FILE *f, int status)
 		"    a zero value disables assignment\n"
 		"    default: 65520: maximum 802.3 MTU minus 802.3 header\n"
 		"                    length, rounded to 32 bits (IPv4 words)\n"
-		"  -a, --address ADDR	Assign IPv4 or IPv6 address ADDR\n"
+		"  -a, --address ADDR	Assign IPv4 or IPv6 address ADDR[/PREFIXLEN]\n"
 		"    can be specified zero to two times (for IPv4 and IPv6)\n"
 		"    default: use addresses from interface with default route\n"
 		"  -n, --netmask MASK	Assign IPv4 MASK, dot-decimal or bits\n"
@@ -1530,6 +1530,8 @@ void conf(struct ctx *c, int argc, char **argv)
 	unsigned dns4_idx = 0, dns6_idx = 0;
 	unsigned long max_mtu = IP_MAX_MTU;
 	struct fqdn *dnss = c->dns_search;
+	bool addr_has_prefix_len = false;
+	uint8_t prefix_len_from_opt = 0;
 	unsigned int ifi4 = 0, ifi6 = 0;
 	const char *logfile = NULL;
 	size_t logsize = 0;
@@ -1834,36 +1836,56 @@ void conf(struct ctx *c, int argc, char **argv)
 			c->mtu = mtu;
 			break;
 		}
-		case 'a':
-			if (inet_pton(AF_INET6, optarg, &c->ip6.addr)	&&
-			    !IN6_IS_ADDR_UNSPECIFIED(&c->ip6.addr)	&&
-			    !IN6_IS_ADDR_LOOPBACK(&c->ip6.addr)		&&
-			    !IN6_IS_ADDR_V4MAPPED(&c->ip6.addr)		&&
-			    !IN6_IS_ADDR_V4COMPAT(&c->ip6.addr)		&&
-			    !IN6_IS_ADDR_MULTICAST(&c->ip6.addr)) {
-				if (c->mode == MODE_PASTA)
-					c->ip6.no_copy_addrs = true;
-				break;
-			}
+		case 'a': {
+			union inany_addr addr;
+			uint8_t prefix_len;
 
-			if (inet_pton(AF_INET, optarg, &c->ip4.addr)	&&
-			    !IN4_IS_ADDR_UNSPECIFIED(&c->ip4.addr)	&&
-			    !IN4_IS_ADDR_BROADCAST(&c->ip4.addr)	&&
-			    !IN4_IS_ADDR_LOOPBACK(&c->ip4.addr)		&&
-			    !IN4_IS_ADDR_MULTICAST(&c->ip4.addr)) {
+			addr_has_prefix_len = inany_prefix_pton(optarg, &addr,
+								&prefix_len);
+
+			if (addr_has_prefix_len && prefix_len_from_opt)
+				die("Redundant prefix length specification");
+
+			if (!addr_has_prefix_len && !inany_pton(optarg, &addr))
+				die("Invalid address: %s", optarg);
+
+			if (prefix_len_from_opt && inany_v4(&addr))
+				prefix_len = prefix_len_from_opt;
+			else if (!addr_has_prefix_len)
+				prefix_len = inany_default_prefix_len(&addr);
+
+			if (inany_is_unspecified(&addr) ||
+			    inany_is_multicast(&addr) ||
+			    inany_is_loopback(&addr) ||
+			    IN6_IS_ADDR_V4COMPAT(&addr.a6))
+				die("Invalid address: %s", optarg);
+
+			if (inany_v4(&addr)) {
+				c->ip4.addr = *inany_v4(&addr);
+				c->ip4.prefix_len = prefix_len - 96;
 				if (c->mode == MODE_PASTA)
 					c->ip4.no_copy_addrs = true;
-				break;
+			} else {
+				c->ip6.addr = addr.a6;
+				if (c->mode == MODE_PASTA)
+					c->ip6.no_copy_addrs = true;
 			}
-
-			die("Invalid address: %s", optarg);
 			break;
-		case 'n':
-			c->ip4.prefix_len = conf_ip4_prefix(optarg);
-			if (c->ip4.prefix_len < 0)
-				die("Invalid netmask: %s", optarg);
+		}
+		case 'n': {
+			int plen;
 
+			if (addr_has_prefix_len)
+				die("Redundant prefix length specification");
+
+			plen = conf_ip4_prefix(optarg);
+			if (plen < 0)
+				die("Invalid prefix length: %s", optarg);
+
+			prefix_len_from_opt = plen + 96;
+			c->ip4.prefix_len = plen;
 			break;
+		}
 		case 'M':
 			parse_mac(c->our_tap_mac, optarg);
 			break;
