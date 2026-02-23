@@ -1159,7 +1159,7 @@ void raw_random(void *buf, size_t buflen)
 		ret = getrandom((char *)buf + random_read,
 				buflen - random_read, GRND_RANDOM);
 #else
-		ret = read(dev_random, (char *)buf + random_read,
+		ret = read(fd, (char *)buf + random_read,
 			   buflen - random_read);
 #endif
 
@@ -1176,7 +1176,7 @@ void raw_random(void *buf, size_t buflen)
 	}
 
 #ifndef HAS_GETRANDOM
-	close(dev_random);
+	close(fd);
 #endif
 
 	if (random_read < buflen)
