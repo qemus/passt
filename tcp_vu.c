@@ -90,12 +90,12 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	vu_set_element(&flags_elem[0], NULL, &flags_iov[0]);
 
 	elem_cnt = vu_collect(vdev, vq, &flags_elem[0], 1,
-			      MAX(hdrlen + sizeof(*opts), ETH_ZLEN), NULL);
+			      MAX(hdrlen + sizeof(*opts), ETH_ZLEN + VNET_HLEN), NULL);
 	if (elem_cnt != 1)
 		return -1;
 
 	ASSERT(flags_elem[0].in_sg[0].iov_len >=
-	       MAX(hdrlen + sizeof(*opts), ETH_ZLEN));
+	       MAX(hdrlen + sizeof(*opts), ETH_ZLEN + VNET_HLEN));
 
 	vu_set_vnethdr(vdev, flags_elem[0].in_sg[0].iov_base, 1);
 
@@ -209,7 +209,7 @@ static ssize_t tcp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq,
 
 		cnt = vu_collect(vdev, vq, &elem[elem_cnt],
 				 VIRTQUEUE_MAX_SIZE - elem_cnt,
-				 MAX(MIN(mss, fillsize) + hdrlen, ETH_ZLEN),
+				 MAX(MIN(mss, fillsize) + hdrlen, ETH_ZLEN + VNET_HLEN),
 				 &frame_size);
 		if (cnt == 0)
 			break;
@@ -303,7 +303,7 @@ static void tcp_vu_prepare(const struct ctx *c, struct tcp_tap_conn *conn,
 	/* we guess the first iovec provided by the guest can embed
 	 * all the headers needed by L2 frame, including any padding
 	 */
-	ASSERT(iov[0].iov_len >= MAX(hdrlen, ETH_ZLEN));
+	ASSERT(iov[0].iov_len >= hdrlen);
 
 	eh = vu_eth(base);
 

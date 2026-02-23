@@ -97,7 +97,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 		return -1;
 
 	/* reserve space for the headers */
-	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN));
+	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN + VNET_HLEN));
 	iov_vu[0].iov_base = (char *)iov_vu[0].iov_base + hdrlen;
 	iov_vu[0].iov_len -= hdrlen;
 
