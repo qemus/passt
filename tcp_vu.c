@@ -40,10 +40,10 @@ static struct vu_virtq_element elem[VIRTQUEUE_MAX_SIZE];
 static int head[VIRTQUEUE_MAX_SIZE + 1];
 
 /**
- * tcp_vu_hdrlen() - return the size of the header in level 2 frame (TCP)
+ * tcp_vu_hdrlen() - Sum size of all headers, from TCP to virtio-net
  * @v6:		Set for IPv6 packet
  *
- * Return: return the size of the header
+ * Return: total size of virtio-net, Ethernet, IP, and TCP headers
  */
 static size_t tcp_vu_hdrlen(bool v6)
 {
