@@ -37,10 +37,10 @@ static struct iovec     iov_vu		[VIRTQUEUE_MAX_SIZE];
 static struct vu_virtq_element	elem		[VIRTQUEUE_MAX_SIZE];
 
 /**
- * udp_vu_hdrlen() - return the size of the header in level 2 frame (UDP)
+ * udp_vu_hdrlen() - Sum size of all headers, from UDP to virtio-net
  * @v6:		Set for IPv6 packet
  *
- * Return: return the size of the header
+ * Return: total size of virtio-net, Ethernet, IP, and UDP headers
  */
 static size_t udp_vu_hdrlen(bool v6)
 {
@@ -97,7 +97,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 		return -1;
 
 	/* reserve space for the headers */
-	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN));
+	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN + VNET_HLEN));
 	iov_vu[0].iov_base = (char *)iov_vu[0].iov_base + hdrlen;
 	iov_vu[0].iov_len -= hdrlen;
 

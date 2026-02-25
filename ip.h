@@ -136,4 +136,6 @@ static const struct in_addr in4addr_broadcast = { 0xffffffff };
 #define IPV6_MIN_MTU		1280
 #endif
 
+int ip4_class_prefix_len(const struct in_addr *addr);
+
 #endif /* IP_H */

@@ -13,6 +13,8 @@
  */
 
 #include <stddef.h>
+#include <netinet/in.h>
+
 #include "util.h"
 #include "ip.h"
 
@@ -92,4 +94,23 @@ const char *ipproto_name(uint8_t proto)
 	default:
 		return "<unknown protocol>";
 	}
+}
+
+/**
+ * ip4_class_prefix_len() - Get class based prefix length for IPv4 address
+ * @addr:	IPv4 address
+ *
+ * Return: prefix length based on address class, or 32 for other
+ */
+int ip4_class_prefix_len(const struct in_addr *addr)
+{
+	in_addr_t a = ntohl(addr->s_addr);
+
+	if (IN_CLASSA(a))
+		return 32 - IN_CLASSA_NSHIFT;
+	if (IN_CLASSB(a))
+		return 32 - IN_CLASSB_NSHIFT;
+	if (IN_CLASSC(a))
+		return 32 - IN_CLASSC_NSHIFT;
+	return 32;
 }
