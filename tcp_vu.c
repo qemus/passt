@@ -134,6 +134,9 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	flags_elem[0].in_sg[0].iov_len = hdrlen + optlen;
 	payload = IOV_TAIL(flags_elem[0].in_sg, 1, hdrlen);
 
+	if (flags & KEEPALIVE)
+		seq--;
+
 	tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &payload,
 			 NULL, seq, !*c->pcap);
 

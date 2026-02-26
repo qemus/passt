@@ -190,9 +190,6 @@
  * - RTO_INIT_AFTER_SYN_RETRIES: if SYN retries happened during handshake and
  *   RTO is less than this, re-initialise RTO to this for data retransmissions
  *
- * - ACT_TIMEOUT, in the presence of any event: if no activity is detected on
- *   either side, the connection is reset
- *
  * - RTT / 2 elapsed after data segment received from tap without having
  *   sent an ACK segment, or zero-sized window advertised to tap/guest (flag
  *   ACK_TO_TAP_DUE): forcibly check if an ACK segment can be sent.
@@ -201,6 +198,19 @@
  *   TCP_INFO, with a representable range from RTT_STORE_MIN (100 us) to
  *   RTT_STORE_MAX (3276.8 ms). The timeout value is clamped accordingly.
  *
+ * We also use a global interval timer for an activity timeout which doesn't
+ * require precision:
+ *
+ * - INACTIVITY_INTERVAL: if a connection has had no activity for an entire
+ *   interval, close and reset it.  This means that idle connections (without
+ *   keepalives) will be removed between INACTIVITY_INTERVAL s and
+ *   2*INACTIVITY_INTERVAL s after the last activity.
+ *
+ * - KEEPALIVE_INTERVAL: if a connection has had no tap-side activity for an
+ *   entire interval, send a tap-side keepalive.  If the endpoint is no longer
+ *   aware of the connection (due to a reboot, or a kernel timeout in FIN_WAIT_2
+ *   state) that should trigger an RST, so we won't keep track of connections
+ *   that the guest endpoint no longer cares about.
  *
  * Summary of data flows (with ESTABLISHED event)
  * ----------------------------------------------
@@ -336,7 +346,9 @@ enum {
 
 #define RTO_INIT			1		/* s, RFC 6298 */
 #define RTO_INIT_AFTER_SYN_RETRIES	3		/* s, RFC 6298 */
-#define ACT_TIMEOUT			7200
+
+#define INACTIVITY_INTERVAL		7200		/* s */
+#define	KEEPALIVE_INTERVAL		30		/* s */
 
 #define LOW_RTT_TABLE_SIZE		8
 #define LOW_RTT_THRESHOLD		10 /* us */
@@ -589,7 +601,9 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		timeout <<= MAX(exp, 0);
 		it.it_value.tv_sec = MIN(timeout, c->tcp.rto_max);
 	} else {
-		it.it_value.tv_sec = ACT_TIMEOUT;
+		/* Disarm */
+		it.it_value.tv_sec = 0;
+		it.it_value.tv_nsec = 0;
 	}
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
@@ -2257,6 +2271,9 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		return 1;
 	}
 
+	conn->inactive = false;
+	conn->tap_inactive = false;
+
 	if (th->ack && !(conn->events & ESTABLISHED))
 		tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq));
 
@@ -2600,23 +2617,6 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 			tcp_data_from_sock(c, conn);
 			tcp_timer_ctl(c, conn);
 		}
-	} else {
-		struct itimerspec new = { { 0 }, { ACT_TIMEOUT, 0 } };
-		struct itimerspec old = { { 0 }, { 0 } };
-
-		/* Activity timeout: if it was already set, reset the
-		 * connection, otherwise, it was a left-over from ACK_TO_TAP_DUE
-		 * or ACK_FROM_TAP_DUE, so just set the long timeout in that
-		 * case. This avoids having to preemptively reset the timer on
-		 * ~ACK_TO_TAP_DUE or ~ACK_FROM_TAP_DUE.
-		 */
-		if (timerfd_settime(conn->timer, 0, &new, &old))
-			flow_perror(conn, "failed to set timer");
-
-		if (old.it_value.tv_sec == ACT_TIMEOUT) {
-			flow_dbg(conn, "activity timeout");
-			tcp_rst(c, conn);
-		}
 	}
 }
 
@@ -2641,6 +2641,8 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 		tcp_rst(c, conn);
 		return;
 	}
+
+	conn->inactive = false;
 
 	if ((conn->events & TAP_FIN_ACKED) && (events & EPOLLHUP)) {
 		conn_event(c, conn, CLOSED);
@@ -2893,17 +2895,80 @@ int tcp_init(struct ctx *c)
 }
 
 /**
+ * tcp_keepalive() - Send keepalives for connections which need it
+ * @:	Execution context
+ */
+static void tcp_keepalive(struct ctx *c, const struct timespec *now)
+{
+	union flow *flow;
+
+	if (now->tv_sec - c->tcp.keepalive_run < KEEPALIVE_INTERVAL)
+		return;
+
+	c->tcp.keepalive_run = now->tv_sec;
+
+	flow_foreach(flow) {
+		struct tcp_tap_conn *conn = &flow->tcp;
+
+		if (flow->f.type != FLOW_TCP)
+			continue;
+
+		if (conn->tap_inactive) {
+			flow_dbg(conn, "No tap activity for least %us, send keepalive",
+				 KEEPALIVE_INTERVAL);
+			tcp_send_flag(c, conn, KEEPALIVE);
+		}
+
+		/* Ready to check fot next interval */
+		conn->tap_inactive = true;
+	}
+}
+
+/**
+ * tcp_inactivity() - Scan for and close long-inactive connections
+ * @:	Execution context
+ */
+static void tcp_inactivity(struct ctx *c, const struct timespec *now)
+{
+	union flow *flow;
+
+	if (now->tv_sec - c->tcp.inactivity_run < INACTIVITY_INTERVAL)
+		return;
+
+	debug("TCP inactivity scan");
+	c->tcp.inactivity_run = now->tv_sec;
+
+	flow_foreach(flow) {
+		struct tcp_tap_conn *conn = &flow->tcp;
+
+		if (flow->f.type != FLOW_TCP)
+			continue;
+
+		if (conn->inactive) {
+			/* No activity in this interval, reset */
+			flow_dbg(conn, "Inactive for at least %us, resetting",
+				 INACTIVITY_INTERVAL);
+			tcp_rst(c, conn);
+		}
+
+		/* Ready to check fot next interval */
+		conn->inactive = true;
+	}
+}
+
+/**
  * tcp_timer() - Periodic tasks: port detection, closed connections, pool refill
  * @c:		Execution context
  * @now:	Current timestamp
  */
-void tcp_timer(const struct ctx *c, const struct timespec *now)
+void tcp_timer(struct ctx *c, const struct timespec *now)
 {
-	(void)now;
-
 	tcp_sock_refill_init(c);
 	if (c->mode == MODE_PASTA)
 		tcp_splice_refill(c);
+
+	tcp_keepalive(c, now);
+	tcp_inactivity(c, now);
 }
 
 /**
