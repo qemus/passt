@@ -7,6 +7,9 @@
 #ifndef LINUX_DEP_H
 #define LINUX_DEP_H
 
+#include <stdint.h>
+#include <unistd.h>
+
 /* struct tcp_info_linux - Information from Linux TCP_INFO getsockopt()
  *
  * Largely derived from include/linux/tcp.h in the Linux kernel

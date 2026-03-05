@@ -29,13 +29,13 @@
 #define MIGRATE_MAGIC		0xB1BB1D1B0BB1D1B0
 
 /**
- * struct migrate_seen_addrs_v1 - Migratable guest addresses for v1 state stream
+ * struct migrate_seen_addrs_v2 - Migratable guest addresses for v2 state stream
  * @addr6:	Observed guest IPv6 address
  * @addr6_ll:	Observed guest IPv6 link-local address
  * @addr4:	Observed guest IPv4 address
  * @mac:	Observed guest MAC address
  */
-struct migrate_seen_addrs_v1 {
+struct migrate_seen_addrs_v2 {
 	struct in6_addr addr6;
 	struct in6_addr addr6_ll;
 	struct in_addr addr4;
@@ -43,7 +43,7 @@ struct migrate_seen_addrs_v1 {
 } __attribute__((packed));
 
 /**
- * seen_addrs_source_v1() - Copy and send guest observed addresses from source
+ * seen_addrs_source_v2() - Copy and send guest observed addresses from source
  * @c:		Execution context
  * @stage:	Migration stage, unused
  * @fd:		File descriptor for state transfer
@@ -51,10 +51,10 @@ struct migrate_seen_addrs_v1 {
  * Return: 0 on success, positive error code on failure
  */
 /* cppcheck-suppress [constParameterCallback, unmatchedSuppression] */
-static int seen_addrs_source_v1(struct ctx *c,
+static int seen_addrs_source_v2(struct ctx *c,
 				const struct migrate_stage *stage, int fd)
 {
-	struct migrate_seen_addrs_v1 addrs = {
+	struct migrate_seen_addrs_v2 addrs = {
 		.addr6 = c->ip6.addr_seen,
 		.addr6_ll = c->ip6.addr_ll_seen,
 		.addr4 = c->ip4.addr_seen,
@@ -71,17 +71,17 @@ static int seen_addrs_source_v1(struct ctx *c,
 }
 
 /**
- * seen_addrs_target_v1() - Receive and use guest observed addresses on target
+ * seen_addrs_target_v2() - Receive and use guest observed addresses on target
  * @c:		Execution context
  * @stage:	Migration stage, unused
  * @fd:		File descriptor for state transfer
  *
  * Return: 0 on success, positive error code on failure
  */
-static int seen_addrs_target_v1(struct ctx *c,
+static int seen_addrs_target_v2(struct ctx *c,
 				const struct migrate_stage *stage, int fd)
 {
-	struct migrate_seen_addrs_v1 addrs;
+	struct migrate_seen_addrs_v2 addrs;
 
 	(void)stage;
 
@@ -100,8 +100,8 @@ static int seen_addrs_target_v1(struct ctx *c,
 static const struct migrate_stage stages_v2[] = {
 	{
 		.name = "observed addresses",
-		.source = seen_addrs_source_v1,
-		.target = seen_addrs_target_v1,
+		.source = seen_addrs_source_v2,
+		.target = seen_addrs_target_v2,
 	},
 	{
 		.name = "prepare flows",

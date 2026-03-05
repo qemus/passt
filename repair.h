@@ -6,6 +6,8 @@
 #ifndef REPAIR_H
 #define REPAIR_H
 
+#include <stdint.h>
+
 void repair_sock_init(const struct ctx *c);
 int repair_listen_handler(struct ctx *c, uint32_t events);
 void repair_handler(struct ctx *c, uint32_t events);

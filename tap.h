@@ -6,6 +6,11 @@
 #ifndef TAP_H
 #define TAP_H
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include "passt.h"
+
 /** L2_MAX_LEN_PASTA - Maximum frame length for pasta mode (with L2 header)
  *
  * The kernel tuntap device imposes a maximum frame size of 65535 including

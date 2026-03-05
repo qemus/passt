@@ -97,7 +97,7 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	ASSERT(flags_elem[0].in_sg[0].iov_len >=
 	       MAX(hdrlen + sizeof(*opts), ETH_ZLEN + VNET_HLEN));
 
-	vu_set_vnethdr(vdev, flags_elem[0].in_sg[0].iov_base, 1);
+	vu_set_vnethdr(flags_elem[0].in_sg[0].iov_base, 1);
 
 	eh = vu_eth(flags_elem[0].in_sg[0].iov_base);
 
@@ -452,7 +452,7 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 		bool push = i == head_cnt - 1;
 		size_t l2len;
 
-		vu_set_vnethdr(vdev, iov->iov_base, buf_cnt);
+		vu_set_vnethdr(iov->iov_base, buf_cnt);
 
 		/* The IPv4 header checksum varies only with dlen */
 		if (previous_dlen != dlen)

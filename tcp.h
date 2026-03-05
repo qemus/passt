@@ -6,6 +6,14 @@
 #ifndef TCP_H
 #define TCP_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#include "fwd.h"
+
 #define TCP_TIMER_INTERVAL		1000	/* ms */
 
 struct ctx;

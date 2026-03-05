@@ -81,6 +81,11 @@ Checks:
     #	precedence over addition in modern mathematical notation. Adding
     #	parentheses to reinforce that certainly won't improve readability.
     - "-readability-math-missing-parentheses"
+
+    # #if defined(FOO) is fine, and can be more consistent with other
+    # #if directives.  Don't insist on #ifdef instead.
+    - "-readability-use-concise-preprocessor-directives"
+
 WarningsAsErrors: "*"
 HeaderFileExtensions:
     - h

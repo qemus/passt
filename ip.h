@@ -9,6 +9,8 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 
+#include "util.h"
+
 #define IN4_IS_ADDR_UNSPECIFIED(a) \
 	(((struct in_addr *)(a))->s_addr == htonl_constant(INADDR_ANY))
 #define IN4_IS_ADDR_BROADCAST(a) \

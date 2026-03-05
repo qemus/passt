@@ -121,17 +121,16 @@ int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 
 /**
  * vu_set_vnethdr() - set virtio-net headers
- * @vdev:		vhost-user device
  * @vnethdr:		Address of the header to set
  * @num_buffers:	Number of guest buffers of the frame
  */
-void vu_set_vnethdr(const struct vu_dev *vdev,
-		    struct virtio_net_hdr_mrg_rxbuf *vnethdr,
-		    int num_buffers)
+void vu_set_vnethdr(struct virtio_net_hdr_mrg_rxbuf *vnethdr, int num_buffers)
 {
 	vnethdr->hdr = VU_HEADER;
-	if (vu_has_feature(vdev, VIRTIO_NET_F_MRG_RXBUF))
-		vnethdr->num_buffers = htole16(num_buffers);
+	/* Note: if VIRTIO_NET_F_MRG_RXBUF is not negotiated,
+	 * num_buffers must be 1
+	 */
+	vnethdr->num_buffers = htole16(num_buffers);
 }
 
 /**
@@ -269,7 +268,7 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 		goto err;
 	}
 
-	vu_set_vnethdr(vdev, in_sg[0].iov_base, elem_cnt);
+	vu_set_vnethdr(in_sg[0].iov_base, elem_cnt);
 
 	total -= VNET_HLEN;
 

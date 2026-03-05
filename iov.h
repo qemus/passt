@@ -15,8 +15,9 @@
 #ifndef IOVEC_H
 #define IOVEC_H
 
-#include <unistd.h>
+#include <stdbool.h>
 #include <string.h>
+#include <unistd.h>
 
 #define IOV_OF_LVALUE(lval) \
 	(struct iovec){ .iov_base = &(lval), .iov_len = sizeof(lval) }

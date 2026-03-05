@@ -6,6 +6,10 @@
 #ifndef NETLINK_H
 #define NETLINK_H
 
+#include <stdbool.h>
+
+#include <netinet/in.h>
+
 extern int nl_sock;
 extern int nl_sock_ns;
 

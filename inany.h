@@ -9,6 +9,12 @@
 #ifndef INANY_H
 #define INANY_H
 
+#include <assert.h>
+#include <string.h>
+
+#include "ip.h"
+#include "siphash.h"
+
 struct siphash_state;
 
 /** union inany_addr - Represents either an IPv4 or IPv6 address

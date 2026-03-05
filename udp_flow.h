@@ -7,6 +7,12 @@
 #ifndef UDP_FLOW_H
 #define UDP_FLOW_H
 
+#include <stdbool.h>
+#include <stdint.h>
+#include <netinet/in.h>
+
+#include "flow.h"
+
 /**
  * struct udp_flow - Descriptor for a flow of UDP packets
  * @f:		Generic flow information

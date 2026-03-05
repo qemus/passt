@@ -7,6 +7,8 @@
 #define PACKET_H
 
 #include <stdbool.h>
+#include <sys/uio.h>
+
 #include "iov.h"
 #include "virtio.h"
 

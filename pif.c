@@ -62,23 +62,23 @@ void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
 	}
 }
 
-/** pif_sock_l4() - Open a socket bound to an address on a specified interface
+/** pif_listen() - Open a listening socket on a specified pif
  * @c:		Execution context
  * @type:	Socket epoll type
  * @pif:	Interface for this socket
  * @addr:	Address to bind to, or NULL for dual-stack any
  * @ifname:	Interface for binding, NULL for any
  * @port:	Port number to bind to (host byte order)
- * @data:	epoll reference portion for protocol handlers
+ * @rule:	Forwarding rule index this socket belongs to
  *
  * NOTE: For namespace pifs, this must be called having already entered the
  * relevant namespace.
  *
  * Return: newly created socket, negative error code on failure
  */
-int pif_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
-		const union inany_addr *addr, const char *ifname,
-		in_port_t port, uint32_t data)
+int pif_listen(const struct ctx *c, enum epoll_type type, uint8_t pif,
+	       const union inany_addr *addr, const char *ifname,
+	       in_port_t port, unsigned rule)
 {
 	union epoll_ref ref;
 	int ret;
@@ -98,7 +98,9 @@ int pif_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 		return ref.fd;
 
 	ref.type = type;
-	ref.data = data;
+	ref.listen.port = port;
+	ref.listen.pif = pif;
+	ref.listen.rule = rule;
 
 	ret = epoll_add(c->epollfd, EPOLLIN, ref);
 	if (ret < 0) {

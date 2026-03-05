@@ -35,7 +35,7 @@ union epoll_ref {
 		union {
 			uint32_t flow;
 			flow_sidx_t flowside;
-			union fwd_listen_ref listen;
+			struct fwd_listen_ref listen;
 			uint32_t data;
 			int nsdir_fd;
 			int queue;

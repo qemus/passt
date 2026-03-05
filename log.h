@@ -6,7 +6,9 @@
 #ifndef LOG_H
 #define LOG_H
 
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <syslog.h>
 
 /* This would make more sense in util.h, but because we use it in die(), that

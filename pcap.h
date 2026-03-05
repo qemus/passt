@@ -6,6 +6,8 @@
 #ifndef PCAP_H
 #define PCAP_H
 
+#include <stddef.h>
+
 extern int pcap_fd;
 
 void pcap(const char *pkt, size_t l2len);

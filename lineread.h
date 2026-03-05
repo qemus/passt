@@ -6,6 +6,8 @@
 #ifndef LINEREAD_H
 #define LINEREAD_H
 
+#include <sys/types.h>
+
 #define LINEREAD_BUFFER_SIZE	8192
 
 /**

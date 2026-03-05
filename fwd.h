@@ -7,7 +7,15 @@
 #ifndef FWD_H
 #define FWD_H
 
-union inany_addr;
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <netinet/in.h>
+
+#include "inany.h"
+
 struct flowside;
 
 /* Number of ports for both TCP and UDP */
@@ -49,20 +57,16 @@ struct fwd_rule {
 #define FWD_NO_HINT	(-1)
 
 /**
- * union fwd_listen_ref - information about a single listening socket
+ * struct fwd_listen_ref - information about a single listening socket
  * @port:	Bound port number of the socket
  * @pif:	pif in which the socket is listening
  * @rule:	Index of forwarding rule
  */
-union fwd_listen_ref {
-	struct {
-		in_port_t	port;
-		uint8_t		pif;
-		unsigned	rule :FWD_RULE_BITS;
-	};
-	uint32_t u32;
+struct fwd_listen_ref {
+	in_port_t	port;
+	uint8_t		pif;
+	unsigned	rule :FWD_RULE_BITS;
 };
-static_assert(sizeof(union fwd_listen_ref) == sizeof(uint32_t));
 
 enum fwd_ports_mode {
 	FWD_UNSET = 0,

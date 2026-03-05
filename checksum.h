@@ -6,6 +6,9 @@
 #ifndef CHECKSUM_H
 #define CHECKSUM_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 struct udphdr;
 struct icmphdr;
 struct icmp6hdr;

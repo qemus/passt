@@ -6,6 +6,9 @@
 #ifndef UDP_INTERNAL_H
 #define UDP_INTERNAL_H
 
+#include <netinet/in.h>
+#include <netinet/udp.h>
+
 #include "tap.h" /* needed by udp_meta_t */
 
 /**

@@ -127,7 +127,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	l2len = *dlen + hdrlen - VNET_HLEN;
 	vu_pad(&iov_vu[0], l2len);
 
-	vu_set_vnethdr(vdev, iov_vu[0].iov_base, iov_used);
+	vu_set_vnethdr(iov_vu[0].iov_base, iov_used);
 
 	/* release unused buffers */
 	vu_queue_rewind(vq, iov_cnt - iov_used);

@@ -44,6 +44,9 @@
 #ifndef SIPHASH_H
 #define SIPHASH_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 /**
  * struct siphash_state - Internal state of siphash calculation
  */

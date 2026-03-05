@@ -9,6 +9,10 @@
 #ifndef TCP_CONN_H
 #define TCP_CONN_H
 
+#include <stdint.h>
+
+#include "flow.h"
+
 /**
  * struct tcp_tap_conn - Descriptor for a TCP connection (not spliced)
  * @f:			Generic flow information

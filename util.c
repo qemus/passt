@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <linux/errqueue.h>
+#include <linux/in6.h>
 #include <getopt.h>
 
 #include "linux_dep.h"

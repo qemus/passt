@@ -6,6 +6,9 @@
 #ifndef MIGRATE_H
 #define MIGRATE_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 /**
  * struct migrate_header - Migration header from source
  * @magic:		0xB1BB1D1B0BB1D1B0, network order

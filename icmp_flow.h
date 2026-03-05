@@ -7,6 +7,8 @@
 #ifndef ICMP_FLOW_H
 #define ICMP_FLOW_H
 
+#include "flow.h"
+
 /**
  * struct icmp_ping_flow - Descriptor for a flow of ping requests/replies
  * @f:		Generic flow information

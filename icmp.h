@@ -6,6 +6,10 @@
 #ifndef ICMP_H
 #define ICMP_H
 
+#include <stdint.h>
+
+#include <netinet/in.h>
+
 struct ctx;
 struct icmp_ping_flow;
 

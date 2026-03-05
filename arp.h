@@ -6,6 +6,8 @@
 #ifndef ARP_H
 #define ARP_H
 
+#include <linux/if_ether.h>
+
 /**
  * struct arpmsg - 802.2 ARP IPv4 payload
  * @sha:	Sender hardware address

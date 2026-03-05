@@ -6,6 +6,8 @@
 #ifndef TCP_SPLICE_H
 #define TCP_SPLICE_H
 
+#include <stdint.h>
+
 struct tcp_splice_conn;
 union sockaddr_inany;
 

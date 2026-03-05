@@ -6,6 +6,8 @@
 #ifndef PASTA_H
 #define PASTA_H
 
+#include <unistd.h>
+
 extern int pasta_child_pid;
 
 void pasta_open_ns(struct ctx *c, const char *netns);

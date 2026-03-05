@@ -7,6 +7,12 @@
 #ifndef FLOW_H
 #define FLOW_H
 
+#include <stdint.h>
+#include <netinet/in.h>
+
+#include "inany.h"
+#include "util.h"
+
 #define FLOW_TIMER_INTERVAL		1000	/* ms */
 
 /**

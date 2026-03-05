@@ -6,6 +6,11 @@
 #ifndef TCP_INTERNAL_H
 #define TCP_INTERNAL_H
 
+#include <stdint.h>
+#include <netinet/tcp.h>
+
+#include "util.h"
+
 #define MAX_WS				8
 #define MAX_WINDOW			(1 << (16 + (MAX_WS)))
 

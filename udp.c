@@ -1139,11 +1139,6 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 int udp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 	       const union inany_addr *addr, const char *ifname, in_port_t port)
 {
-	union fwd_listen_ref ref = {
-		.pif = pif,
-		.port = port,
-		.rule = rule,
-	};
 	int s;
 
 	ASSERT(!c->no_udp);
@@ -1163,8 +1158,7 @@ int udp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 			return -EAFNOSUPPORT;
 	}
 
-	s = pif_sock_l4(c, EPOLL_TYPE_UDP_LISTEN, pif,
-			addr, ifname, port, ref.u32);
+	s = pif_listen(c, EPOLL_TYPE_UDP_LISTEN, pif, addr, ifname, port, rule);
 
 	return s;
 }

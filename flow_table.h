@@ -7,6 +7,7 @@
 #ifndef FLOW_TABLE_H
 #define FLOW_TABLE_H
 
+#include "pif.h"
 #include "tcp_conn.h"
 #include "icmp_flow.h"
 #include "udp_flow.h"
