@@ -148,6 +148,28 @@ size_t iov_size(const struct iovec *iov, size_t iov_cnt)
 }
 
 /**
+ * iov_truncate() - Truncate an IO vector to a given number of bytes
+ * @iov:	IO vector (modified)
+ * @iov_cnt:	Number of entries in @iov
+ * @size:	Total number of bytes to keep
+ *
+ * Return: number of iov entries that contain data after truncation
+ */
+size_t iov_truncate(struct iovec *iov, size_t iov_cnt, size_t size)
+{
+	size_t i, offset;
+
+	i = iov_skip_bytes(iov, iov_cnt, size, &offset);
+
+	if (i < iov_cnt) {
+		iov[i].iov_len = offset;
+		i += !!offset;
+	}
+
+	return i;
+}
+
+/**
  * iov_tail_prune() - Remove any unneeded buffers from an IOV tail
  * @tail:	IO vector tail (modified)
  *

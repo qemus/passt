@@ -60,7 +60,8 @@ struct tcp_tap_conn {
 #define RTT_STORE_MIN			100 /* us, minimum representable */
 #define RTT_STORE_MAX			((long)(RTT_STORE_MIN << RTT_EXP_MAX))
 #define RTT_SET(conn, rtt)						\
-	(conn->rtt_exp = MIN(RTT_EXP_MAX, ilog2(MAX(1, rtt / RTT_STORE_MIN))))
+	(conn->rtt_exp = MIN(RTT_EXP_MAX,				\
+			     (unsigned)MAX(0, ilog2(rtt / RTT_STORE_MIN))))
 #define RTT_GET(conn)			(RTT_STORE_MIN << conn->rtt_exp)
 
 	bool		tap_inactive	:1;

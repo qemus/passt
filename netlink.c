@@ -752,7 +752,7 @@ int nl_addr_set_ll_nodad(int s, unsigned int ifi)
  * @ifi:	Interface index in outer network namespace
  * @af:		Address family
  * @addr:	Global address to fill
- * @prefix_len:	Mask or prefix length, to fill (for IPv4)
+ * @prefix_len:	Mask or prefix length, to fill
  * @addr_l:	Link-scoped address to fill (for IPv6)
  *
  * Return: 0 on success, negative error code on failure
@@ -788,16 +788,11 @@ int nl_addr_get(int s, unsigned int ifi, sa_family_t af,
 			    (af == AF_INET6 && rta->rta_type != IFA_ADDRESS))
 				continue;
 
-			if (af == AF_INET && ifa->ifa_prefixlen > prefix_max) {
+			if (ifa->ifa_prefixlen > prefix_max &&
+			    (af == AF_INET || ifa->ifa_scope < RT_SCOPE_LINK)) {
 				memcpy(addr, RTA_DATA(rta), RTA_PAYLOAD(rta));
 
 				prefix_max = *prefix_len = ifa->ifa_prefixlen;
-			} else if (af == AF_INET6 && addr &&
-				   ifa->ifa_scope < RT_SCOPE_LINK &&
-				   ifa->ifa_prefixlen > prefix_max) {
-				memcpy(addr, RTA_DATA(rta), RTA_PAYLOAD(rta));
-
-				prefix_max = ifa->ifa_prefixlen;
 			}
 
 			if (addr_l &&

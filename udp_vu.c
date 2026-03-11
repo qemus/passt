@@ -71,9 +71,9 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 			    bool v6, ssize_t *dlen)
 {
 	const struct vu_dev *vdev = c->vdev;
-	int iov_cnt, idx, iov_used;
-	size_t off, hdrlen, l2len;
 	struct msghdr msg  = { 0 };
+	int iov_cnt, iov_used;
+	size_t hdrlen, l2len;
 
 	ASSERT(!c->no_udp);
 
@@ -115,13 +115,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	iov_vu[0].iov_base = (char *)iov_vu[0].iov_base - hdrlen;
 	iov_vu[0].iov_len += hdrlen;
 
-	/* count the numbers of buffer filled by recvmsg() */
-	idx = iov_skip_bytes(iov_vu, iov_cnt, *dlen + hdrlen, &off);
-
-	/* adjust last iov length */
-	if (idx < iov_cnt)
-		iov_vu[idx].iov_len = off;
-	iov_used = idx + !!off;
+	iov_used = iov_truncate(iov_vu, iov_cnt, *dlen + hdrlen);
 
 	/* pad frame to 60 bytes: first buffer is at least ETH_ZLEN long */
 	l2len = *dlen + hdrlen - VNET_HLEN;

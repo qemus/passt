@@ -29,6 +29,7 @@ size_t iov_from_buf(const struct iovec *iov, size_t iov_cnt,
 size_t iov_to_buf(const struct iovec *iov, size_t iov_cnt,
 		  size_t offset, void *buf, size_t bytes);
 size_t iov_size(const struct iovec *iov, size_t iov_cnt);
+size_t iov_truncate(struct iovec *iov, size_t iov_cnt, size_t size);
 
 /*
  * DOC: Theory of Operation, struct iov_tail

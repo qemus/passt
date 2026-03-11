@@ -131,7 +131,7 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 		return ret;
 	}
 
-	flags_elem[0].in_sg[0].iov_len = hdrlen + optlen;
+	iov_truncate(&flags_iov[0], 1, hdrlen + optlen);
 	payload = IOV_TAIL(flags_elem[0].in_sg, 1, hdrlen);
 
 	if (flags & KEEPALIVE)
@@ -192,9 +192,9 @@ static ssize_t tcp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq,
 	struct msghdr mh_sock = { 0 };
 	uint16_t mss = MSS_GET(conn);
 	int s = conn->sock;
-	ssize_t ret, len;
 	size_t hdrlen;
 	int elem_cnt;
+	ssize_t ret;
 	int i;
 
 	*iov_cnt = 0;
@@ -247,15 +247,7 @@ static ssize_t tcp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq,
 		ret -= already_sent;
 
 	/* adjust iov number and length of the last iov */
-	len = ret;
-	for (i = 0; len && i < elem_cnt; i++) {
-		struct iovec *iov = &elem[i].in_sg[0];
-
-		if (iov->iov_len > (size_t)len)
-			iov->iov_len = len;
-
-		len -= iov->iov_len;
-	}
+	i = iov_truncate(&iov_vu[DISCARD_IOV_NUM], elem_cnt, ret);
 
 	/* adjust head count */
 	while (*head_cnt > 0 && head[*head_cnt - 1] >= i)
@@ -448,10 +440,14 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 	for (i = 0, previous_dlen = -1, check = NULL; i < head_cnt; i++) {
 		struct iovec *iov = &elem[head[i]].in_sg[0];
 		int buf_cnt = head[i + 1] - head[i];
-		ssize_t dlen = iov_size(iov, buf_cnt) - hdrlen;
+		size_t frame_size = iov_size(iov, buf_cnt);
 		bool push = i == head_cnt - 1;
+		ssize_t dlen;
 		size_t l2len;
 
+		ASSERT(frame_size >= hdrlen);
+
+		dlen = frame_size - hdrlen;
 		vu_set_vnethdr(iov->iov_base, buf_cnt);
 
 		/* The IPv4 header checksum varies only with dlen */

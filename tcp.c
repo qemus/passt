@@ -2588,7 +2588,8 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 		tcp_timer_ctl(c, conn);
 	} else if (conn->flags & ACK_FROM_TAP_DUE) {
 		if (!(conn->events & ESTABLISHED)) {
-			int max;
+			unsigned int max;
+
 			max = c->tcp.syn_retries + c->tcp.syn_linear_timeouts;
 			max = MIN(TCP_MAX_RETRIES, max);
 			if (conn->retries >= max) {
