@@ -38,9 +38,8 @@ extern bool peek_offset_cap;
 
 /**
  * struct tcp_ctx - Execution context for TCP routines
- * @port_to_tap:	Ports bound host-side, packets to tap or spliced
- * @fwd_in:		Port forwarding configuration for inbound packets
- * @fwd_out:		Port forwarding configuration for outbound packets
+ * @scan_in:		Port scanning state for inbound packets
+ * @scan_out:		Port scanning state for outbound packets
  * @timer_run:		Timestamp of most recent timer run
  * @pipe_size:		Size of pipes for spliced connections
  * @rto_max:		Maximum retry timeout (in s)
@@ -50,8 +49,8 @@ extern bool peek_offset_cap;
  * @inactivity_run:	Time we last scanned for inactive connections
  */
 struct tcp_ctx {
-	struct fwd_ports fwd_in;
-	struct fwd_ports fwd_out;
+	struct fwd_scan scan_in;
+	struct fwd_scan scan_out;
 	struct timespec timer_run;
 	size_t pipe_size;
 	int rto_max;

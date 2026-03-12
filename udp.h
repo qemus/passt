@@ -26,15 +26,15 @@ void udp_update_l2_buf(const unsigned char *eth_d);
 
 /**
  * struct udp_ctx - Execution context for UDP
- * @fwd_in:		Port forwarding configuration for inbound packets
- * @fwd_out:		Port forwarding configuration for outbound packets
+ * @scan_in:		Port scanning state for inbound packets
+ * @scan_out:		Port scanning state for outbound packets
  * @timer_run:		Timestamp of most recent timer run
  * @timeout:		Timeout for unidirectional flows (in s)
  * @stream_timeout:	Timeout for stream-like flows (in s)
  */
 struct udp_ctx {
-	struct fwd_ports fwd_in;
-	struct fwd_ports fwd_out;
+	struct fwd_scan scan_in;
+	struct fwd_scan scan_out;
 	struct timespec timer_run;
 	int timeout;
 	int stream_timeout;

@@ -505,7 +505,7 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 	const struct flowside *ini = &f->side[INISIDE];
 	struct flowside *tgt = &f->side[TGTSIDE];
 	const struct fwd_rule *rule = NULL;
-	const struct fwd_ports *fwd;
+	const struct fwd_table *fwd;
 	uint8_t tgtpif = PIF_NONE;
 
 	ASSERT(flow_new_entry == flow && f->state == FLOW_STATE_INI);
@@ -520,28 +520,18 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 		break;
 
 	case PIF_SPLICE:
-		if (proto == IPPROTO_TCP)
-			fwd = &c->tcp.fwd_out;
-		else if (proto == IPPROTO_UDP)
-			fwd = &c->udp.fwd_out;
-		else
-			goto nofwd;
+		fwd = &c->fwd_out;
 
-		if (!(rule = fwd_rule_search(fwd, ini, rule_hint)))
+		if (!(rule = fwd_rule_search(fwd, ini, proto, rule_hint)))
 			goto norule;
 
 		tgtpif = fwd_nat_from_splice(rule, proto, ini, tgt);
 		break;
 
 	case PIF_HOST:
-		if (proto == IPPROTO_TCP)
-			fwd = &c->tcp.fwd_in;
-		else if (proto == IPPROTO_UDP)
-			fwd = &c->udp.fwd_in;
-		else
-			goto nofwd;
+		fwd = &c->fwd_in;
 
-		if (!(rule = fwd_rule_search(fwd, ini, rule_hint)))
+		if (!(rule = fwd_rule_search(fwd, ini, proto, rule_hint)))
 			goto norule;
 
 		tgtpif = fwd_nat_from_host(c, rule, proto, ini, tgt);
@@ -1023,7 +1013,8 @@ static int flow_migrate_source_rollback(struct ctx *c, unsigned bound, int ret)
 
 	debug("...roll back migration");
 
-	if (fwd_listen_sync(c, &c->tcp.fwd_in, PIF_HOST, IPPROTO_TCP) < 0)
+	if (fwd_listen_sync(c, &c->fwd_in, PIF_HOST,
+			    &c->tcp.scan_in, &c->udp.scan_in) < 0)
 		die("Failed to re-establish listening sockets");
 
 	foreach_established_tcp_flow(flow) {
@@ -1157,7 +1148,7 @@ int flow_migrate_source(struct ctx *c, const struct migrate_stage *stage,
 	 * fix that is to not allow local to local migration, which arguably we
 	 * should (use namespaces for testing instead). */
 	debug("Stop listen()s");
-	fwd_listen_close(&c->tcp.fwd_in);
+	fwd_listen_close(&c->fwd_in);
 
 	debug("Sending %u flows", ntohl(count));
 

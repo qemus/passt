@@ -1215,15 +1215,8 @@ int udp_init(struct ctx *c)
 
 	udp_iov_init(c);
 
-	if (fwd_listen_sync(c, &c->udp.fwd_in, PIF_HOST, IPPROTO_UDP) < 0)
-		return -1;
-
-	if (c->mode == MODE_PASTA) {
+	if (c->mode == MODE_PASTA)
 		udp_splice_iov_init();
-		if (fwd_listen_sync(c, &c->udp.fwd_out,
-				    PIF_SPLICE, IPPROTO_UDP) < 0)
-			return -1;
-	}
 
 	return 0;
 }

@@ -788,7 +788,7 @@ int nl_addr_get(int s, unsigned int ifi, sa_family_t af,
 			    (af == AF_INET6 && rta->rta_type != IFA_ADDRESS))
 				continue;
 
-			if (ifa->ifa_prefixlen > prefix_max &&
+			if (ifa->ifa_prefixlen > prefix_max && addr &&
 			    (af == AF_INET || ifa->ifa_scope < RT_SCOPE_LINK)) {
 				memcpy(addr, RTA_DATA(rta), RTA_PAYLOAD(rta));
 

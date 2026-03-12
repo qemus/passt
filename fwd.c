@@ -334,6 +334,7 @@ bool fwd_port_is_ephemeral(in_port_t port)
 /**
  * fwd_rule_add() - Add a rule to a forwarding table
  * @fwd:	Table to add to
+ * @proto:	Protocol to forward
  * @flags:	Flags for this entry
  * @addr:	Our address to forward (NULL for both 0.0.0.0 and ::)
  * @ifname:	Only forward from this interface name, if non-empty
@@ -341,7 +342,7 @@ bool fwd_port_is_ephemeral(in_port_t port)
  * @last:	Last port number to forward
  * @to:		First port of target port range to map to
  */
-void fwd_rule_add(struct fwd_ports *fwd, uint8_t flags,
+void fwd_rule_add(struct fwd_table *fwd, uint8_t proto, uint8_t flags,
 		  const union inany_addr *addr, const char *ifname,
 		  in_port_t first, in_port_t last, in_port_t to)
 {
@@ -363,6 +364,10 @@ void fwd_rule_add(struct fwd_ports *fwd, uint8_t flags,
 		char newstr[INANY_ADDRSTRLEN], rulestr[INANY_ADDRSTRLEN];
 		struct fwd_rule *rule = &fwd->rules[i];
 
+		if (proto != rule->proto)
+			/* Non-conflicting protocols */
+			continue;
+
 		if (!inany_matches(addr, fwd_rule_addr(rule)))
 			/* Non-conflicting addresses */
 			continue;
@@ -378,6 +383,7 @@ void fwd_rule_add(struct fwd_ports *fwd, uint8_t flags,
 	}
 
 	new = &fwd->rules[fwd->count++];
+	new->proto = proto;
 	new->flags = flags;
 
 	if (addr) {
@@ -405,26 +411,23 @@ void fwd_rule_add(struct fwd_ports *fwd, uint8_t flags,
 	new->socks = &fwd->socks[fwd->sock_count];
 	fwd->sock_count += num;
 
-	for (port = new->first; port <= new->last; port++) {
+	for (port = new->first; port <= new->last; port++)
 		new->socks[port - new->first] = -1;
-
-		/* Fill in the legacy forwarding data structures to match the table */
-		if (!(new->flags & FWD_SCAN))
-			bitmap_set(fwd->map, port);
-	}
 }
 
 /**
  * fwd_rule_match() - Does a prospective flow match a given forwarding rule?
  * @rule:	Forwarding rule
  * @ini:	Initiating side flow information
+ * @proto:	Protocol to match
  *
  * Returns: true if the rule applies to the flow, false otherwise
  */
 static bool fwd_rule_match(const struct fwd_rule *rule,
-			   const struct flowside *ini)
+			   const struct flowside *ini, uint8_t proto)
 {
-	return inany_matches(&ini->oaddr, fwd_rule_addr(rule)) &&
+	return rule->proto == proto &&
+	       inany_matches(&ini->oaddr, fwd_rule_addr(rule)) &&
 	       ini->oport >= rule->first && ini->oport <= rule->last;
 }
 
@@ -432,13 +435,14 @@ static bool fwd_rule_match(const struct fwd_rule *rule,
  * fwd_rule_search() - Find a rule which matches a prospective flow
  * @fwd:	Forwarding table
  * @ini:	Initiating side flow information
+ * @proto:	Protocol to match
  * @hint:	Index of the rule in table, if known, otherwise FWD_NO_HINT
  *
  * Returns: first matching rule, or NULL if there is none
  */
-const struct fwd_rule *fwd_rule_search(const struct fwd_ports *fwd,
+const struct fwd_rule *fwd_rule_search(const struct fwd_table *fwd,
 				       const struct flowside *ini,
-				       int hint)
+				       uint8_t proto, int hint)
 {
 	unsigned i;
 
@@ -447,7 +451,7 @@ const struct fwd_rule *fwd_rule_search(const struct fwd_ports *fwd,
 		const struct fwd_rule *rule = &fwd->rules[hint];
 
 		ASSERT((unsigned)hint < fwd->count);
-		if (fwd_rule_match(rule, ini))
+		if (fwd_rule_match(rule, ini, proto))
 			return rule;
 
 		debug("Incorrect rule hint: %s:%hu does not match %s:%hu-%hu",
@@ -458,7 +462,7 @@ const struct fwd_rule *fwd_rule_search(const struct fwd_ports *fwd,
 	}
 
 	for (i = 0; i < fwd->count; i++) {
-		if (fwd_rule_match(&fwd->rules[i], ini))
+		if (fwd_rule_match(&fwd->rules[i], ini, proto))
 			return &fwd->rules[i];
 	}
 
@@ -469,7 +473,7 @@ const struct fwd_rule *fwd_rule_search(const struct fwd_ports *fwd,
  * fwd_rules_print() - Print forwarding rules for debugging
  * @fwd:	Table to print
  */
-void fwd_rules_print(const struct fwd_ports *fwd)
+void fwd_rules_print(const struct fwd_table *fwd)
 {
 	unsigned i;
 
@@ -486,13 +490,13 @@ void fwd_rules_print(const struct fwd_ports *fwd)
 			scan = " (auto-scan)";
 
 		if (rule->first == rule->last) {
-			info("    [%s]%s%s:%hu  =>  %hu %s%s",
-			     addr, percent, rule->ifname,
-			     rule->first, rule->to, weak, scan);
+			info("    %s [%s]%s%s:%hu  =>  %hu %s%s",
+			     ipproto_name(rule->proto), addr, percent,
+			     rule->ifname, rule->first, rule->to, weak, scan);
 		} else {
-			info("    [%s]%s%s:%hu-%hu  =>  %hu-%hu %s%s",
-			     addr, percent, rule->ifname,
-			     rule->first, rule->last,
+			info("    %s [%s]%s%s:%hu-%hu  =>  %hu-%hu %s%s",
+			     ipproto_name(rule->proto), addr, percent,
+			     rule->ifname, rule->first, rule->last,
 			     rule->to, rule->last - rule->first + rule->to,
 			     weak, scan);
 		}
@@ -504,14 +508,13 @@ void fwd_rules_print(const struct fwd_ports *fwd)
  * @fwd:	Forwarding table
  * @rule:	Forwarding rule
  * @pif:	Interface to create listening sockets for
- * @proto:	Protocol to listen for
  * @scanmap:	Bitmap of ports to listen for on FWD_SCAN entries
  *
  * Return: 0 on success, -1 on failure
  */
-static int fwd_sync_one(const struct ctx *c,
-			const struct fwd_ports *fwd, const struct fwd_rule *rule,
-			uint8_t pif, uint8_t proto, const uint8_t *scanmap)
+static int fwd_sync_one(const struct ctx *c, const struct fwd_table *fwd,
+			const struct fwd_rule *rule, uint8_t pif,
+			const uint8_t *scanmap)
 {
 	const union inany_addr *addr = fwd_rule_addr(rule);
 	const char *ifname = rule->ifname;
@@ -525,6 +528,7 @@ static int fwd_sync_one(const struct ctx *c,
 
 	idx = rule - fwd->rules;
 	ASSERT(idx < MAX_FWD_RULES);
+	ASSERT(!(rule->flags & FWD_SCAN && !scanmap));
 	
 	for (port = rule->first; port <= rule->last; port++) {
 		int fd = rule->socks[port - rule->first];
@@ -545,9 +549,9 @@ static int fwd_sync_one(const struct ctx *c,
 			continue;
 		}
 
-		if (proto == IPPROTO_TCP)
+		if (rule->proto == IPPROTO_TCP)
 			fd = tcp_listen(c, pif, idx, addr, ifname, port);
-		else if (proto == IPPROTO_UDP)
+		else if (rule->proto == IPPROTO_UDP)
 			fd = udp_listen(c, pif, idx, addr, ifname, port);
 		else
 			ASSERT(0);
@@ -556,7 +560,7 @@ static int fwd_sync_one(const struct ctx *c,
 			char astr[INANY_ADDRSTRLEN];
 
 			warn("Listen failed for %s %s port %s%s%s/%u: %s",
-			     pif_name(pif), ipproto_name(proto),
+			     pif_name(pif), ipproto_name(rule->proto),
 			     inany_ntop(addr, astr, sizeof(astr)),
 			     ifname ? "%" : "", ifname ? ifname : "",
 			     port, strerror_(-fd));
@@ -575,7 +579,7 @@ static int fwd_sync_one(const struct ctx *c,
 		char astr[INANY_ADDRSTRLEN];
 
 		warn("All listens failed for %s %s %s%s%s/%u-%u",
-		     pif_name(pif), ipproto_name(proto),
+		     pif_name(pif), ipproto_name(rule->proto),
 		     inany_ntop(addr, astr, sizeof(astr)),
 		     ifname ? "%" : "", ifname ? ifname : "",
 		     rule->first, rule->last);
@@ -587,18 +591,17 @@ static int fwd_sync_one(const struct ctx *c,
 
 /** struct fwd_listen_args - arguments for fwd_listen_init_()
  * @c:		Execution context
- * @fwd:	Forwarding information
- * @scanmap:	Bitmap of ports to auto-forward
+ * @fwd:	Forwarding table
+ * @tcpmap:	Bitmap of TCP ports to auto-forward
+ * @udpmap:	Bitmap of TCP ports to auto-forward
  * @pif:	Interface to create listening sockets for
- * @proto:	Protocol
  * @ret:	Return code
  */
 struct fwd_listen_args {
 	const struct ctx *c;
-	const struct fwd_ports *fwd;
-	const uint8_t *scanmap;
+	const struct fwd_table *fwd;
+	const uint8_t *tcpmap, *udpmap;
 	uint8_t pif;
-	uint8_t proto;
 	int ret;
 };
 
@@ -616,8 +619,15 @@ static int fwd_listen_sync_(void *arg)
 		ns_enter(a->c);
 
 	for (i = 0; i < a->fwd->count; i++) {
+		const uint8_t *scanmap = NULL;
+
+		if (a->fwd->rules[i].proto == IPPROTO_TCP)
+			scanmap = a->tcpmap;
+		else if (a->fwd->rules[i].proto == IPPROTO_UDP)
+			scanmap = a->udpmap;
+
 		a->ret = fwd_sync_one(a->c, a->fwd, &a->fwd->rules[i],
-				      a->pif, a->proto, a->fwd->map);
+				      a->pif, scanmap);
 		if (a->ret < 0)
 			break;
 	}
@@ -629,15 +639,19 @@ static int fwd_listen_sync_(void *arg)
  * @c:		Execution context
  * @fwd:	Forwarding information
  * @pif:	Interface to create listening sockets for
- * @proto:	Protocol
+ * @tcp:	Scanning state for TCP
+ * @udp:	Scanning state for UDP
  *
  * Return: 0 on success, -1 on failure
  */
-int fwd_listen_sync(const struct ctx *c, const struct fwd_ports *fwd,
-		    uint8_t pif, uint8_t proto)
+int fwd_listen_sync(const struct ctx *c, const struct fwd_table *fwd,
+		    uint8_t pif,
+		    const struct fwd_scan *tcp, const struct fwd_scan *udp)
 {
 	struct fwd_listen_args a = {
-		.c = c, .fwd = fwd, .pif = pif, .proto = proto,
+		.c = c, .fwd = fwd,
+		.tcpmap = tcp->map, .udpmap = udp->map,
+		.pif = pif,
 	};
 
 	if (pif == PIF_SPLICE)
@@ -646,8 +660,7 @@ int fwd_listen_sync(const struct ctx *c, const struct fwd_ports *fwd,
 		fwd_listen_sync_(&a);
 
 	if (a.ret < 0) {
-		err("Couldn't listen on requested %s ports",
-		    ipproto_name(proto));
+		err("Couldn't listen on requested ports");
 		return -1;
 	}
 
@@ -657,7 +670,7 @@ int fwd_listen_sync(const struct ctx *c, const struct fwd_ports *fwd,
 /** fwd_listen_close() - Close all listening sockets
  * @fwd:	Forwarding information
  */
-void fwd_listen_close(const struct fwd_ports *fwd)
+void fwd_listen_close(const struct fwd_table *fwd)
 {
 	unsigned i;
 
@@ -673,6 +686,26 @@ void fwd_listen_close(const struct fwd_ports *fwd)
 			}
 		}
 	}
+}
+
+/** fwd_listen_init() - Set up listening sockets at start up
+ * @c:		Execution context
+ *
+ * Return: 0 on success, -1 on failure
+ */
+int fwd_listen_init(const struct ctx *c)
+{
+	if (fwd_listen_sync(c, &c->fwd_in, PIF_HOST,
+			    &c->tcp.scan_in, &c->udp.scan_in) < 0)
+		return -1;
+
+	if (c->mode == MODE_PASTA) {
+		if (fwd_listen_sync(c, &c->fwd_out, PIF_SPLICE,
+				    &c->tcp.scan_out, &c->udp.scan_out) < 0)
+			return -1;
+	}
+
+	return 0;
 }
 
 /* See enum in kernel's include/net/tcp_states.h */
@@ -718,55 +751,78 @@ static void procfs_scan_listen(int fd, unsigned int lstate, uint8_t *map)
 }
 
 /**
+ * has_scan_rules() - Does the given table have any FWD_SCAN rules?
+ * @fwd:	Forwarding table
+ * @proto:	Protocol to consider
+ */
+static bool has_scan_rules(const struct fwd_table *fwd, uint8_t proto)
+{
+	unsigned i;
+
+	for (i = 0; i < fwd->count; i++) {
+		if (fwd->rules[i].proto == proto &&
+		    fwd->rules[i].flags & FWD_SCAN)
+			return true;
+	}
+	return false;
+}
+
+/**
  * fwd_scan_ports_tcp() - Scan /proc to update TCP forwarding map
- * @fwd:	Forwarding information to update
+ * @fwd:	Forwarding table
+ * @scan:	Scanning state to update
  * @exclude:	Ports to _not_ forward
  */
-static void fwd_scan_ports_tcp(struct fwd_ports *fwd, const uint8_t *exclude)
+static void fwd_scan_ports_tcp(const struct fwd_table *fwd,
+			       struct fwd_scan *scan, const uint8_t *exclude)
 {
-	if (fwd->mode != FWD_AUTO)
+	if (!has_scan_rules(fwd, IPPROTO_TCP))
 		return;
 
-	memset(fwd->map, 0, PORT_BITMAP_SIZE);
-	procfs_scan_listen(fwd->scan4, TCP_LISTEN, fwd->map);
-	procfs_scan_listen(fwd->scan6, TCP_LISTEN, fwd->map);
-	bitmap_and_not(fwd->map, PORT_BITMAP_SIZE, fwd->map, exclude);
+	memset(scan->map, 0, PORT_BITMAP_SIZE);
+	procfs_scan_listen(scan->scan4, TCP_LISTEN, scan->map);
+	procfs_scan_listen(scan->scan6, TCP_LISTEN, scan->map);
+	bitmap_and_not(scan->map, PORT_BITMAP_SIZE, scan->map, exclude);
 }
 
 /**
  * fwd_scan_ports_udp() - Scan /proc to update UDP forwarding map
- * @fwd:	Forwarding information to update
- * @tcp_fwd:	Corresponding TCP forwarding information
+ * @fwd:	Forwarding table
+ * @scan:	Scanning state to update
+ * @tcp_scan:	Corresponding TCP scanning state
  * @exclude:	Ports to _not_ forward
  */
-static void fwd_scan_ports_udp(struct fwd_ports *fwd,
-			       const struct fwd_ports *tcp_fwd,
+static void fwd_scan_ports_udp(const struct fwd_table *fwd,
+			       struct fwd_scan *scan,
+			       const struct fwd_scan *tcp_scan,
 			       const uint8_t *exclude)
 {
-	if (fwd->mode != FWD_AUTO)
+	if (!has_scan_rules(fwd, IPPROTO_UDP))
 		return;
 
-	memset(fwd->map, 0, PORT_BITMAP_SIZE);
-	procfs_scan_listen(fwd->scan4, UDP_LISTEN, fwd->map);
-	procfs_scan_listen(fwd->scan6, UDP_LISTEN, fwd->map);
+	memset(scan->map, 0, PORT_BITMAP_SIZE);
+	procfs_scan_listen(scan->scan4, UDP_LISTEN, scan->map);
+	procfs_scan_listen(scan->scan6, UDP_LISTEN, scan->map);
 
 	/* Also forward UDP ports with the same numbers as bound TCP ports.
 	 * This is useful for a handful of protocols (e.g. iperf3) where a TCP
 	 * control port is used to set up transfers on a corresponding UDP
 	 * port.
 	 */
-	procfs_scan_listen(tcp_fwd->scan4, TCP_LISTEN, fwd->map);
-	procfs_scan_listen(tcp_fwd->scan6, TCP_LISTEN, fwd->map);
+	procfs_scan_listen(tcp_scan->scan4, TCP_LISTEN, scan->map);
+	procfs_scan_listen(tcp_scan->scan6, TCP_LISTEN, scan->map);
 
-	bitmap_and_not(fwd->map, PORT_BITMAP_SIZE, fwd->map, exclude);
+	bitmap_and_not(scan->map, PORT_BITMAP_SIZE, scan->map, exclude);
 }
 
 /**
  * current_listen_map() - Get bitmap of which ports we're already listening on
  * @map:	Bitmap to populate
  * @fwd:	Forwarding table to consider
+ * @proto:	IP protocol to consider
  */
-static void current_listen_map(uint8_t *map, const struct fwd_ports *fwd)
+static void current_listen_map(uint8_t *map, const struct fwd_table *fwd,
+			       uint8_t proto)
 {
 	unsigned i;
 
@@ -775,6 +831,9 @@ static void current_listen_map(uint8_t *map, const struct fwd_ports *fwd)
 	for (i = 0; i < fwd->count; i++) {
 		const struct fwd_rule *rule = &fwd->rules[i];
 		unsigned port;
+
+		if (rule->proto != proto)
+			continue;
 
 		for (port = rule->first; port <= rule->last; port++) {
 			if (rule->socks[port - rule->first] >= 0)
@@ -792,15 +851,17 @@ static void fwd_scan_ports(struct ctx *c)
 	uint8_t excl_tcp_out[PORT_BITMAP_SIZE], excl_udp_out[PORT_BITMAP_SIZE];
 	uint8_t excl_tcp_in[PORT_BITMAP_SIZE], excl_udp_in[PORT_BITMAP_SIZE];
 
-	current_listen_map(excl_tcp_out, &c->tcp.fwd_in);
-	current_listen_map(excl_tcp_in, &c->tcp.fwd_out);
-	current_listen_map(excl_udp_out, &c->udp.fwd_in);
-	current_listen_map(excl_udp_in, &c->udp.fwd_out);
+	current_listen_map(excl_tcp_out, &c->fwd_in, IPPROTO_TCP);
+	current_listen_map(excl_tcp_in, &c->fwd_out, IPPROTO_TCP);
+	current_listen_map(excl_udp_out, &c->fwd_in, IPPROTO_UDP);
+	current_listen_map(excl_udp_in, &c->fwd_out, IPPROTO_UDP);
 
-	fwd_scan_ports_tcp(&c->tcp.fwd_out, excl_tcp_out);
-	fwd_scan_ports_tcp(&c->tcp.fwd_in, excl_tcp_in);
-	fwd_scan_ports_udp(&c->udp.fwd_out, &c->tcp.fwd_out, excl_udp_out);
-	fwd_scan_ports_udp(&c->udp.fwd_in, &c->tcp.fwd_in, excl_udp_in);
+	fwd_scan_ports_tcp(&c->fwd_out, &c->tcp.scan_out, excl_tcp_out);
+	fwd_scan_ports_tcp(&c->fwd_in, &c->tcp.scan_in, excl_tcp_in);
+	fwd_scan_ports_udp(&c->fwd_out, &c->udp.scan_out,
+			   &c->tcp.scan_out, excl_udp_out);
+	fwd_scan_ports_udp(&c->fwd_in, &c->udp.scan_in,
+			   &c->tcp.scan_in, excl_udp_in);
 }
 
 /**
@@ -811,28 +872,24 @@ void fwd_scan_ports_init(struct ctx *c)
 {
 	const int flags = O_RDONLY | O_CLOEXEC;
 
-	c->tcp.fwd_in.scan4 = c->tcp.fwd_in.scan6 = -1;
-	c->tcp.fwd_out.scan4 = c->tcp.fwd_out.scan6 = -1;
-	c->udp.fwd_in.scan4 = c->udp.fwd_in.scan6 = -1;
-	c->udp.fwd_out.scan4 = c->udp.fwd_out.scan6 = -1;
+	c->tcp.scan_in.scan4 = c->tcp.scan_in.scan6 = -1;
+	c->tcp.scan_out.scan4 = c->tcp.scan_out.scan6 = -1;
+	c->udp.scan_in.scan4 = c->udp.scan_in.scan6 = -1;
+	c->udp.scan_out.scan4 = c->udp.scan_out.scan6 = -1;
 
-	if (c->tcp.fwd_in.mode == FWD_AUTO) {
-		c->tcp.fwd_in.scan4 = open_in_ns(c, "/proc/net/tcp", flags);
-		c->tcp.fwd_in.scan6 = open_in_ns(c, "/proc/net/tcp6", flags);
+	if (c->mode == MODE_PASTA) {
+		c->tcp.scan_out.scan4 = open("/proc/net/tcp", flags);
+		c->tcp.scan_out.scan6 = open("/proc/net/tcp6", flags);
+		c->udp.scan_out.scan4 = open("/proc/net/udp", flags);
+		c->udp.scan_out.scan6 = open("/proc/net/udp6", flags);
+
+		c->tcp.scan_in.scan4 = open_in_ns(c, "/proc/net/tcp", flags);
+		c->tcp.scan_in.scan6 = open_in_ns(c, "/proc/net/tcp6", flags);
+		c->udp.scan_in.scan4 = open_in_ns(c, "/proc/net/udp", flags);
+		c->udp.scan_in.scan6 = open_in_ns(c, "/proc/net/udp6", flags);
+
+		fwd_scan_ports(c);
 	}
-	if (c->udp.fwd_in.mode == FWD_AUTO) {
-		c->udp.fwd_in.scan4 = open_in_ns(c, "/proc/net/udp", flags);
-		c->udp.fwd_in.scan6 = open_in_ns(c, "/proc/net/udp6", flags);
-	}
-	if (c->tcp.fwd_out.mode == FWD_AUTO) {
-		c->tcp.fwd_out.scan4 = open("/proc/net/tcp", flags);
-		c->tcp.fwd_out.scan6 = open("/proc/net/tcp6", flags);
-	}
-	if (c->udp.fwd_out.mode == FWD_AUTO) {
-		c->udp.fwd_out.scan4 = open("/proc/net/udp", flags);
-		c->udp.fwd_out.scan6 = open("/proc/net/udp6", flags);
-	}
-	fwd_scan_ports(c);
 }
 
 /* Last time we scanned for open ports */
@@ -855,14 +912,10 @@ void fwd_scan_ports_timer(struct ctx *c, const struct timespec *now)
 
 	fwd_scan_ports(c);
 
-	if (!c->no_tcp) {
-		fwd_listen_sync(c, &c->tcp.fwd_in, PIF_HOST, IPPROTO_TCP);
-		fwd_listen_sync(c, &c->tcp.fwd_out, PIF_SPLICE, IPPROTO_TCP);
-	}
-	if (!c->no_udp) {
-		fwd_listen_sync(c, &c->udp.fwd_in, PIF_HOST, IPPROTO_UDP);
-		fwd_listen_sync(c, &c->udp.fwd_out, PIF_SPLICE, IPPROTO_UDP);
-	}
+	fwd_listen_sync(c, &c->fwd_in, PIF_HOST,
+			&c->tcp.scan_in, &c->udp.scan_in);
+	fwd_listen_sync(c, &c->fwd_out, PIF_SPLICE,
+			&c->tcp.scan_out, &c->udp.scan_out);
 }
 
 /**

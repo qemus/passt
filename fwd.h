@@ -31,11 +31,12 @@ bool fwd_port_is_ephemeral(in_port_t port);
  * @first:	First port number to forward
  * @last:	Last port number to forward
  * @to:		Target port for @first, port n goes to @to + (n - @first)
- * @socks:	Array of listening sockets for this entry
+ * @proto:	Protocol to forward
  * @flags:	Flag mask
  * 	FWD_DUAL_STACK_ANY - match any IPv4 or IPv6 address (@addr should be ::)
  *	FWD_WEAK - Don't give an error if binds fail for some forwards
  *	FWD_SCAN - Only forward if the matching port in the target is listening
+ * @socks:	Array of listening sockets for this entry
  *
  * FIXME: @addr and @ifname currently ignored for outbound tables
  */
@@ -45,11 +46,12 @@ struct fwd_rule {
 	in_port_t first;
 	in_port_t last;
 	in_port_t to;
-	int *socks;
+	uint8_t proto;
 #define FWD_DUAL_STACK_ANY	BIT(0)
 #define FWD_WEAK		BIT(1)
 #define FWD_SCAN		BIT(2)
 	uint8_t flags;
+	int *socks;
 };
 
 #define FWD_RULE_BITS	8
@@ -68,61 +70,60 @@ struct fwd_listen_ref {
 	unsigned	rule :FWD_RULE_BITS;
 };
 
-enum fwd_ports_mode {
-	FWD_UNSET = 0,
-	FWD_SPEC = 1,
-	FWD_NONE,
-	FWD_AUTO,
-	FWD_ALL,
-};
-
-#define PORT_BITMAP_SIZE	DIV_ROUND_UP(NUM_PORTS, 8)
-
-/* Maximum number of listening sockets (per pif & protocol)
+/* Maximum number of listening sockets (per pif)
  *
- * Rationale: This lets us listen on every port for two addresses (which we need
- * for -T auto without SO_BINDTODEVICE), plus a comfortable number of extras.
+ * Rationale: This lets us listen on every port for two addresses and two
+ * protocols (which we need for -T auto -U auto without SO_BINDTODEVICE), plus a
+ * comfortable number of extras.
  */
-#define MAX_LISTEN_SOCKS	(NUM_PORTS * 3)
+#define MAX_LISTEN_SOCKS	(NUM_PORTS * 5)
 
 /**
- * fwd_ports() - Describes port forwarding for one protocol and direction
- * @mode:	Overall mode (all, none, auto, specific ports)
- * @scan4:	/proc/net fd to scan for IPv4 ports when in AUTO mode
- * @scan6:	/proc/net fd to scan for IPv6 ports when in AUTO mode
+ * struct fwd_table - Table of forwarding rules (per initiating pif)
  * @count:	Number of forwarding rules
  * @rules:	Array of forwarding rules
- * @map:	Bitmap describing which ports are forwarded
  * @sock_count:	Number of entries used in @socks
  * @socks:	Listening sockets for forwarding
  */
-struct fwd_ports {
-	enum fwd_ports_mode mode;
-	int scan4;
-	int scan6;
+struct fwd_table {
 	unsigned count;
 	struct fwd_rule rules[MAX_FWD_RULES];
-	uint8_t map[PORT_BITMAP_SIZE];
 	unsigned sock_count;
 	int socks[MAX_LISTEN_SOCKS];
 };
 
+#define PORT_BITMAP_SIZE	DIV_ROUND_UP(NUM_PORTS, 8)
+
+/**
+ * struct fwd_scan - Port scanning state for a protocol+direction
+ * @scan4:	/proc/net fd to scan for IPv4 ports when in AUTO mode
+ * @scan6:	/proc/net fd to scan for IPv6 ports when in AUTO mode
+ * @map:	Bitmap describing which ports are forwarded
+ */
+struct fwd_scan {
+	int scan4;
+	int scan6;
+	uint8_t map[PORT_BITMAP_SIZE];
+};
+
 #define FWD_PORT_SCAN_INTERVAL		1000	/* ms */
 
-void fwd_rule_add(struct fwd_ports *fwd, uint8_t flags,
+void fwd_rule_add(struct fwd_table *fwd, uint8_t proto, uint8_t flags,
 		  const union inany_addr *addr, const char *ifname,
 		  in_port_t first, in_port_t last, in_port_t to);
-const struct fwd_rule *fwd_rule_search(const struct fwd_ports *fwd,
+const struct fwd_rule *fwd_rule_search(const struct fwd_table *fwd,
 				       const struct flowside *ini,
-				       int hint);
-void fwd_rules_print(const struct fwd_ports *fwd);
+				       uint8_t proto, int hint);
+void fwd_rules_print(const struct fwd_table *fwd);
 
 void fwd_scan_ports_init(struct ctx *c);
 void fwd_scan_ports_timer(struct ctx * c, const struct timespec *now);
 
-int fwd_listen_sync(const struct ctx *c, const struct fwd_ports *fwd,
-		    uint8_t pif, uint8_t proto);
-void fwd_listen_close(const struct fwd_ports *fwd);
+int fwd_listen_sync(const struct ctx *c, const struct fwd_table *fwd,
+		    uint8_t pif,
+		    const struct fwd_scan *tcp, const struct fwd_scan *udp);
+void fwd_listen_close(const struct fwd_table *fwd);
+int fwd_listen_init(const struct ctx *c);
 
 bool nat_inbound(const struct ctx *c, const union inany_addr *addr,
 		 union inany_addr *translated);

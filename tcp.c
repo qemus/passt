@@ -2864,14 +2864,8 @@ int tcp_init(struct ctx *c)
 
 	tcp_sock_refill_init(c);
 
-	if (fwd_listen_sync(c, &c->tcp.fwd_in, PIF_HOST, IPPROTO_TCP) < 0)
-		return -1;
-	if (c->mode == MODE_PASTA) {
+	if (c->mode == MODE_PASTA)
 		tcp_splice_init(c);
-		if (fwd_listen_sync(c, &c->tcp.fwd_out,
-				    PIF_SPLICE, IPPROTO_TCP) < 0)
-			return -1;
-	}
 
 	peek_offset_cap = (!c->ifi4 || tcp_probe_peek_offset_cap(AF_INET)) &&
 			  (!c->ifi6 || tcp_probe_peek_offset_cap(AF_INET6));

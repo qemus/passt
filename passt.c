@@ -401,6 +401,9 @@ int main(int argc, char **argv)
 	if ((!c.no_udp && udp_init(&c)) || (!c.no_tcp && tcp_init(&c)))
 		passt_exit(EXIT_FAILURE);
 
+	if (fwd_listen_init(&c))
+		passt_exit(EXIT_FAILURE);
+
 	proto_update_l2_buf(c.guest_mac);
 
 	if (c.ifi4 && !c.no_dhcp)
