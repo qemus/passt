@@ -35,8 +35,6 @@ enum pif_type {
 	PIF_NUM_TYPES,
 };
 
-#define PIF_NAMELEN	8
-
 extern const char *pif_type_str[];
 
 static inline const char *pif_type(enum pif_type pt)

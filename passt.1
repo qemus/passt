@@ -454,7 +454,7 @@ chosen for the hypervisor UNIX domain socket. No socket is created if not in
 \-\-vhost-user mode.
 
 .TP
-.BR \-\-migrate-exit (DEPRECATED)
+.BR \-\-migrate-exit " " (DEPRECATED)
 Exit after a completed migration as source. By default, \fBpasst\fR keeps
 running and the migrated guest can continue using its connection, or a new guest
 can connect.
@@ -465,7 +465,7 @@ legacy behaviour. If you have any use for this, refer to \fBREPORTING BUGS\fR
 below.
 
 .TP
-.BR \-\-migrate-no-linger (DEPRECATED)
+.BR \-\-migrate-no-linger " " (DEPRECATED)
 Close TCP sockets on the source instance once migration completes.
 
 By default, sockets are kept open, and events on data sockets are ignored, so

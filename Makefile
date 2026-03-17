@@ -172,8 +172,8 @@ docs: README.md
 		done < README.md;					\
 	) > README.plain.md
 
-clang-tidy: $(PASST_SRCS) $(HEADERS)
-	clang-tidy $(PASST_SRCS) -- $(filter-out -pie,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) \
+clang-tidy: $(PASST_SRCS)
+	clang-tidy $^ -- $(filter-out -pie,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) \
 	           -DCLANG_TIDY_58992
 
 cppcheck: $(PASST_SRCS) $(HEADERS)
@@ -189,4 +189,4 @@ cppcheck: $(PASST_SRCS) $(HEADERS)
 	--suppress=missingIncludeSystem \
 	--suppress=unusedStructMember					\
 	$(filter -D%,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) -D CPPCHECK_6936  \
-	$(PASST_SRCS) $(HEADERS)
+	$^
