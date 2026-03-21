@@ -176,7 +176,7 @@ static inline flow_sidx_t flow_sidx(const struct flow_common *f,
 				    unsigned sidei)
 {
 	/* cppcheck-suppress [knownConditionTrueFalse, unmatchedSuppression] */
-	ASSERT(sidei == !!sidei);
+	assert(sidei == !!sidei);
 
 	return (flow_sidx_t){
 		.sidei = sidei,

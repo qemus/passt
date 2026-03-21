@@ -161,7 +161,7 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 	else if (optname == 'u' || optname == 'U')
 		proto = IPPROTO_UDP;
 	else
-		ASSERT(0);
+		assert(0);
 
 	if (addr) {
 		if (!c->ifi4 && inany_v4(addr)) {
@@ -186,7 +186,7 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 			/* FIXME: Once the fwd bitmaps are removed, move this
 			 * workaround to the caller
 			 */
-			ASSERT(!addr && ifname && !strcmp(ifname, "lo"));
+			assert(!addr && ifname && !strcmp(ifname, "lo"));
 			warn(
 "SO_BINDTODEVICE unavailable, forwarding only 127.0.0.1 and ::1 for '-%c %s'",
 			     optname, optarg);
@@ -1743,7 +1743,7 @@ void conf(struct ctx *c, int argc, char **argv)
 			die("Invalid host nameserver address: %s", optarg);
 		case 25:
 			/* Already handled in conf_mode() */
-			ASSERT(c->mode == MODE_VU);
+			assert(c->mode == MODE_VU);
 			break;
 		case 26:
 			vu_print_capabilities();

@@ -73,11 +73,20 @@ void abort_with_msg(const char *fmt, ...)
  * Therefore, avoid using the usual do while wrapper we use to force the macro
  * to act like a single statement requiring a ';'.
  */
-#define ASSERT_WITH_MSG(expr, ...)					\
+#ifndef NDEBUG
+#define assert_with_msg(expr, ...)					\
 	((expr) ? (void)0 : abort_with_msg(__VA_ARGS__))
-#define ASSERT(expr)							\
-	ASSERT_WITH_MSG((expr), "ASSERTION FAILED in %s (%s:%d): %s",	\
+/* The standard library assert() hits our seccomp filter and dies before it can
+ * actually print a message.  So, replace it with our own version.
+ */
+#undef assert
+#define assert(expr)							\
+	assert_with_msg((expr), "ASSERTION FAILED in %s (%s:%d): %s",	\
 			__func__, __FILE__, __LINE__, STRINGIFY(expr))
+#else
+#define assert_with_msg(expr, ...)					\
+	((void)(expr), 0 ? (void)0 : abort_with_msg(__VA_ARGS__))
+#endif
 
 #ifdef P_tmpdir
 #define TMPDIR		P_tmpdir

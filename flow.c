@@ -216,7 +216,7 @@ int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 	const char *ifname = NULL;
 	union sockaddr_inany sa;
 
-	ASSERT(pif_is_socket(pif));
+	assert(pif_is_socket(pif));
 
 	pif_sockaddr(c, &sa, pif, &tgt->oaddr, tgt->oport);
 
@@ -244,7 +244,7 @@ int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
 		/* If we add new socket pifs, they'll need to be implemented
 		 * here
 		 */
-		ASSERT(0);
+		assert(0);
 	}
 }
 
@@ -341,8 +341,8 @@ static void flow_set_state(struct flow_common *f, enum flow_state state)
 {
 	uint8_t oldstate = f->state;
 
-	ASSERT(state < FLOW_NUM_STATES);
-	ASSERT(oldstate < FLOW_NUM_STATES);
+	assert(state < FLOW_NUM_STATES);
+	assert(oldstate < FLOW_NUM_STATES);
 
 	f->state = state;
 	flow_log_(f, true, LOG_DEBUG, "%s -> %s", flow_state_str[oldstate],
@@ -369,7 +369,7 @@ int flow_epollfd(const struct flow_common *f)
  */
 void flow_epollid_set(struct flow_common *f, int epollid)
 {
-	ASSERT(epollid < EPOLLFD_ID_SIZE);
+	assert(epollid < EPOLLFD_ID_SIZE);
 
 	f->epollid = epollid;
 }
@@ -407,7 +407,7 @@ int flow_epoll_set(const struct flow_common *f, int command, uint32_t events,
  */
 void flow_epollid_register(int epollid, int epollfd)
 {
-	ASSERT(epollid < EPOLLFD_ID_SIZE);
+	assert(epollid < EPOLLFD_ID_SIZE);
 
 	epoll_id_to_fd[epollid] = epollfd;
 }
@@ -421,10 +421,10 @@ static void flow_initiate_(union flow *flow, uint8_t pif)
 {
 	struct flow_common *f = &flow->f;
 
-	ASSERT(pif != PIF_NONE);
-	ASSERT(flow_new_entry == flow && f->state == FLOW_STATE_NEW);
-	ASSERT(f->type == FLOW_TYPE_NONE);
-	ASSERT(f->pif[INISIDE] == PIF_NONE && f->pif[TGTSIDE] == PIF_NONE);
+	assert(pif != PIF_NONE);
+	assert(flow_new_entry == flow && f->state == FLOW_STATE_NEW);
+	assert(f->type == FLOW_TYPE_NONE);
+	assert(f->pif[INISIDE] == PIF_NONE && f->pif[TGTSIDE] == PIF_NONE);
 
 	f->pif[INISIDE] = pif;
 	flow_set_state(f, FLOW_STATE_INI);
@@ -474,7 +474,7 @@ struct flowside *flow_initiate_sa(union flow *flow, uint8_t pif,
 	if (inany_from_sockaddr(&ini->eaddr, &ini->eport, ssa) < 0) {
 		char str[SOCKADDR_STRLEN];
 
-		ASSERT_WITH_MSG(0, "Bad socket address %s",
+		assert_with_msg(0, "Bad socket address %s",
 				sockaddr_ntop(ssa, str, sizeof(str)));
 	}
 	if (daddr)
@@ -508,10 +508,10 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 	const struct fwd_table *fwd;
 	uint8_t tgtpif = PIF_NONE;
 
-	ASSERT(flow_new_entry == flow && f->state == FLOW_STATE_INI);
-	ASSERT(f->type == FLOW_TYPE_NONE);
-	ASSERT(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] == PIF_NONE);
-	ASSERT(flow->f.state == FLOW_STATE_INI);
+	assert(flow_new_entry == flow && f->state == FLOW_STATE_INI);
+	assert(f->type == FLOW_TYPE_NONE);
+	assert(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] == PIF_NONE);
+	assert(flow->f.state == FLOW_STATE_INI);
 
 	switch (f->pif[INISIDE]) {
 	case PIF_TAP:
@@ -574,10 +574,10 @@ union flow *flow_set_type(union flow *flow, enum flow_type type)
 {
 	struct flow_common *f = &flow->f;
 
-	ASSERT(type != FLOW_TYPE_NONE);
-	ASSERT(flow_new_entry == flow && f->state == FLOW_STATE_TGT);
-	ASSERT(f->type == FLOW_TYPE_NONE);
-	ASSERT(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] != PIF_NONE);
+	assert(type != FLOW_TYPE_NONE);
+	assert(flow_new_entry == flow && f->state == FLOW_STATE_TGT);
+	assert(f->type == FLOW_TYPE_NONE);
+	assert(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] != PIF_NONE);
 
 	f->type = type;
 	flow_set_state(f, FLOW_STATE_TYPED);
@@ -590,8 +590,8 @@ union flow *flow_set_type(union flow *flow, enum flow_type type)
  */
 void flow_activate(struct flow_common *f)
 {
-	ASSERT(&flow_new_entry->f == f && f->state == FLOW_STATE_TYPED);
-	ASSERT(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] != PIF_NONE);
+	assert(&flow_new_entry->f == f && f->state == FLOW_STATE_TYPED);
+	assert(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] != PIF_NONE);
 
 	flow_set_state(f, FLOW_STATE_ACTIVE);
 	flow_new_entry = NULL;
@@ -606,26 +606,26 @@ union flow *flow_alloc(void)
 {
 	union flow *flow = &flowtab[flow_first_free];
 
-	ASSERT(!flow_new_entry);
+	assert(!flow_new_entry);
 
 	if (flow_first_free >= FLOW_MAX)
 		return NULL;
 
-	ASSERT(flow->f.state == FLOW_STATE_FREE);
-	ASSERT(flow->f.type == FLOW_TYPE_NONE);
-	ASSERT(flow->free.n >= 1);
-	ASSERT(flow_first_free + flow->free.n <= FLOW_MAX);
+	assert(flow->f.state == FLOW_STATE_FREE);
+	assert(flow->f.type == FLOW_TYPE_NONE);
+	assert(flow->free.n >= 1);
+	assert(flow_first_free + flow->free.n <= FLOW_MAX);
 
 	if (flow->free.n > 1) {
 		union flow *next;
 
 		/* Use one entry from the cluster */
-		ASSERT(flow_first_free <= FLOW_MAX - 2);
+		assert(flow_first_free <= FLOW_MAX - 2);
 		next = &flowtab[++flow_first_free];
 
-		ASSERT(FLOW_IDX(next) < FLOW_MAX);
-		ASSERT(next->f.type == FLOW_TYPE_NONE);
-		ASSERT(next->free.n == 0);
+		assert(FLOW_IDX(next) < FLOW_MAX);
+		assert(next->f.type == FLOW_TYPE_NONE);
+		assert(next->free.n == 0);
 
 		next->free.n = flow->free.n - 1;
 		next->free.next = flow->free.next;
@@ -649,12 +649,12 @@ union flow *flow_alloc(void)
  */
 void flow_alloc_cancel(union flow *flow)
 {
-	ASSERT(flow_new_entry == flow);
-	ASSERT(flow->f.state == FLOW_STATE_NEW ||
+	assert(flow_new_entry == flow);
+	assert(flow->f.state == FLOW_STATE_NEW ||
 	       flow->f.state == FLOW_STATE_INI ||
 	       flow->f.state == FLOW_STATE_TGT ||
 	       flow->f.state == FLOW_STATE_TYPED);
-	ASSERT(flow_first_free > FLOW_IDX(flow));
+	assert(flow_first_free > FLOW_IDX(flow));
 
 	flow_set_state(&flow->f, FLOW_STATE_FREE);
 	memset(flow, 0, sizeof(*flow));
@@ -704,7 +704,7 @@ static uint64_t flow_sidx_hash(const struct ctx *c, flow_sidx_t sidx)
 	const struct flowside *side = &f->side[sidx.sidei];
 	uint8_t pif = f->pif[sidx.sidei];
 
-	ASSERT(pif != PIF_NONE);
+	assert(pif != PIF_NONE);
 	return flow_hash(c, FLOW_PROTO(f), pif, side);
 }
 
@@ -897,7 +897,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 		flow_timer_run = *now;
 	}
 
-	ASSERT(!flow_new_entry); /* Incomplete flow at end of cycle */
+	assert(!flow_new_entry); /* Incomplete flow at end of cycle */
 
 	/* Check which flows we might need to close first, but don't free them
 	 * yet as it's not safe to do that in the middle of flow_foreach().
@@ -907,7 +907,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 
 		switch (flow->f.type) {
 		case FLOW_TYPE_NONE:
-			ASSERT(false);
+			assert(false);
 			break;
 		case FLOW_TCP:
 			closed = tcp_flow_defer(&flow->tcp);
@@ -942,7 +942,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 			unsigned skip = flow->free.n;
 
 			/* First entry of a free cluster must have n >= 1 */
-			ASSERT(skip);
+			assert(skip);
 
 			if (free_head) {
 				/* Merge into preceding free cluster */
@@ -965,7 +965,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 		case FLOW_STATE_TGT:
 		case FLOW_STATE_TYPED:
 			/* Incomplete flow at end of cycle */
-			ASSERT(false);
+			assert(false);
 			break;
 
 		case FLOW_STATE_ACTIVE:
@@ -975,7 +975,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 
 				if (free_head) {
 					/* Add slot to current free cluster */
-					ASSERT(FLOW_IDX(flow) ==
+					assert(FLOW_IDX(flow) ==
 					    FLOW_IDX(free_head) + free_head->n);
 					free_head->n++;
 					flow->free.n = flow->free.next = 0;
@@ -992,7 +992,7 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now)
 			break;
 
 		default:
-			ASSERT(false);
+			assert(false);
 		}
 	}
 

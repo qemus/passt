@@ -305,7 +305,7 @@ static void passt_worker(void *opaque, int nfds, struct epoll_event *events)
 			break;
 		default:
 			/* Can't happen */
-			ASSERT(0);
+			assert(0);
 		}
 		stats.events[ref.type]++;
 		print_stats(c, &stats, &now);

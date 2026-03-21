@@ -31,7 +31,7 @@ struct udp_flow *udp_at_sidx(flow_sidx_t sidx)
 	if (!flow)
 		return NULL;
 
-	ASSERT(flow->f.type == FLOW_UDP);
+	assert(flow->f.type == FLOW_UDP);
 	return &flow->udp;
 }
 
@@ -280,7 +280,7 @@ flow_sidx_t udp_flow_from_tap(const struct ctx *c,
 	union flow *flow;
 	flow_sidx_t sidx;
 
-	ASSERT(pif == PIF_TAP);
+	assert(pif == PIF_TAP);
 
 	sidx = flow_lookup_af(c, IPPROTO_UDP, pif, af, saddr, daddr,
 			      srcport, dstport);

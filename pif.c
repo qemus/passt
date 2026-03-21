@@ -39,7 +39,7 @@ void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
 {
 	const struct in_addr *v4 = inany_v4(addr);
 
-	ASSERT(pif_is_socket(pif));
+	assert(pif_is_socket(pif));
 
 	if (v4) {
 		sa->sa_family = AF_INET;
@@ -83,7 +83,7 @@ int pif_listen(const struct ctx *c, enum epoll_type type, uint8_t pif,
 	union epoll_ref ref;
 	int ret;
 
-	ASSERT(pif_is_socket(pif));
+	assert(pif_is_socket(pif));
 
 	if (!addr) {
 		ref.fd = sock_l4_dualstack_any(c, type, port, ifname);

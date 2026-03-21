@@ -168,7 +168,7 @@ bool packet_get_do(const struct pool *p, size_t idx,
 {
 	size_t i;
 
-	ASSERT_WITH_MSG(p->count <= p->size,
+	assert_with_msg(p->count <= p->size,
 			"Corrupted pool count: %zu, size: %zu, %s:%i",
 			p->count, p->size, func, line);
 
@@ -188,7 +188,7 @@ bool packet_get_do(const struct pool *p, size_t idx,
 	data->off = 0;
 
 	for (i = 0; i < data->cnt; i++) {
-		ASSERT_WITH_MSG(!packet_check_range(p, data->iov[i].iov_base,
+		assert_with_msg(!packet_check_range(p, data->iov[i].iov_base,
 						    data->iov[i].iov_len,
 						    func, line),
 				"Corrupt packet pool, %s:%i", func, line);

@@ -21,6 +21,7 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 
+#include <assert.h>
 #include <sys/socket.h>
 
 #include "util.h"
@@ -118,7 +119,7 @@ size_t iov_to_buf(const struct iovec *iov, size_t iov_cnt,
 	for (copied = 0; copied < bytes && i < iov_cnt; i++) {
 		size_t len = MIN(iov[i].iov_len - offset, bytes - copied);
 
-		ASSERT(iov[i].iov_base);
+		assert(iov[i].iov_base);
 
 		memcpy((char *)buf + copied, (char *)iov[i].iov_base + offset,
 		       len);

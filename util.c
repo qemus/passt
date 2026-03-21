@@ -84,7 +84,7 @@ static int sock_l4_(const struct ctx *c, enum epoll_type type,
 		socktype = SOCK_DGRAM | SOCK_NONBLOCK;
 		break;
 	default:
-		ASSERT(0);
+		assert(0);
 	}
 
 	fd = socket(af, socktype, proto);
@@ -884,7 +884,7 @@ int read_all_buf(int fd, void *buf, size_t len)
 	while (left) {
 		ssize_t rc;
 
-		ASSERT(left <= len);
+		assert(left <= len);
 
 		do
 			rc = read(fd, p, left);
@@ -924,7 +924,7 @@ int read_remainder(int fd, const struct iovec *iov, size_t cnt, size_t skip)
 		ssize_t rc;
 
 		if (offset) {
-			ASSERT(offset < iov[i].iov_len);
+			assert(offset < iov[i].iov_len);
 			/* Read the remainder of the partially read buffer */
 			if (read_all_buf(fd, (char *)iov[i].iov_base + offset,
 					 iov[i].iov_len - offset) < 0)

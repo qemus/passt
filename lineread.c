@@ -12,6 +12,7 @@
  * Author: David Gibson <david@gibson.dropbear.id.au>
  */
 
+#include <assert.h>
 #include <stddef.h>
 #include <fcntl.h>
 #include <string.h>
@@ -44,8 +45,8 @@ static ssize_t peek_line(struct lineread *lr, bool eof)
 	char *nl;
 
 	/* Sanity checks (which also document invariants) */
-	ASSERT(lr->next_line + lr->count >= lr->next_line);
-	ASSERT(lr->next_line + lr->count <= LINEREAD_BUFFER_SIZE);
+	assert(lr->next_line + lr->count >= lr->next_line);
+	assert(lr->next_line + lr->count <= LINEREAD_BUFFER_SIZE);
 
 	nl = memchr(lr->buf + lr->next_line, '\n', lr->count);
 

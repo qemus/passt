@@ -396,7 +396,7 @@ void isolate_postfork(const struct ctx *c)
 		prog.filter = filter_vu;
 		break;
 	default:
-		ASSERT(0);
+		assert(0);
 	}
 
 	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) ||

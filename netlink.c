@@ -160,7 +160,7 @@ static uint32_t nl_send(int s, void *req, uint16_t type,
  */
 static int nl_status(const struct nlmsghdr *nh, ssize_t n, uint32_t seq)
 {
-	ASSERT(NLMSG_OK(nh, n));
+	assert(NLMSG_OK(nh, n));
 
 	if (nh->nlmsg_seq != seq)
 		die("netlink: Unexpected sequence number (%u != %u)",

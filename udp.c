@@ -271,7 +271,7 @@ size_t udp_update_hdr4(struct iphdr *ip4h, struct udp_payload_t *bp,
 	size_t l4len = dlen + sizeof(bp->uh);
 	size_t l3len = l4len + sizeof(*ip4h);
 
-	ASSERT(src && dst);
+	assert(src && dst);
 
 	ip4h->tot_len = htons(l3len);
 	ip4h->daddr = dst->s_addr;
@@ -431,7 +431,7 @@ static void udp_send_tap_icmp4(const struct ctx *c,
 	size_t msglen = sizeof(msg) - sizeof(msg.data) + dlen;
 	size_t l4len = dlen + sizeof(struct udphdr);
 
-	ASSERT(dlen <= ICMP4_MAX_DLEN);
+	assert(dlen <= ICMP4_MAX_DLEN);
 	memset(&msg, 0, sizeof(msg));
 	msg.icmp4h.type = ee->ee_type;
 	msg.icmp4h.code = ee->ee_code;
@@ -480,7 +480,7 @@ static void udp_send_tap_icmp6(const struct ctx *c,
 	size_t msglen = sizeof(msg) - sizeof(msg.data) + dlen;
 	size_t l4len = dlen + sizeof(struct udphdr);
 
-	ASSERT(dlen <= ICMP6_MAX_DLEN);
+	assert(dlen <= ICMP6_MAX_DLEN);
 	memset(&msg, 0, sizeof(msg));
 	msg.icmp6h.icmp6_type = ee->ee_type;
 	msg.icmp6h.icmp6_code = ee->ee_code;
@@ -628,7 +628,7 @@ static int udp_sock_recverr(const struct ctx *c, int s, flow_sidx_t sidx,
 	}
 
 	uflow = udp_at_sidx(sidx);
-	ASSERT(uflow);
+	assert(uflow);
 	fromside = &uflow->f.side[sidx.sidei];
 	toside = &uflow->f.side[!sidx.sidei];
 	topif = uflow->f.pif[!sidx.sidei];
@@ -692,7 +692,7 @@ static int udp_sock_errs(const struct ctx *c, int s, flow_sidx_t sidx,
 	socklen_t errlen;
 	int rc, err;
 
-	ASSERT(!c->no_udp);
+	assert(!c->no_udp);
 
 	/* Empty the error queue */
 	while ((rc = udp_sock_recverr(c, s, sidx, pif, port)) > 0)
@@ -772,7 +772,7 @@ static int udp_peek_addr(int s, union sockaddr_inany *src,
  */
 static int udp_sock_recv(const struct ctx *c, int s, struct mmsghdr *mmh, int n)
 {
-	ASSERT(!c->no_udp);
+	assert(!c->no_udp);
 
 	n = recvmmsg(s, mmh, n, 0, NULL);
 	if (n < 0) {
@@ -940,7 +940,7 @@ void udp_sock_handler(const struct ctx *c, union epoll_ref ref,
 {
 	struct udp_flow *uflow = udp_at_sidx(ref.flowside);
 
-	ASSERT(!c->no_udp && uflow);
+	assert(!c->no_udp && uflow);
 
 	if (events & EPOLLERR) {
 		if (udp_sock_errs(c, ref.fd, ref.flowside, PIF_NONE, 0) < 0) {
@@ -1023,7 +1023,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 	in_port_t src, dst;
 	uint8_t topif;
 
-	ASSERT(!c->no_udp);
+	assert(!c->no_udp);
 
 	if (!packet_get(p, idx, &data))
 		return 1;
@@ -1061,7 +1061,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 	toside = flowside_at_sidx(tosidx);
 
 	s = uflow->s[tosidx.sidei];
-	ASSERT(s >= 0);
+	assert(s >= 0);
 
 	pif_sockaddr(c, &to_sa, topif, &toside->eaddr, toside->eport);
 
@@ -1141,7 +1141,7 @@ int udp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 {
 	int s;
 
-	ASSERT(!c->no_udp);
+	assert(!c->no_udp);
 
 	if (!c->ifi4) {
 		if (!addr)
@@ -1209,7 +1209,7 @@ static void udp_get_timeout_params(struct ctx *c)
  */
 int udp_init(struct ctx *c)
 {
-	ASSERT(!c->no_udp);
+	assert(!c->no_udp);
 
 	udp_get_timeout_params(c);
 

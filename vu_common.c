@@ -20,8 +20,6 @@
 #include "migrate.h"
 #include "epoll_ctl.h"
 
-#define VU_MAX_TX_BUFFER_NB	2
-
 /**
  * vu_packet_check_range() - Check if a given memory zone is contained in
  * 			     a mapped guest memory region
@@ -43,7 +41,7 @@ int vu_packet_check_range(struct vdev_memory *memory,
 		/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
 		const char *base = (const char *)base_addr;
 
-		ASSERT(base_addr >= dev_region[i].mmap_addr);
+		assert(base_addr >= dev_region[i].mmap_addr);
 
 		if (len <= dev_region[i].size && base <= ptr &&
 		    (size_t)(ptr - base) <= dev_region[i].size - len)
@@ -54,27 +52,14 @@ int vu_packet_check_range(struct vdev_memory *memory,
 }
 
 /**
- * vu_init_elem() - initialize an array of virtqueue elements with 1 iov in each
- * @elem:	Array of virtqueue elements to initialize
- * @iov:	Array of iovec to assign to virtqueue element
- * @elem_cnt:	Number of virtqueue element
- */
-void vu_init_elem(struct vu_virtq_element *elem, struct iovec *iov, int elem_cnt)
-{
-	int i;
-
-	for (i = 0; i < elem_cnt; i++)
-		vu_set_element(&elem[i], NULL, &iov[i]);
-}
-
-/**
  * vu_collect() - collect virtio buffers from a given virtqueue
  * @vdev:		vhost-user device
  * @vq:			virtqueue to collect from
- * @elem:		Array of virtqueue element
- * 			each element must be initialized with one iovec entry
- * 			in the in_sg array.
+ * @elem:		Array of @max_elem virtqueue elements
  * @max_elem:		Number of virtqueue elements in the array
+ * @in_sg:		Incoming iovec array for device-writable descriptors
+ * @max_in_sg:		Maximum number of entries in @in_sg
+ * @in_total:		Number of collected entries from @in_sg (output)
  * @size:		Maximum size of the data in the frame
  * @collected:		Collected buffer length, up to @size, set on return
  *
@@ -82,16 +67,21 @@ void vu_init_elem(struct vu_virtq_element *elem, struct iovec *iov, int elem_cnt
  */
 int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 	       struct vu_virtq_element *elem, int max_elem,
+	       struct iovec *in_sg, size_t max_in_sg, size_t *in_total,
 	       size_t size, size_t *collected)
 {
 	size_t current_size = 0;
+	size_t current_iov = 0;
 	int elem_cnt = 0;
 
-	while (current_size < size && elem_cnt < max_elem) {
-		struct iovec *iov;
+	while (current_size < size && elem_cnt < max_elem &&
+	       current_iov < max_in_sg) {
 		int ret;
 
-		ret = vu_queue_pop(vdev, vq, &elem[elem_cnt]);
+		ret = vu_queue_pop(vdev, vq, &elem[elem_cnt],
+				   &in_sg[current_iov],
+				   max_in_sg - current_iov,
+				   NULL, 0);
 		if (ret < 0)
 			break;
 
@@ -101,17 +91,21 @@ int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 			break;
 		}
 
-		iov = &elem[elem_cnt].in_sg[0];
+		elem[elem_cnt].in_num = iov_truncate(elem[elem_cnt].in_sg,
+						     elem[elem_cnt].in_num,
+						     size - current_size);
 
-		if (iov->iov_len > size - current_size)
-			iov->iov_len = size - current_size;
-
-		current_size += iov->iov_len;
+		current_size += iov_size(elem[elem_cnt].in_sg,
+					 elem[elem_cnt].in_num);
+		current_iov += elem[elem_cnt].in_num;
 		elem_cnt++;
 
 		if (!vu_has_feature(vdev, VIRTIO_NET_F_MRG_RXBUF))
 			break;
 	}
+
+	if (in_total)
+		*in_total = current_iov;
 
 	if (collected)
 		*collected = current_size;
@@ -145,8 +139,11 @@ void vu_flush(const struct vu_dev *vdev, struct vu_virtq *vq,
 {
 	int i;
 
-	for (i = 0; i < elem_cnt; i++)
-		vu_queue_fill(vdev, vq, &elem[i], elem[i].in_sg[0].iov_len, i);
+	for (i = 0; i < elem_cnt; i++) {
+		size_t elem_size = iov_size(elem[i].in_sg, elem[i].in_num);
+
+		vu_queue_fill(vdev, vq, &elem[i], elem_size, i);
+	}
 
 	vu_queue_flush(vdev, vq, elem_cnt);
 	vu_queue_notify(vdev, vq);
@@ -167,23 +164,19 @@ static void vu_handle_tx(struct vu_dev *vdev, int index,
 	int out_sg_count;
 	int count;
 
-	ASSERT(VHOST_USER_IS_QUEUE_TX(index));
+	assert(VHOST_USER_IS_QUEUE_TX(index));
 
 	tap_flush_pools();
 
 	count = 0;
 	out_sg_count = 0;
-	while (count < VIRTQUEUE_MAX_SIZE &&
-	       out_sg_count + VU_MAX_TX_BUFFER_NB <= VIRTQUEUE_MAX_SIZE) {
-		int ret;
+	while (count < ARRAY_SIZE(elem) && out_sg_count < ARRAY_SIZE(out_sg)) {
 		struct iov_tail data;
+		int ret;
 
-		elem[count].out_num = VU_MAX_TX_BUFFER_NB;
-		elem[count].out_sg = &out_sg[out_sg_count];
-		elem[count].in_num = 0;
-		elem[count].in_sg = NULL;
-
-		ret = vu_queue_pop(vdev, vq, &elem[count]);
+		ret = vu_queue_pop(vdev, vq, &elem[count], NULL, 0,
+				   &out_sg[out_sg_count],
+				   ARRAY_SIZE(out_sg) - out_sg_count);
 		if (ret < 0)
 			break;
 		out_sg_count += elem[count].out_num;
@@ -247,7 +240,7 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 	struct vu_virtq *vq = &vdev->vq[VHOST_USER_RX_QUEUE];
 	struct vu_virtq_element elem[VIRTQUEUE_MAX_SIZE];
 	struct iovec in_sg[VIRTQUEUE_MAX_SIZE];
-	size_t total;
+	size_t total, in_total;
 	int elem_cnt;
 	int i;
 
@@ -258,11 +251,10 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 		return -1;
 	}
 
-	vu_init_elem(elem, in_sg, VIRTQUEUE_MAX_SIZE);
-
 	size += VNET_HLEN;
-	elem_cnt = vu_collect(vdev, vq, elem, VIRTQUEUE_MAX_SIZE, size, &total);
-	if (total < size) {
+	elem_cnt = vu_collect(vdev, vq, elem, ARRAY_SIZE(elem), in_sg,
+			      ARRAY_SIZE(in_sg), &in_total, size, &total);
+	if (elem_cnt == 0 || total < size) {
 		debug("vu_send_single: no space to send the data "
 		      "elem_cnt %d size %zd", elem_cnt, total);
 		goto err;
@@ -273,10 +265,10 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 	total -= VNET_HLEN;
 
 	/* copy data from the buffer to the iovec */
-	iov_from_buf(in_sg, elem_cnt, VNET_HLEN, buf, total);
+	iov_from_buf(in_sg, in_total, VNET_HLEN, buf, total);
 
 	if (*c->pcap)
-		pcap_iov(in_sg, elem_cnt, VNET_HLEN);
+		pcap_iov(in_sg, in_total, VNET_HLEN);
 
 	vu_flush(vdev, vq, elem, elem_cnt);
 

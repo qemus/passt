@@ -461,7 +461,7 @@ static struct tcp_tap_conn *conn_at_sidx(flow_sidx_t sidx)
 	if (!flow)
 		return NULL;
 
-	ASSERT(flow->f.type == FLOW_TCP);
+	assert(flow->f.type == FLOW_TCP);
 	return &flow->tcp;
 }
 
@@ -966,7 +966,7 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 		const struct in_addr *src4 = inany_v4(&tapside->oaddr);
 		const struct in_addr *dst4 = inany_v4(&tapside->eaddr);
 
-		ASSERT(src4 && dst4);
+		assert(src4 && dst4);
 
 		l3len += + sizeof(*ip4h);
 
@@ -1879,7 +1879,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 	if (conn->events == CLOSED)
 		return p->count - idx;
 
-	ASSERT(conn->events & ESTABLISHED);
+	assert(conn->events & ESTABLISHED);
 
 	for (i = idx, iov_i = 0; i < (int)p->count; i++) {
 		uint32_t seq, seq_offset, ack_seq;
@@ -2260,8 +2260,8 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		return 1;
 	}
 
-	ASSERT(flow->f.type == FLOW_TCP);
-	ASSERT(pif_at_sidx(sidx) == PIF_TAP);
+	assert(flow->f.type == FLOW_TCP);
+	assert(pif_at_sidx(sidx) == PIF_TAP);
 	conn = &flow->tcp;
 
 	flow_trace(conn, "packet length %zu from tap", l4len);
@@ -2500,7 +2500,7 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 	union flow *flow;
 	int s;
 
-	ASSERT(!c->no_tcp);
+	assert(!c->no_tcp);
 
 	if (!(flow = flow_alloc()))
 		return;
@@ -2570,8 +2570,8 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 	struct itimerspec check_armed = { { 0 }, { 0 } };
 	struct tcp_tap_conn *conn = &FLOW(ref.flow)->tcp;
 
-	ASSERT(!c->no_tcp);
-	ASSERT(conn->f.type == FLOW_TCP);
+	assert(!c->no_tcp);
+	assert(conn->f.type == FLOW_TCP);
 
 	/* We don't reset timers on ~ACK_FROM_TAP_DUE, ~ACK_TO_TAP_DUE. If the
 	 * timer is currently armed, this event came from a previous setting,
@@ -2632,8 +2632,8 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 {
 	struct tcp_tap_conn *conn = conn_at_sidx(ref.flowside);
 
-	ASSERT(!c->no_tcp);
-	ASSERT(pif_at_sidx(ref.flowside) != PIF_TAP);
+	assert(!c->no_tcp);
+	assert(pif_at_sidx(ref.flowside) != PIF_TAP);
 
 	if (conn->events == CLOSED)
 		return;
@@ -2701,7 +2701,7 @@ int tcp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 {
 	int s;
 
-	ASSERT(!c->no_tcp);
+	assert(!c->no_tcp);
 
 	if (!c->ifi4) {
 		if (!addr)
@@ -2853,7 +2853,7 @@ static void tcp_get_rto_params(struct ctx *c)
  */
 int tcp_init(struct ctx *c)
 {
-	ASSERT(!c->no_tcp);
+	assert(!c->no_tcp);
 
 	tcp_get_rto_params(c);
 

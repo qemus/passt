@@ -352,7 +352,7 @@ void fwd_rule_add(struct fwd_table *fwd, uint8_t proto, uint8_t flags,
 	struct fwd_rule *new;
 	unsigned i, port;
 
-	ASSERT(!(flags & ~allowed_flags));
+	assert(!(flags & ~allowed_flags));
 
 	if (fwd->count >= ARRAY_SIZE(fwd->rules))
 		die("Too many port forwarding ranges");
@@ -402,7 +402,7 @@ void fwd_rule_add(struct fwd_table *fwd, uint8_t proto, uint8_t flags,
 			die("Invalid interface name: %s", ifname);
 	}
 
-	ASSERT(first <= last);
+	assert(first <= last);
 	new->first = first;
 	new->last = last;
 
@@ -450,7 +450,7 @@ const struct fwd_rule *fwd_rule_search(const struct fwd_table *fwd,
 		char ostr[INANY_ADDRSTRLEN], rstr[INANY_ADDRSTRLEN];
 		const struct fwd_rule *rule = &fwd->rules[hint];
 
-		ASSERT((unsigned)hint < fwd->count);
+		assert((unsigned)hint < fwd->count);
 		if (fwd_rule_match(rule, ini, proto))
 			return rule;
 
@@ -521,14 +521,14 @@ static int fwd_sync_one(const struct ctx *c, const struct fwd_table *fwd,
 	bool bound_one = false;
 	unsigned port, idx;
 
-	ASSERT(pif_is_socket(pif));
+	assert(pif_is_socket(pif));
 
 	if (!*ifname)
 		ifname = NULL;
 
 	idx = rule - fwd->rules;
-	ASSERT(idx < MAX_FWD_RULES);
-	ASSERT(!(rule->flags & FWD_SCAN && !scanmap));
+	assert(idx < MAX_FWD_RULES);
+	assert(!(rule->flags & FWD_SCAN && !scanmap));
 	
 	for (port = rule->first; port <= rule->last; port++) {
 		int fd = rule->socks[port - rule->first];
@@ -554,7 +554,7 @@ static int fwd_sync_one(const struct ctx *c, const struct fwd_table *fwd,
 		else if (rule->proto == IPPROTO_UDP)
 			fd = udp_listen(c, pif, idx, addr, ifname, port);
 		else
-			ASSERT(0);
+			assert(0);
 
 		if (fd < 0) {
 			char astr[INANY_ADDRSTRLEN];

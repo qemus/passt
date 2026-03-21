@@ -58,7 +58,7 @@ static struct icmp_ping_flow *ping_at_sidx(flow_sidx_t sidx)
 	if (!flow)
 		return NULL;
 
-	ASSERT(flow->f.type == FLOW_PING4 || flow->f.type == FLOW_PING6);
+	assert(flow->f.type == FLOW_PING4 || flow->f.type == FLOW_PING6);
 	return &flow->ping;
 }
 
@@ -80,7 +80,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
 	if (c->no_icmp)
 		return;
 
-	ASSERT(pingf);
+	assert(pingf);
 
 	n = recvfrom(ref.fd, buf, sizeof(buf), 0, &sr.sa, &sl);
 	if (n < 0) {
@@ -109,7 +109,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
 		ih6->icmp6_identifier = htons(ini->eport);
 		seq = ntohs(ih6->icmp6_sequence);
 	} else {
-		ASSERT(0);
+		assert(0);
 	}
 
 	/* In PASTA mode, we'll get any reply we send, discard them. */
@@ -131,7 +131,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
 		const struct in_addr *saddr = inany_v4(&ini->oaddr);
 		const struct in_addr *daddr = inany_v4(&ini->eaddr);
 
-		ASSERT(saddr && daddr); /* Must have IPv4 addresses */
+		assert(saddr && daddr); /* Must have IPv4 addresses */
 		tap_icmp4_send(c, *saddr, *daddr, buf, pingf->f.tap_omac, n);
 	} else if (pingf->f.type == FLOW_PING6) {
 		const struct in6_addr *saddr = &ini->oaddr.a6;
@@ -256,7 +256,7 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	int cnt;
 
 	(void)saddr;
-	ASSERT(pif == PIF_TAP);
+	assert(pif == PIF_TAP);
 
 	if (af == AF_INET) {
 		struct icmphdr ih_storage;
@@ -287,7 +287,7 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		id = ntohs(ih->icmp6_identifier);
 		seq = ntohs(ih->icmp6_sequence);
 	} else {
-		ASSERT(0);
+		assert(0);
 	}
 
 	cnt = iov_tail_clone(&iov[0], MAX_IOV_ICMP, data);
@@ -304,7 +304,7 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 	tgt = &pingf->f.side[TGTSIDE];
 
-	ASSERT(flow_proto[pingf->f.type] == proto);
+	assert(flow_proto[pingf->f.type] == proto);
 	pingf->ts = now->tv_sec;
 
 	pif_sockaddr(c, &sa, PIF_HOST, &tgt->eaddr, 0);

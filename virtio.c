@@ -72,6 +72,7 @@
  * SUCH DAMAGE.
  */
 
+#include <assert.h>
 #include <stddef.h>
 #include <endian.h>
 #include <string.h>
@@ -402,8 +403,8 @@ static bool virtqueue_map_desc(const struct vu_dev *dev,
 {
 	unsigned int num_sg = *p_num_sg;
 
-	ASSERT(num_sg < max_num_sg);
-	ASSERT(sz);
+	assert(num_sg < max_num_sg);
+	assert(sz);
 
 	while (sz) {
 		uint64_t len = sz;
@@ -428,12 +429,18 @@ static bool virtqueue_map_desc(const struct vu_dev *dev,
  * @vq:		Virtqueue
  * @idx:	First descriptor ring entry to map
  * @elem:	Virtqueue element to store descriptor ring iov
+ * @in_sg:	Incoming iovec array for device-writable descriptors
+ * @max_in_sg:	Maximum number of entries in @in_sg
+ * @out_sg:	Outgoing iovec array for device-readable descriptors
+ * @max_out_sg:	Maximum number of entries in @out_sg
  *
  * Return: -1 if there is an error, 0 otherwise
  */
 static int vu_queue_map_desc(const struct vu_dev *dev,
 			     struct vu_virtq *vq, unsigned int idx,
-			     struct vu_virtq_element *elem)
+			     struct vu_virtq_element *elem,
+			     struct iovec *in_sg, size_t max_in_sg,
+			     struct iovec *out_sg, size_t max_out_sg)
 {
 	const struct vring_desc *desc = vq->vring.desc;
 	struct vring_desc desc_buf[VIRTQUEUE_MAX_SIZE];
@@ -470,16 +477,16 @@ static int vu_queue_map_desc(const struct vu_dev *dev,
 	/* Collect all the descriptors */
 	do {
 		if (le16toh(desc[i].flags) & VRING_DESC_F_WRITE) {
-			if (!virtqueue_map_desc(dev, &in_num, elem->in_sg,
-						elem->in_num,
+			if (!virtqueue_map_desc(dev, &in_num, in_sg,
+						max_in_sg,
 						le64toh(desc[i].addr),
 						le32toh(desc[i].len)))
 				return -1;
 		} else {
 			if (in_num)
 				die("Incorrect order for descriptors");
-			if (!virtqueue_map_desc(dev, &out_num, elem->out_sg,
-						elem->out_num,
+			if (!virtqueue_map_desc(dev, &out_num, out_sg,
+						max_out_sg,
 						le64toh(desc[i].addr),
 						le32toh(desc[i].len))) {
 				return -1;
@@ -496,7 +503,9 @@ static int vu_queue_map_desc(const struct vu_dev *dev,
 		die("vhost-user: Failed to read descriptor list");
 
 	elem->index = idx;
+	elem->in_sg = in_sg;
 	elem->in_num = in_num;
+	elem->out_sg = out_sg;
 	elem->out_num = out_num;
 
 	return 0;
@@ -507,11 +516,17 @@ static int vu_queue_map_desc(const struct vu_dev *dev,
  * @dev:	Vhost-user device
  * @vq:		Virtqueue
  * @elem:	Virtqueue element to fill with the entry information
+ * @in_sg:	Incoming iovec array for device-writable descriptors
+ * @max_in_sg:	Maximum number of entries in @in_sg
+ * @out_sg:	Outgoing iovec array for device-readable descriptors
+ * @max_out_sg:	Maximum number of entries in @out_sg
  *
  * Return: -1 if there is an error, 0 otherwise
  */
 int vu_queue_pop(const struct vu_dev *dev, struct vu_virtq *vq,
-		 struct vu_virtq_element *elem)
+		 struct vu_virtq_element *elem,
+		 struct iovec *in_sg, size_t max_in_sg,
+		 struct iovec *out_sg, size_t max_out_sg)
 {
 	unsigned int head;
 	int ret;
@@ -535,7 +550,8 @@ int vu_queue_pop(const struct vu_dev *dev, struct vu_virtq *vq,
 	if (vu_has_feature(dev, VIRTIO_RING_F_EVENT_IDX))
 		vring_set_avail_event(vq, vq->last_avail_idx);
 
-	ret = vu_queue_map_desc(dev, vq, head, elem);
+	ret = vu_queue_map_desc(dev, vq, head, elem, in_sg, max_in_sg,
+				out_sg, max_out_sg);
 
 	if (ret < 0)
 		return ret;

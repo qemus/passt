@@ -105,7 +105,7 @@ static struct tcp_splice_conn *conn_at_sidx(flow_sidx_t sidx)
 	if (!flow)
 		return NULL;
 
-	ASSERT(flow->f.type == FLOW_TCP_SPLICE);
+	assert(flow->f.type == FLOW_TCP_SPLICE);
 	return &flow->tcp_splice;
 }
 
@@ -369,7 +369,7 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 	else if (tgtpif == PIF_SPLICE)
 		conn->s[1] = tcp_conn_sock_ns(c, af);
 	else
-		ASSERT(0);
+		assert(0);
 
 	if (conn->s[1] < 0)
 		return -1;
@@ -457,7 +457,7 @@ void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0)
 	struct tcp_splice_conn *conn = FLOW_SET_TYPE(flow, FLOW_TCP_SPLICE,
 						     tcp_splice);
 
-	ASSERT(c->mode == MODE_PASTA);
+	assert(c->mode == MODE_PASTA);
 
 	conn->s[0] = s0;
 	conn->s[1] = -1;
@@ -489,7 +489,7 @@ void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
 	uint8_t lowat_set_flag, lowat_act_flag;
 	int eof, never_read;
 
-	ASSERT(conn->f.type == FLOW_TCP_SPLICE);
+	assert(conn->f.type == FLOW_TCP_SPLICE);
 
 	if (conn->events == SPLICE_CLOSED)
 		return;
@@ -779,7 +779,7 @@ void tcp_splice_timer(struct tcp_splice_conn *conn)
 {
 	unsigned sidei;
 
-	ASSERT(!(conn->flags & CLOSING));
+	assert(!(conn->flags & CLOSING));
 
 	flow_foreach_sidei(sidei) {
 		if ((conn->flags & RCVLOWAT_SET(sidei)) &&

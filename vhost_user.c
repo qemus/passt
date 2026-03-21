@@ -216,9 +216,9 @@ static int vu_message_read_default(int conn_fd, struct vhost_user_msg *vmsg)
 		    cmsg->cmsg_type == SCM_RIGHTS) {
 			size_t fd_size;
 
-			ASSERT(cmsg->cmsg_len >= CMSG_LEN(0));
+			assert(cmsg->cmsg_len >= CMSG_LEN(0));
 			fd_size = cmsg->cmsg_len - CMSG_LEN(0);
-			ASSERT(fd_size <= sizeof(vmsg->fds));
+			assert(fd_size <= sizeof(vmsg->fds));
 			vmsg->fd_num = fd_size / sizeof(int);
 			memcpy(vmsg->fds, CMSG_DATA(cmsg), fd_size);
 			break;
@@ -272,7 +272,7 @@ static void vu_message_write(int conn_fd, struct vhost_user_msg *vmsg)
 	};
 	int rc;
 
-	ASSERT(vmsg->fd_num <= VHOST_MEMORY_BASELINE_NREGIONS);
+	assert(vmsg->fd_num <= VHOST_MEMORY_BASELINE_NREGIONS);
 	if (vmsg->fd_num > 0) {
 		size_t fdsize = vmsg->fd_num * sizeof(int);
 		struct cmsghdr *cmsg;
@@ -483,7 +483,7 @@ static bool vu_set_mem_table_exec(struct vu_dev *vdev,
 		}
 	}
 
-	ASSERT(vdev->memory.nregions < VHOST_USER_MAX_RAM_SLOTS);
+	assert(vdev->memory.nregions < VHOST_USER_MAX_RAM_SLOTS);
 
 	return false;
 }

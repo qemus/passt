@@ -117,7 +117,7 @@ unsigned long tap_l2_max_len(const struct ctx *c)
 		return L2_MAX_LEN_VU;
 	}
 	/* NOLINTEND(bugprone-branch-clone) */
-	ASSERT(0);
+	assert(0);
 
 	return 0; /* Unreachable, for cppcheck's sake */
 }
@@ -543,7 +543,7 @@ size_t tap_send_frames(const struct ctx *c, const struct iovec *iov,
 	case MODE_VU:
 		/* fall through */
 	default:
-		ASSERT(0);
+		assert(0);
 	}
 
 	if (m < nframes)
@@ -1536,7 +1536,7 @@ void tap_backend_init(struct ctx *c)
 	}
 
 	if (c->fd_tap != -1) { /* Passed as --fd */
-		ASSERT(c->one_off);
+		assert(c->one_off);
 		tap_start_connection(c);
 		return;
 	}

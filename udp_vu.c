@@ -71,11 +71,12 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 			    bool v6, ssize_t *dlen)
 {
 	const struct vu_dev *vdev = c->vdev;
+	int elem_cnt, elem_used, iov_used;
 	struct msghdr msg  = { 0 };
-	int iov_cnt, iov_used;
 	size_t hdrlen, l2len;
+	size_t iov_cnt;
 
-	ASSERT(!c->no_udp);
+	assert(!c->no_udp);
 
 	if (!vu_queue_enabled(vq) || !vu_queue_started(vq)) {
 		debug("Got UDP packet, but RX virtqueue not usable yet");
@@ -89,15 +90,16 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	/* compute L2 header length */
 	hdrlen = udp_vu_hdrlen(v6);
 
-	vu_init_elem(elem, iov_vu, VIRTQUEUE_MAX_SIZE);
-
-	iov_cnt = vu_collect(vdev, vq, elem, VIRTQUEUE_MAX_SIZE,
-			     IP_MAX_MTU + ETH_HLEN + VNET_HLEN, NULL);
-	if (iov_cnt == 0)
+	elem_cnt = vu_collect(vdev, vq, elem, ARRAY_SIZE(elem),
+			      iov_vu, ARRAY_SIZE(iov_vu), &iov_cnt,
+			      IP_MAX_MTU + ETH_HLEN + VNET_HLEN, NULL);
+	if (elem_cnt == 0)
 		return -1;
 
+	assert((size_t)elem_cnt == iov_cnt);	/* one iovec per element */
+
 	/* reserve space for the headers */
-	ASSERT(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN + VNET_HLEN));
+	assert(iov_vu[0].iov_len >= MAX(hdrlen, ETH_ZLEN + VNET_HLEN));
 	iov_vu[0].iov_base = (char *)iov_vu[0].iov_base + hdrlen;
 	iov_vu[0].iov_len -= hdrlen;
 
@@ -107,7 +109,7 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 
 	*dlen = recvmsg(s, &msg, 0);
 	if (*dlen < 0) {
-		vu_queue_rewind(vq, iov_cnt);
+		vu_queue_rewind(vq, elem_cnt);
 		return -1;
 	}
 
@@ -116,15 +118,16 @@ static int udp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq, int s,
 	iov_vu[0].iov_len += hdrlen;
 
 	iov_used = iov_truncate(iov_vu, iov_cnt, *dlen + hdrlen);
+	elem_used = iov_used; /* one iovec per element */
 
 	/* pad frame to 60 bytes: first buffer is at least ETH_ZLEN long */
 	l2len = *dlen + hdrlen - VNET_HLEN;
 	vu_pad(&iov_vu[0], l2len);
 
-	vu_set_vnethdr(iov_vu[0].iov_base, iov_used);
+	vu_set_vnethdr(iov_vu[0].iov_base, elem_used);
 
 	/* release unused buffers */
-	vu_queue_rewind(vq, iov_cnt - iov_used);
+	vu_queue_rewind(vq, elem_cnt - elem_used);
 
 	return iov_used;
 }

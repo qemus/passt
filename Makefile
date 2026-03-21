@@ -188,5 +188,5 @@ cppcheck: $(PASST_SRCS) $(HEADERS)
 	--inline-suppr							\
 	--suppress=missingIncludeSystem \
 	--suppress=unusedStructMember					\
-	$(filter -D%,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) -D CPPCHECK_6936  \
+	$(filter -D%,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) -D CPPCHECK_6936	\
 	$^

@@ -86,7 +86,7 @@ static inline socklen_t socklen_inany(const union sockaddr_inany *sa)
 	case AF_INET6:
 		return sizeof(sa->sa6);
 	default:
-		ASSERT(0);
+		assert(0);
 	}
 }
 
@@ -268,7 +268,7 @@ static inline void inany_from_af(union inany_addr *aa,
 		aa->v4mapped.a4 = *((struct in_addr *)addr);
 	} else {
 		/* Not valid to call with other address families */
-		ASSERT(0);
+		assert(0);
 	}
 }
 
