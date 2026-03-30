@@ -308,6 +308,7 @@
 #include "flow.h"
 #include "repair.h"
 #include "linux_dep.h"
+#include "serialise.h"
 
 #include "flow_table.h"
 #include "tcp_internal.h"

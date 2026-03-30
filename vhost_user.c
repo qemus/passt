@@ -440,11 +440,13 @@ static bool vu_set_mem_table_exec(struct vu_dev *vdev,
 
 	debug("vhost-user nregions: %u", memory->nregions);
 	for (i = 0; i < vdev->memory.nregions; i++) {
-		struct vhost_user_memory_region *msg_region = &memory->regions[i];
 		struct vu_dev_region *dev_region = &vdev->memory.regions[i];
+		const struct vhost_user_memory_region *msg_region;
 		const void *mmap_addr;
 
-		debug("vhost-user region %d", i);
+		msg_region = &memory->regions[i];
+
+		debug("vhost-user region %u", i);
 		debug("    guest_phys_addr: 0x%016"PRIx64,
 		      msg_region->guest_phys_addr);
 		debug("    memory_size:     0x%016"PRIx64,
@@ -479,7 +481,7 @@ static bool vu_set_mem_table_exec(struct vu_dev *vdev,
 	for (i = 0; i < VHOST_USER_MAX_VQS; i++) {
 		if (vdev->vq[i].vring.desc) {
 			if (map_ring(vdev, &vdev->vq[i]))
-				die("remapping queue %d during setmemtable", i);
+				die("remapping queue %u during setmemtable", i);
 		}
 	}
 
@@ -763,8 +765,8 @@ static void vu_set_watch(const struct vu_dev *vdev, int idx)
  */
 static void vu_check_queue_msg_file(struct vhost_user_msg *vmsg)
 {
+	unsigned idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 	bool nofd = vmsg->payload.u64 & VHOST_USER_VRING_NOFD_MASK;
-	int idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 
 	if (idx >= VHOST_USER_MAX_VQS)
 		die("Invalid vhost-user queue index: %u", idx);
@@ -1010,11 +1012,11 @@ static bool vu_set_device_state_fd_exec(struct vu_dev *vdev,
 		die("Invalid device_state_fd message");
 
 	if (phase != VHOST_USER_TRANSFER_STATE_PHASE_STOPPED)
-		die("Invalid device_state_fd phase: %d", phase);
+		die("Invalid device_state_fd phase: %u", phase);
 
 	if (direction != VHOST_USER_TRANSFER_STATE_DIRECTION_SAVE &&
 	    direction != VHOST_USER_TRANSFER_STATE_DIRECTION_LOAD)
-		die("Invalid device_state_fd direction: %d", direction);
+		die("Invalid device_state_fd direction: %u", direction);
 
 	migrate_request(vdev->context, vmsg->fds[0],
 			direction == VHOST_USER_TRANSFER_STATE_DIRECTION_LOAD);
@@ -1047,7 +1049,7 @@ static bool vu_check_device_state_exec(struct vu_dev *vdev,
  */
 void vu_init(struct ctx *c)
 {
-	int i;
+	unsigned i;
 
 	c->vdev = &vdev_storage;
 	c->vdev->context = c;

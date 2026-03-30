@@ -34,6 +34,7 @@
 #include "pcap.h"
 #include "iov.h"
 #include "tap.h"
+#include "serialise.h"
 
 #define PCAP_VERSION_MINOR 4
 

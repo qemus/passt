@@ -36,6 +36,7 @@
 #include <netinet/if_ether.h>
 
 #include "util.h"
+#include "bitmap.h"
 #include "ip.h"
 #include "passt.h"
 #include "netlink.h"
@@ -151,10 +152,7 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 	unsigned base, i;
 	uint8_t proto;
 
-	if (first == 0) {
-		die("Can't forward port 0 for option '-%c %s'",
-		    optname, optarg);
-	}
+	assert(first != 0);
 
 	if (optname == 't' || optname == 'T')
 		proto = IPPROTO_TCP;
@@ -162,16 +160,6 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 		proto = IPPROTO_UDP;
 	else
 		assert(0);
-
-	if (addr) {
-		if (!c->ifi4 && inany_v4(addr)) {
-			die("IPv4 is disabled, can't use -%c %s",
-			    optname, optarg);
-		} else if (!c->ifi6 && !inany_v4(addr)) {
-			die("IPv6 is disabled, can't use -%c %s",
-			    optname, optarg);
-		}
-	}
 
 	for (base = first; base <= last; base++) {
 		if (exclude && bitmap_isset(exclude, base))
@@ -262,12 +250,6 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		if (c->mode != MODE_PASTA)
 			die("'auto' port forwarding is only allowed for pasta");
 
-		if ((optname == 'T' || optname == 'U') && c->no_bindtodevice) {
-			warn(
-"'-%c auto' enabled without unprivileged SO_BINDTODEVICE", optname);
-			warn(
-"Forwarding from addresses other than 127.0.0.1 will not work");
-		}
 		*mode = FWD_MODE_AUTO;
 		return;
 	}
@@ -282,9 +264,7 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		*mode = FWD_MODE_ALL;
 
 		/* Exclude ephemeral ports */
-		for (i = 0; i < NUM_PORTS; i++)
-			if (fwd_port_is_ephemeral(i))
-				bitmap_set(exclude, i);
+		fwd_port_map_ephemeral(exclude);
 
 		conf_ports_range_except(c, optname, optarg, fwd,
 					NULL, NULL,
@@ -340,6 +320,16 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		addr = NULL;
 	}
 
+	if (addr) {
+		if (!c->ifi4 && inany_v4(addr)) {
+			die("IPv4 is disabled, can't use -%c %s",
+			    optname, optarg);
+		} else if (!c->ifi6 && !inany_v4(addr)) {
+			die("IPv6 is disabled, can't use -%c %s",
+			    optname, optarg);
+		}
+	}
+
 	/* Mark all exclusions first, they might be given after base ranges */
 	p = spec;
 	do {
@@ -357,12 +347,8 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		if ((*p != '\0')  && (*p != ',')) /* Garbage after the range */
 			goto bad;
 
-		for (i = xrange.first; i <= xrange.last; i++) {
-			if (bitmap_isset(exclude, i))
-				die("Overlapping excluded ranges %s", optarg);
-
+		for (i = xrange.first; i <= xrange.last; i++)
 			bitmap_set(exclude, i);
-		}
 	} while ((p = next_chunk(p, ',')));
 
 	if (ifname && c->no_bindtodevice) {
@@ -376,9 +362,7 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 
 	if (exclude_only) {
 		/* Exclude ephemeral ports */
-		for (i = 0; i < NUM_PORTS; i++)
-			if (fwd_port_is_ephemeral(i))
-				bitmap_set(exclude, i);
+		fwd_port_map_ephemeral(exclude);
 
 		conf_ports_range_except(c, optname, optarg, fwd,
 					addr, ifname,
@@ -411,6 +395,11 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 
 		if ((*p != '\0')  && (*p != ',')) /* Garbage after the ranges */
 			goto bad;
+
+		if (orig_range.first == 0) {
+			die("Can't forward port 0 for option '-%c %s'",
+			    optname, optarg);
+		}
 
 		conf_ports_range_except(c, optname, optarg, fwd,
 					addr, ifname,
@@ -1252,11 +1241,17 @@ dns6:
 		}
 	}
 
-	info("Inbound forwarding:");
-	fwd_rules_print(&c->fwd_in);
-	if (c->mode == MODE_PASTA) {
-		info("Outbound forwarding:");
-		fwd_rules_print(&c->fwd_out);
+	for (i = 0; i < PIF_NUM_TYPES; i++) {
+		const char *dir = "Outbound";
+
+		if (!c->fwd[i])
+			continue;
+
+		if (i == PIF_HOST)
+			dir = "Inbound";
+
+		info("%s forwarding rules (%s):", dir, pif_name(i));
+		fwd_rules_print(c->fwd[i]);
 	}
 }
 
@@ -1320,7 +1315,7 @@ static int conf_runas(const char *opt, unsigned int *uid, unsigned int *gid)
  * @uid:	User ID, set on success
  * @gid:	Group ID, set on success
  */
-static void conf_ugid(char *runas, uid_t *uid, gid_t *gid)
+static void conf_ugid(const char *runas, uid_t *uid, gid_t *gid)
 {
 	/* If user has specified --runas, that takes precedence... */
 	if (runas) {
@@ -1561,8 +1556,8 @@ void conf(struct ctx *c, int argc, char **argv)
 	uint8_t prefix_len_from_opt = 0;
 	unsigned int ifi4 = 0, ifi6 = 0;
 	const char *logfile = NULL;
+	const char *runas = NULL;
 	size_t logsize = 0;
-	char *runas = NULL;
 	long fd_tap_opt;
 	int name, ret;
 	uid_t uid;
@@ -2154,18 +2149,24 @@ void conf(struct ctx *c, int argc, char **argv)
 
 	/* Forwarding options can be parsed now, after IPv4/IPv6 settings */
 	fwd_probe_ephemeral();
+	fwd_rule_init(c);
 	optind = 0;
 	do {
 		name = getopt_long(argc, argv, optstring, options, NULL);
 
-		if (name == 't')
-			conf_ports(c, name, optarg, &c->fwd_in, &tcp_in_mode);
-		else if (name == 'u')
-			conf_ports(c, name, optarg, &c->fwd_in, &udp_in_mode);
-		else if (name == 'T')
-			conf_ports(c, name, optarg, &c->fwd_out, &tcp_out_mode);
-		else if (name == 'U')
-			conf_ports(c, name, optarg, &c->fwd_out, &udp_out_mode);
+		if (name == 't') {
+			conf_ports(c, name, optarg, c->fwd[PIF_HOST],
+				   &tcp_in_mode);
+		} else if (name == 'u') {
+			conf_ports(c, name, optarg, c->fwd[PIF_HOST],
+				   &udp_in_mode);
+		} else if (name == 'T') {
+			conf_ports(c, name, optarg, c->fwd[PIF_SPLICE],
+				   &tcp_out_mode);
+		} else if (name == 'U') {
+			conf_ports(c, name, optarg, c->fwd[PIF_SPLICE],
+				   &udp_out_mode);
+		}
 	} while (name != -1);
 
 	if (c->mode == MODE_PASTA)
@@ -2224,20 +2225,24 @@ void conf(struct ctx *c, int argc, char **argv)
 		udp_out_mode = fwd_default;
 
 	if (tcp_in_mode == FWD_MODE_AUTO) {
-		conf_ports_range_except(c, 't', "auto", &c->fwd_in, NULL, NULL,
-					1, NUM_PORTS - 1, NULL, 1, FWD_SCAN);
+		conf_ports_range_except(c, 't', "auto", c->fwd[PIF_HOST],
+					NULL, NULL, 1, NUM_PORTS - 1, NULL, 1,
+					FWD_SCAN);
 	}
 	if (tcp_out_mode == FWD_MODE_AUTO) {
-		conf_ports_range_except(c, 'T', "auto", &c->fwd_out, NULL, "lo",
-					1, NUM_PORTS - 1, NULL, 1, FWD_SCAN);
+		conf_ports_range_except(c, 'T', "auto", c->fwd[PIF_SPLICE],
+					NULL, "lo", 1, NUM_PORTS - 1, NULL, 1,
+					FWD_SCAN);
 	}
 	if (udp_in_mode == FWD_MODE_AUTO) {
-		conf_ports_range_except(c, 'u', "auto", &c->fwd_in, NULL, NULL,
-					1, NUM_PORTS - 1, NULL, 1, FWD_SCAN);
+		conf_ports_range_except(c, 'u', "auto", c->fwd[PIF_HOST],
+					NULL, NULL, 1, NUM_PORTS - 1, NULL, 1,
+					FWD_SCAN);
 	}
 	if (udp_out_mode == FWD_MODE_AUTO) {
-		conf_ports_range_except(c, 'U', "auto", &c->fwd_out, NULL, "lo",
-					1, NUM_PORTS - 1, NULL, 1, FWD_SCAN);
+		conf_ports_range_except(c, 'U', "auto", c->fwd[PIF_SPLICE],
+					NULL, "lo", 1, NUM_PORTS - 1, NULL, 1,
+					FWD_SCAN);
 	}
 
 	if (!c->quiet)

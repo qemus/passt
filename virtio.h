@@ -90,7 +90,7 @@ struct vu_dev_region {
 	uint64_t mmap_addr;
 };
 
-#define VHOST_USER_MAX_VQS 2
+#define VHOST_USER_MAX_VQS 2U
 
 /*
  * Set a reasonable maximum number of ram slots, which will be supported by

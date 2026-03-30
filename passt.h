@@ -184,8 +184,7 @@ struct ip6_ctx {
  * @pasta_ifn:		Name of namespace interface for pasta
  * @pasta_ifi:		Index of namespace interface for pasta
  * @pasta_conf_ns:	Configure namespace after creating it
- * @fwd_in:		Forwarding table for inbound flows
- * @fwd_out:		Forwarding table for outbound flows
+ * @fwd:		Forwarding tables
  * @no_tcp:		Disable TCP operation
  * @tcp:		Context for TCP protocol handler
  * @no_udp:		Disable UDP operation
@@ -264,8 +263,7 @@ struct ctx {
 	unsigned int pasta_ifi;
 	int pasta_conf_ns;
 
-	struct fwd_table fwd_in;
-	struct fwd_table fwd_out;
+	struct fwd_table *fwd[PIF_NUM_TYPES];
 
 	int no_tcp;
 	struct tcp_ctx tcp;

@@ -12,6 +12,7 @@
  * Author: Stefano Brivio <sbrivio@redhat.com>
  */
 
+#include <assert.h>
 #include <stddef.h>
 #include <netinet/in.h>
 
@@ -74,7 +75,7 @@ found:
  * ipproto_name() - Get IP protocol name from number
  * @proto:	IP protocol number
  *
- * Return: pointer to name of protocol @proto
+ * Return: pointer to name of protocol @proto (<= IPPROTO_STRLEN bytes)
  *
  * Usually this would be done with getprotobynumber(3) but that reads
  * /etc/protocols and might allocate, which isn't possible for us once
@@ -83,16 +84,21 @@ found:
 const char *ipproto_name(uint8_t proto)
 {
 	switch (proto) {
+#define CASE(s)								\
+		static_assert(sizeof(s) <= IPPROTO_STRLEN,		\
+			      "Increase IPPROTO_STRLEN to contain " #s); \
+		return s;
 	case IPPROTO_ICMP:
-		return "ICMP";
+		CASE("ICMP");
 	case IPPROTO_TCP:
-		return "TCP";
+		CASE("TCP");
 	case IPPROTO_UDP:
-		return "UDP";
+		CASE("UDP");
 	case IPPROTO_ICMPV6:
-		return "ICMPv6";
+		CASE("ICMPv6");
 	default:
-		return "<unknown protocol>";
+		CASE("<unknown protocol>");
+#undef CASE
 	}
 }
 

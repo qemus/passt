@@ -24,6 +24,7 @@
 
 #include "migrate.h"
 #include "repair.h"
+#include "serialise.h"
 
 /* Magic identifier for migration data */
 #define MIGRATE_MAGIC		0xB1BB1D1B0BB1D1B0

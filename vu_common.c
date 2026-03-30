@@ -256,7 +256,7 @@ int vu_send_single(const struct ctx *c, const void *buf, size_t size)
 			      ARRAY_SIZE(in_sg), &in_total, size, &total);
 	if (elem_cnt == 0 || total < size) {
 		debug("vu_send_single: no space to send the data "
-		      "elem_cnt %d size %zd", elem_cnt, total);
+		      "elem_cnt %d size %zu", elem_cnt, total);
 		goto err;
 	}
 

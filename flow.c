@@ -21,6 +21,7 @@
 #include "flow_table.h"
 #include "repair.h"
 #include "epoll_ctl.h"
+#include "serialise.h"
 
 const char *flow_state_str[] = {
 	[FLOW_STATE_FREE]	= "FREE",
@@ -502,16 +503,21 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 {
 	char estr[INANY_ADDRSTRLEN], ostr[INANY_ADDRSTRLEN];
 	struct flow_common *f = &flow->f;
+	const struct fwd_table *fwd = c->fwd[f->pif[INISIDE]];
 	const struct flowside *ini = &f->side[INISIDE];
 	struct flowside *tgt = &f->side[TGTSIDE];
 	const struct fwd_rule *rule = NULL;
-	const struct fwd_table *fwd;
 	uint8_t tgtpif = PIF_NONE;
 
 	assert(flow_new_entry == flow && f->state == FLOW_STATE_INI);
 	assert(f->type == FLOW_TYPE_NONE);
 	assert(f->pif[INISIDE] != PIF_NONE && f->pif[TGTSIDE] == PIF_NONE);
 	assert(flow->f.state == FLOW_STATE_INI);
+
+	if (fwd) {
+		if (!(rule = fwd_rule_search(fwd, ini, proto, rule_hint)))
+			goto norule;
+	}
 
 	switch (f->pif[INISIDE]) {
 	case PIF_TAP:
@@ -520,20 +526,12 @@ struct flowside *flow_target(const struct ctx *c, union flow *flow,
 		break;
 
 	case PIF_SPLICE:
-		fwd = &c->fwd_out;
-
-		if (!(rule = fwd_rule_search(fwd, ini, proto, rule_hint)))
-			goto norule;
-
+		assert(rule);
 		tgtpif = fwd_nat_from_splice(rule, proto, ini, tgt);
 		break;
 
 	case PIF_HOST:
-		fwd = &c->fwd_in;
-
-		if (!(rule = fwd_rule_search(fwd, ini, proto, rule_hint)))
-			goto norule;
-
+		assert(rule);
 		tgtpif = fwd_nat_from_host(c, rule, proto, ini, tgt);
 		fwd_neigh_mac_get(c, &tgt->oaddr, f->tap_omac);
 		break;
@@ -1013,8 +1011,7 @@ static int flow_migrate_source_rollback(struct ctx *c, unsigned bound, int ret)
 
 	debug("...roll back migration");
 
-	if (fwd_listen_sync(c, &c->fwd_in, PIF_HOST,
-			    &c->tcp.scan_in, &c->udp.scan_in) < 0)
+	if (fwd_listen_sync(c, PIF_HOST, &c->tcp.scan_in, &c->udp.scan_in) < 0)
 		die("Failed to re-establish listening sockets");
 
 	foreach_established_tcp_flow(flow) {
@@ -1134,10 +1131,9 @@ int flow_migrate_source(struct ctx *c, const struct migrate_stage *stage,
 			count++;
 	}
 
-	count = htonl(count);
-	if (write_all_buf(fd, &count, sizeof(count))) {
+	if (write_u32(fd, count)) {
 		rc = errno;
-		err_perror("Can't send flow count (%u)", ntohl(count));
+		err_perror("Can't send flow count (%u)", count);
 		return flow_migrate_source_rollback(c, FLOW_MAX, rc);
 	}
 
@@ -1148,9 +1144,9 @@ int flow_migrate_source(struct ctx *c, const struct migrate_stage *stage,
 	 * fix that is to not allow local to local migration, which arguably we
 	 * should (use namespaces for testing instead). */
 	debug("Stop listen()s");
-	fwd_listen_close(&c->fwd_in);
+	fwd_listen_close(c->fwd[PIF_HOST]);
 
-	debug("Sending %u flows", ntohl(count));
+	debug("Sending %u flows", count);
 
 	if (!count)
 		return 0;
@@ -1220,10 +1216,9 @@ int flow_migrate_target(struct ctx *c, const struct migrate_stage *stage,
 
 	(void)stage;
 
-	if (read_all_buf(fd, &count, sizeof(count)))
+	if (read_u32(fd, &count))
 		return errno;
 
-	count = ntohl(count);
 	debug("Receiving %u flows", count);
 
 	if (!count)

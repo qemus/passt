@@ -50,10 +50,6 @@
 
 #define MAX_FROM_BITS(n)	(((1U << (n)) - 1))
 
-#define BIT(n)			(1UL << (n))
-#define BITMAP_BIT(n)		(BIT((n) % (sizeof(long) * 8)))
-#define BITMAP_WORD(n)		(n / (sizeof(long) * 8))
-
 #define SWAP(a, b)							\
 	do {								\
 		__typeof__(a) __x = (a); (a) = (b); (b) = __x;		\
@@ -228,12 +224,6 @@ int sock_unix(char *sock_path);
 void sock_probe_features(struct ctx *c);
 long timespec_diff_ms(const struct timespec *a, const struct timespec *b);
 int64_t timespec_diff_us(const struct timespec *a, const struct timespec *b);
-void bitmap_set(uint8_t *map, unsigned bit);
-void bitmap_clear(uint8_t *map, unsigned bit);
-bool bitmap_isset(const uint8_t *map, unsigned bit);
-void bitmap_or(uint8_t *dst, size_t size, const uint8_t *a, const uint8_t *b);
-void bitmap_and_not(uint8_t *dst, size_t size,
-		    const uint8_t *a, const uint8_t *b);
 char *line_read(char *buf, size_t len, int fd);
 void ns_enter(const struct ctx *c);
 bool ns_is_init(void);
@@ -245,9 +235,7 @@ int fls(unsigned long x);
 int ilog2(unsigned long x);
 int write_file(const char *path, const char *buf);
 intmax_t read_file_integer(const char *path, intmax_t fallback);
-int write_all_buf(int fd, const void *buf, size_t len);
 int write_remainder(int fd, const struct iovec *iov, size_t iovcnt, size_t skip);
-int read_all_buf(int fd, void *buf, size_t len);
 int read_remainder(int fd, const struct iovec *iov, size_t cnt, size_t skip);
 void close_open_files(int argc, char **argv);
 bool snprintf_check(char *str, size_t size, const char *format, ...);
