@@ -1688,9 +1688,9 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	    !inany_is_unicast(&ini->oaddr) || ini->oport == 0) {
 		char sstr[INANY_ADDRSTRLEN], dstr[INANY_ADDRSTRLEN];
 
-		debug("Invalid endpoint in TCP SYN: %s:%hu -> %s:%hu",
-		      inany_ntop(&ini->eaddr, sstr, sizeof(sstr)), ini->eport,
-		      inany_ntop(&ini->oaddr, dstr, sizeof(dstr)), ini->oport);
+		warn_ratelimit(now, "Invalid endpoint in TCP SYN: %s:%hu -> %s:%hu",
+			       inany_ntop(&ini->eaddr, sstr, sizeof(sstr)), ini->eport,
+			       inany_ntop(&ini->oaddr, dstr, sizeof(dstr)), ini->oport);
 		goto cancel;
 	}
 

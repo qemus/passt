@@ -305,20 +305,6 @@ parse_err:
 }
 
 /**
- * fwd_rule_addr() - Return match address for a rule
- * @rule:	Forwarding rule
- *
- * Return: matching address for rule, NULL if it matches all addresses
- */
-static const union inany_addr *fwd_rule_addr(const struct fwd_rule *rule)
-{
-	if (rule->flags & FWD_DUAL_STACK_ANY)
-		return NULL;
-
-	return &rule->addr;
-}
-
-/**
  * fwd_port_map_ephemeral() - Mark ephemeral ports in a bitmap
  * @map:	Bitmap to update
  */
@@ -346,91 +332,55 @@ void fwd_rule_init(struct ctx *c)
 }
 
 /**
- * fwd_rule_add() - Add a rule to a forwarding table
+ * fwd_rule_add() - Validate and add a rule to a forwarding table
  * @fwd:	Table to add to
- * @proto:	Protocol to forward
- * @flags:	Flags for this entry
- * @addr:	Our address to forward (NULL for both 0.0.0.0 and ::)
- * @ifname:	Only forward from this interface name, if non-empty
- * @first:	First port number to forward
- * @last:	Last port number to forward
- * @to:		First port of target port range to map to
+ * @new:	Rule to add
+ *
+ * Return: 0 on success, negative error code on failure
  */
-void fwd_rule_add(struct fwd_table *fwd, uint8_t proto, uint8_t flags,
-		  const union inany_addr *addr, const char *ifname,
-		  in_port_t first, in_port_t last, in_port_t to)
+int fwd_rule_add(struct fwd_table *fwd, const struct fwd_rule *new)
 {
 	/* Flags which can be set from the caller */
 	const uint8_t allowed_flags = FWD_WEAK | FWD_SCAN | FWD_DUAL_STACK_ANY;
-	unsigned num = (unsigned)last - first + 1;
-	struct fwd_rule_state *new;
-	unsigned i, port;
+	unsigned num = (unsigned)new->last - new->first + 1;
+	unsigned port;
 
-	assert(!(flags & ~allowed_flags));
-	/* Passing a non-wildcard address with DUAL_STACK_ANY is a bug */
-	assert(!(flags & FWD_DUAL_STACK_ANY) || !addr ||
-	       inany_equals(addr, &inany_any6));
+	if (new->first > new->last) {
+		warn("Rule has invalid port range %u-%u",
+		     new->first, new->last);
+		return -EINVAL;
+	}
+	if (new->flags & ~allowed_flags) {
+		warn("Rule has invalid flags 0x%hhx",
+		     new->flags & ~allowed_flags);
+		return -EINVAL;
+	}
+	if (new->flags & FWD_DUAL_STACK_ANY &&
+	    !inany_equals(&new->addr, &inany_any6)) {
+		char astr[INANY_ADDRSTRLEN];
 
-	if (fwd->count >= ARRAY_SIZE(fwd->rules))
-		die("Too many port forwarding ranges");
-	if ((fwd->sock_count + num) > ARRAY_SIZE(fwd->socks))
-		die("Too many listening sockets");
-
-	/* Check for any conflicting entries */
-	for (i = 0; i < fwd->count; i++) {
-		char newstr[INANY_ADDRSTRLEN], rulestr[INANY_ADDRSTRLEN];
-		const struct fwd_rule *rule = &fwd->rules[i].rule;
-
-		if (proto != rule->proto)
-			/* Non-conflicting protocols */
-			continue;
-
-		if (!inany_matches(addr, fwd_rule_addr(rule)))
-			/* Non-conflicting addresses */
-			continue;
-
-		if (last < rule->first || rule->last < first)
-			/* Port ranges don't overlap */
-			continue;
-
-		die("Forwarding configuration conflict: %s/%u-%u versus %s/%u-%u",
-		    inany_ntop(addr, newstr, sizeof(newstr)), first, last,
-		    inany_ntop(fwd_rule_addr(rule), rulestr, sizeof(rulestr)),
-		    rule->first, rule->last);
+		warn("Dual stack rule has non-wildcard address %s",
+		     inany_ntop(&new->addr, astr, sizeof(astr)));
+		return -EINVAL;
 	}
 
-	new = &fwd->rules[fwd->count++];
-	new->rule.proto = proto;
-	new->rule.flags = flags;
-
-	if (addr) {
-		new->rule.addr = *addr;
-	} else {
-		new->rule.addr = inany_any6;
-		new->rule.flags |= FWD_DUAL_STACK_ANY;
+	if (fwd->count >= ARRAY_SIZE(fwd->rules)) {
+		warn("Too many rules (maximum %u)", ARRAY_SIZE(fwd->rules));
+		return -ENOSPC;
+	}
+	if ((fwd->sock_count + num) > ARRAY_SIZE(fwd->socks)) {
+		warn("Rules require too many listening sockets (maximum %u)",
+		     ARRAY_SIZE(fwd->socks));
+		return -ENOSPC;
 	}
 
-	memset(new->rule.ifname, 0, sizeof(new->rule.ifname));
-	if (ifname) {
-		int ret;
+	fwd->rulesocks[fwd->count] = &fwd->socks[fwd->sock_count];
+	for (port = new->first; port <= new->last; port++)
+		fwd->rulesocks[fwd->count][port - new->first] = -1;
 
-		ret = snprintf(new->rule.ifname, sizeof(new->rule.ifname),
-			       "%s", ifname);
-		if (ret <= 0 || (size_t)ret >= sizeof(new->rule.ifname))
-			die("Invalid interface name: %s", ifname);
-	}
-
-	assert(first <= last);
-	new->rule.first = first;
-	new->rule.last = last;
-
-	new->rule.to = to;
-
-	new->socks = &fwd->socks[fwd->sock_count];
+	fwd->rules[fwd->count++] = *new;
 	fwd->sock_count += num;
-
-	for (port = new->rule.first; port <= new->rule.last; port++)
-		new->socks[port - new->rule.first] = -1;
+	return 0;
 }
 
 /**
@@ -466,7 +416,7 @@ const struct fwd_rule *fwd_rule_search(const struct fwd_table *fwd,
 
 	if (hint >= 0) {
 		char ostr[INANY_ADDRSTRLEN], rstr[INANY_ADDRSTRLEN];
-		const struct fwd_rule *rule = &fwd->rules[hint].rule;
+		const struct fwd_rule *rule = &fwd->rules[hint];
 
 		assert((unsigned)hint < fwd->count);
 		if (fwd_rule_match(rule, ini, proto))
@@ -480,45 +430,11 @@ const struct fwd_rule *fwd_rule_search(const struct fwd_table *fwd,
 	}
 
 	for (i = 0; i < fwd->count; i++) {
-		if (fwd_rule_match(&fwd->rules[i].rule, ini, proto))
-			return &fwd->rules[i].rule;
+		if (fwd_rule_match(&fwd->rules[i], ini, proto))
+			return &fwd->rules[i];
 	}
 
 	return NULL;
-}
-
-/**
- * fwd_rules_print() - Print forwarding rules for debugging
- * @fwd:	Table to print
- */
-void fwd_rules_print(const struct fwd_table *fwd)
-{
-	unsigned i;
-
-	for (i = 0; i < fwd->count; i++) {
-		const struct fwd_rule *rule = &fwd->rules[i].rule;
-		const char *percent = *rule->ifname ? "%" : "";
-		const char *weak = "", *scan = "";
-		char addr[INANY_ADDRSTRLEN];
-
-		inany_ntop(fwd_rule_addr(rule), addr, sizeof(addr));
-		if (rule->flags & FWD_WEAK)
-			weak = " (best effort)";
-		if (rule->flags & FWD_SCAN)
-			scan = " (auto-scan)";
-
-		if (rule->first == rule->last) {
-			info("    %s [%s]%s%s:%hu  =>  %hu %s%s",
-			     ipproto_name(rule->proto), addr, percent,
-			     rule->ifname, rule->first, rule->to, weak, scan);
-		} else {
-			info("    %s [%s]%s%s:%hu-%hu  =>  %hu-%hu %s%s",
-			     ipproto_name(rule->proto), addr, percent,
-			     rule->ifname, rule->first, rule->last,
-			     rule->to, rule->last - rule->first + rule->to,
-			     weak, scan);
-		}
-	}
 }
 
 /** fwd_sync_one() - Create or remove listening sockets for a forward entry
@@ -533,9 +449,9 @@ void fwd_rules_print(const struct fwd_table *fwd)
 static int fwd_sync_one(const struct ctx *c, uint8_t pif, unsigned idx,
 			const uint8_t *tcp, const uint8_t *udp)
 {
-	const struct fwd_rule_state *rs = &c->fwd[pif]->rules[idx];
-	const struct fwd_rule *rule = &rs->rule;
+	const struct fwd_rule *rule = &c->fwd[pif]->rules[idx];
 	const union inany_addr *addr = fwd_rule_addr(rule);
+	int *socks = c->fwd[pif]->rulesocks[idx];
 	const char *ifname = rule->ifname;
 	const uint8_t *map = NULL;
 	bool bound_one = false;
@@ -555,7 +471,7 @@ static int fwd_sync_one(const struct ctx *c, uint8_t pif, unsigned idx,
 	}
 
 	for (port = rule->first; port <= rule->last; port++) {
-		int fd = rs->socks[port - rule->first];
+		int fd = socks[port - rule->first];
 
 		if (map && !bitmap_isset(map, port)) {
 			/* We don't want to listen on this port */
@@ -563,7 +479,7 @@ static int fwd_sync_one(const struct ctx *c, uint8_t pif, unsigned idx,
 				/* We already are, so stop */
 				epoll_del(c->epollfd, fd);
 				close(fd);
-				rs->socks[port - rule->first] = -1;
+				socks[port - rule->first] = -1;
 			}
 			continue;
 		}
@@ -595,7 +511,7 @@ static int fwd_sync_one(const struct ctx *c, uint8_t pif, unsigned idx,
 			continue;
 		}
 
-		rs->socks[port - rule->first] = fd;
+		socks[port - rule->first] = fd;
 		bound_one = true;
 	}
 
@@ -685,11 +601,12 @@ void fwd_listen_close(const struct fwd_table *fwd)
 	unsigned i;
 
 	for (i = 0; i < fwd->count; i++) {
-		const struct fwd_rule_state *rs = &fwd->rules[i];
+		const struct fwd_rule *rule = &fwd->rules[i];
+		int *socks = fwd->rulesocks[i];
 		unsigned port;
 
-		for (port = rs->rule.first; port <= rs->rule.last; port++) {
-			int *fdp = &rs->socks[port - rs->rule.first];
+		for (port = rule->first; port <= rule->last; port++) {
+			int *fdp = &socks[port - rule->first];
 			if (*fdp >= 0) {
 				close(*fdp);
 				*fdp = -1;
@@ -769,8 +686,8 @@ static bool has_scan_rules(const struct fwd_table *fwd, uint8_t proto)
 	unsigned i;
 
 	for (i = 0; i < fwd->count; i++) {
-		if (fwd->rules[i].rule.proto == proto &&
-		    fwd->rules[i].rule.flags & FWD_SCAN)
+		if (fwd->rules[i].proto == proto &&
+		    fwd->rules[i].flags & FWD_SCAN)
 			return true;
 	}
 	return false;
@@ -838,14 +755,14 @@ static void current_listen_map(uint8_t *map, const struct fwd_table *fwd,
 	memset(map, 0, PORT_BITMAP_SIZE);
 
 	for (i = 0; i < fwd->count; i++) {
-		const struct fwd_rule_state *rs = &fwd->rules[i];
+		const struct fwd_rule *rule = &fwd->rules[i];
 		unsigned port;
 
-		if (rs->rule.proto != proto)
+		if (rule->proto != proto)
 			continue;
 
-		for (port = rs->rule.first; port <= rs->rule.last; port++) {
-			if (rs->socks[port - rs->rule.first] >= 0)
+		for (port = rule->first; port <= rule->last; port++) {
+			if (fwd->rulesocks[i][port - rule->first] >= 0)
 				bitmap_set(map, port);
 		}
 	}

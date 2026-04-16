@@ -38,11 +38,11 @@ FLAGS += -DVERSION=\"$(VERSION)\"
 FLAGS += -DDUAL_STACK_SOCKETS=$(DUAL_STACK_SOCKETS)
 
 PASST_SRCS = arch.c arp.c bitmap.c checksum.c conf.c dhcp.c dhcpv6.c \
-	epoll_ctl.c flow.c fwd.c icmp.c igmp.c inany.c iov.c ip.c isolation.c \
-	lineread.c log.c mld.c ndp.c netlink.c migrate.c packet.c passt.c \
-	pasta.c pcap.c pif.c repair.c serialise.c tap.c tcp.c tcp_buf.c \
-	tcp_splice.c tcp_vu.c udp.c udp_flow.c udp_vu.c util.c vhost_user.c \
-	virtio.c vu_common.c
+	epoll_ctl.c flow.c fwd.c fwd_rule.c icmp.c igmp.c inany.c iov.c ip.c \
+	isolation.c lineread.c log.c mld.c ndp.c netlink.c migrate.c packet.c \
+	passt.c pasta.c pcap.c pif.c repair.c serialise.c tap.c tcp.c \
+	tcp_buf.c tcp_splice.c tcp_vu.c udp.c udp_flow.c udp_vu.c util.c \
+	vhost_user.c virtio.c vu_common.c
 QRAP_SRCS = qrap.c
 PASST_REPAIR_SRCS = passt-repair.c
 SRCS = $(PASST_SRCS) $(QRAP_SRCS) $(PASST_REPAIR_SRCS)

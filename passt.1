@@ -425,6 +425,92 @@ Send \fIname\fR as DHCP option 12 (hostname).
 FQDN to configure the client with.
 Send \fIname\fR as Client FQDN: DHCP option 81 and DHCPv6 option 39.
 
+.TP
+.BR \-t ", " \-\-tcp-ports " " \fIspec
+Configure TCP port forwarding to guest or namespace. \fIspec\fR can be one of:
+.RS
+
+.TP
+.BR none
+Don't forward any ports
+
+.TP
+.BR all
+Forward all unbound, non-ephemeral ports, as permitted by current capabilities.
+For low (< 1024) ports, see \fBNOTES\fR. No failures are reported for
+unavailable ports, unless no ports could be forwarded at all.
+
+.TP
+.BR auto " " (\fBpasta\fR " " only)
+Dynamically forward ports bound in the namespace. The list of ports is
+periodically derived (every second) from listening sockets reported by
+\fI/proc/net/tcp\fR and \fI/proc/net/tcp6\fR, see \fBproc\fR(5).
+
+.TP
+.BR ports
+A comma-separated list of ports, optionally ranged with \fI-\fR, and,
+optionally, with target ports after \fI:\fR, if they differ. Specific addresses
+can be bound as well, separated by \fI/\fR, and also, since Linux 5.7, limited
+to specific interfaces, prefixed by \fI%\fR. Within given ranges, selected ports
+and ranges can be excluded by an additional specification prefixed by \fI~\fR.
+
+Specifying excluded ranges only implies that all other ports are forwarded. In
+this case, no failures are reported for unavailable ports, unless no ports could
+be forwarded at all.
+
+Examples:
+.RS
+.TP
+-t 22
+Forward local port 22 to port 22 on the guest or namespace
+.TP
+-t 22:23
+Forward local port 22 to port 23 on the guest or namespace
+.TP
+-t 22,25
+Forward local ports 22 and 25 to ports 22 and 25 on the guest or namespace
+.TP
+-t 22-80
+Forward local ports between 22 and 80 to corresponding ports on the guest or namespace
+.TP
+-t 22-80:32-90
+Forward local ports between 22 and 80 to ports between 32 and 90 on the guest or namespace
+.TP
+-t 192.0.2.1/22
+Forward local port 22, bound to 192.0.2.1, to port 22 on the guest or namespace
+.TP
+-t 192.0.2.1%eth0/22
+Forward local port 22, bound to 192.0.2.1 and interface eth0, to port 22
+.TP
+-t %eth0/22
+Forward local port 22, bound to any address on interface eth0, to port 22
+.TP
+-t 2000-5000,~3000-3010
+Forward local ports between 2000 and 5000, except for those between 3000 and
+3010
+.TP
+-t 192.0.2.1/20-30,~25
+For the local address 192.0.2.1, forward ports between 20 and 24 and between 26
+and 30
+.TP
+-t ~20000-20010
+Forward all ports to the guest, except for the range from 20000 to 20010
+.RE
+
+Default is \fBnone\fR for \fBpasst\fR and \fBauto\fR for \fBpasta\fR.
+.RE
+
+.TP
+.BR \-u ", " \-\-udp-ports " " \fIspec
+Configure UDP port forwarding to guest. \fIspec\fR is as described for TCP
+above.
+
+Note: unless overridden, UDP ports with numbers corresponding to forwarded TCP
+port numbers are forwarded too, without, however, any port translation. IPv6
+bound ports are also forwarded for IPv4.
+
+Default is \fBnone\fR for \fBpasst\fR and \fBauto\fR for \fBpasta\fR.
+
 .SS \fBpasst\fR-only options
 
 .TP
@@ -497,86 +583,6 @@ source, because, in that case, exiting would close sockets for active
 connections, which would in turn cause connection resets if any further data is
 received. See also the description of \fI\-\-migrate-no-linger\fR.
 
-.TP
-.BR \-t ", " \-\-tcp-ports " " \fIspec
-Configure TCP port forwarding to guest. \fIspec\fR can be one of:
-.RS
-
-.TP
-.BR none
-Don't forward any ports
-
-.TP
-.BR all
-Forward all unbound, non-ephemeral ports, as permitted by current capabilities.
-For low (< 1024) ports, see \fBNOTES\fR. No failures are reported for
-unavailable ports, unless no ports could be forwarded at all.
-
-.TP
-.BR ports
-A comma-separated list of ports, optionally ranged with \fI-\fR, and,
-optionally, with target ports after \fI:\fR, if they differ. Specific addresses
-can be bound as well, separated by \fI/\fR, and also, since Linux 5.7, limited
-to specific interfaces, prefixed by \fI%\fR. Within given ranges, selected ports
-and ranges can be excluded by an additional specification prefixed by \fI~\fR.
-
-Specifying excluded ranges only implies that all other ports are forwarded. In
-this case, no failures are reported for unavailable ports, unless no ports could
-be forwarded at all.
-
-Examples:
-.RS
-.TP
--t 22
-Forward local port 22 to port 22 on the guest
-.TP
--t 22:23
-Forward local port 22 to port 23 on the guest
-.TP
--t 22,25
-Forward local ports 22 and 25 to ports 22 and 25 on the guest
-.TP
--t 22-80
-Forward local ports between 22 and 80 to corresponding ports on the guest
-.TP
--t 22-80:32-90
-Forward local ports between 22 and 80 to ports between 32 and 90 on the guest
-.TP
--t 192.0.2.1/22
-Forward local port 22, bound to 192.0.2.1, to port 22 on the guest
-.TP
--t 192.0.2.1%eth0/22
-Forward local port 22, bound to 192.0.2.1 and interface eth0, to port 22
-.TP
--t %eth0/22
-Forward local port 22, bound to any address on interface eth0, to port 22
-.TP
--t 2000-5000,~3000-3010
-Forward local ports between 2000 and 5000, except for those between 3000 and
-3010
-.TP
--t 192.0.2.1/20-30,~25
-For the local address 192.0.2.1, forward ports between 20 and 24 and between 26
-and 30
-.TP
--t ~20000-20010
-Forward all ports to the guest, except for the range from 20000 to 20010
-.RE
-
-Default is \fBnone\fR.
-.RE
-
-.TP
-.BR \-u ", " \-\-udp-ports " " \fIspec
-Configure UDP port forwarding to guest. \fIspec\fR is as described for TCP
-above.
-
-Note: unless overridden, UDP ports with numbers corresponding to forwarded TCP
-port numbers are forwarded too, without, however, any port translation. IPv6
-bound ports are also forwarded for IPv4.
-
-Default is \fBnone\fR.
-
 .SS \fBpasta\fR-only options
 
 .TP
@@ -584,92 +590,6 @@ Default is \fBnone\fR.
 Name of tap interface to be created in target namespace.
 By default, the same interface name as the external, routable interface is used.
 If no such interface exists, the name \fItap0\fR will be used instead.
-
-.TP
-.BR \-t ", " \-\-tcp-ports " " \fIspec
-Configure TCP port forwarding to namespace. \fIspec\fR can be one of:
-.RS
-
-.TP
-.BR none
-Don't forward any ports
-
-.TP
-.BR auto
-Dynamically forward ports bound in the namespace. The list of ports is
-periodically derived (every second) from listening sockets reported by
-\fI/proc/net/tcp\fR and \fI/proc/net/tcp6\fR, see \fBproc\fR(5).
-
-.TP
-.BR ports
-A comma-separated list of ports, optionally ranged with \fI-\fR, and,
-optionally, with target ports after \fI:\fR, if they differ. Specific addresses
-can be bound as well, separated by \fI/\fR, and also, since Linux 5.7, limited
-to specific interfaces, prefixed by \fI%\fR. Within given ranges, selected ports
-and ranges can be excluded by an additional specification prefixed by \fI~\fR.
-
-Specifying excluded ranges only implies that all other ports are forwarded. In
-this case, no failures are reported for unavailable ports, unless no ports could
-be forwarded at all.
-
-Examples:
-.RS
-.TP
--t 22
-Forward local port 22 to 22 in the target namespace
-.TP
--t 22:23
-Forward local port 22 to port 23 in the target namespace
-.TP
--t 22,25
-Forward local ports 22 and 25 to ports 22 and 25 in the target namespace
-.TP
--t 22-80
-Forward local ports between 22 and 80 to corresponding ports in the target
-namespace
-.TP
--t 22-80:32-90
-Forward local ports between 22 and 80 to ports between 32 and 90 in the target
-namespace
-.TP
--t 192.0.2.1/22
-Forward local port 22, bound to 192.0.2.1, to port 22 in the target namespace
-.TP
--t 192.0.2.1%eth0/22
-Forward local port 22, bound to 192.0.2.1 and interface eth0, to port 22
-.TP
--t %eth0/22
-Forward local port 22, bound to any address on interface eth0, to port 22
-.TP
--t 2000-5000,~3000-3010
-Forward local ports between 2000 and 5000, except for those between 3000 and
-3010
-.TP
--t 192.0.2.1/20-30,~25
-For the local address 192.0.2.1, forward ports between 20 and 24 and between 26
-and 30
-.TP
--t ~20000-20010
-Forward all ports to the namespace, except for those between 20000 and 20010
-.RE
-
-IPv6 bound ports are also forwarded for IPv4.
-
-Default is \fBauto\fR.
-.RE
-
-.TP
-.BR \-u ", " \-\-udp-ports " " \fIspec
-Configure UDP port forwarding to namespace. \fIspec\fR is as described for TCP
-above, and the list of ports is derived from listening sockets reported by
-\fI/proc/net/udp\fR and \fI/proc/net/udp6\fR, see \fBproc\fR(5).
-
-Note: unless overridden, UDP ports with numbers corresponding to forwarded TCP
-port numbers are forwarded too, without, however, any port translation. 
-
-IPv6 bound ports are also forwarded for IPv4.
-
-Default is \fBauto\fR.
 
 .TP
 .BR \-T ", " \-\-tcp-ns " " \fIspec

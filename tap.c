@@ -99,7 +99,6 @@ static PACKET_POOL_NOINIT(pool_tap4, TAP_MSGS_IP4);
 static PACKET_POOL_NOINIT(pool_tap6, TAP_MSGS_IP6);
 
 #define TAP_SEQS		128 /* Different L4 tuples in one batch */
-#define FRAGMENT_MSG_RATE	10  /* # seconds between fragment warnings */
 
 /**
  * tap_l2_max_len() - Maximum frame size (including L2 header) for current mode
@@ -686,17 +685,11 @@ static bool tap4_is_fragment(const struct iphdr *iph,
 			     const struct timespec *now)
 {
 	if (ntohs(iph->frag_off) & ~IP_DF) {
-		/* Ratelimit messages */
-		static time_t last_message;
 		static unsigned num_dropped;
 
 		num_dropped++;
-		if (now->tv_sec - last_message > FRAGMENT_MSG_RATE) {
-			warn("Can't process IPv4 fragments (%u dropped)",
-			     num_dropped);
-			last_message = now->tv_sec;
-			num_dropped = 0;
-		}
+		warn_ratelimit(now, "Can't process IPv4 fragments (%u dropped)",
+			       num_dropped);
 		return true;
 	}
 	return false;
@@ -1115,8 +1108,9 @@ void tap_add_packet(struct ctx *c, struct iov_tail *data,
 		char bufmac[ETH_ADDRSTRLEN];
 
 		memcpy(c->guest_mac, eh->h_source, ETH_ALEN);
-		debug("New guest MAC address observed: %s",
-		      eth_ntop(c->guest_mac, bufmac, sizeof(bufmac)));
+		info_ratelimit(now, "New guest MAC address observed: %s",
+			       eth_ntop(c->guest_mac, bufmac,
+					sizeof(bufmac)));
 		proto_update_l2_buf(c->guest_mac);
 	}
 

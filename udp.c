@@ -871,7 +871,7 @@ void udp_sock_fwd(const struct ctx *c, int s, int rule_hint,
 			/* Clear errors & carry on */
 			if (udp_sock_errs(c, s, FLOW_SIDX_NONE,
 					  frompif, port) < 0) {
-				err(
+				err_ratelimit(now,
 "UDP: Unrecoverable error on listening socket: (%s port %hu)",
 				    pif_name(frompif), port);
 				/* FIXME: what now?  close/re-open socket? */
@@ -898,7 +898,7 @@ void udp_sock_fwd(const struct ctx *c, int s, int rule_hint,
 				 pif_name(frompif), pif_name(topif));
 			discard = true;
 		} else {
-			debug("Discarding datagram without flow");
+			warn_ratelimit(now, "Discarding datagram without flow");
 			discard = true;
 		}
 
@@ -1042,10 +1042,10 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 	if (!(uflow = udp_at_sidx(tosidx))) {
 		char sstr[INET6_ADDRSTRLEN], dstr[INET6_ADDRSTRLEN];
 
-		debug("Dropping datagram with no flow %s %s:%hu -> %s:%hu",
-		      pif_name(pif),
-		      inet_ntop(af, saddr, sstr, sizeof(sstr)), src,
-		      inet_ntop(af, daddr, dstr, sizeof(dstr)), dst);
+		warn_ratelimit(now, "Dropping datagram with no flow %s %s:%hu -> %s:%hu",
+			       pif_name(pif),
+			       inet_ntop(af, saddr, sstr, sizeof(sstr)), src,
+			       inet_ntop(af, daddr, dstr, sizeof(dstr)), dst);
 		return 1;
 	}
 

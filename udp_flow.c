@@ -235,8 +235,9 @@ flow_sidx_t udp_flow_from_sock(const struct ctx *c, uint8_t pif,
 	if (!(flow = flow_alloc())) {
 		char sastr[SOCKADDR_STRLEN];
 
-		debug("Couldn't allocate flow for UDP datagram from %s %s",
-		      pif_name(pif), sockaddr_ntop(s_in, sastr, sizeof(sastr)));
+		err_ratelimit(now, "Couldn't allocate flow for UDP datagram from %s %s",
+			      pif_name(pif),
+			      sockaddr_ntop(s_in, sastr, sizeof(sastr)));
 		return FLOW_SIDX_NONE;
 	}
 
@@ -292,10 +293,10 @@ flow_sidx_t udp_flow_from_tap(const struct ctx *c,
 	if (!(flow = flow_alloc())) {
 		char sstr[INET6_ADDRSTRLEN], dstr[INET6_ADDRSTRLEN];
 
-		debug("Couldn't allocate flow for UDP datagram from %s %s:%hu -> %s:%hu",
-		      pif_name(pif),
-		      inet_ntop(af, saddr, sstr, sizeof(sstr)), srcport,
-		      inet_ntop(af, daddr, dstr, sizeof(dstr)), dstport);
+		err_ratelimit(now, "Couldn't allocate flow for UDP datagram from %s %s:%hu -> %s:%hu",
+			      pif_name(pif),
+			      inet_ntop(af, saddr, sstr, sizeof(sstr)), srcport,
+			      inet_ntop(af, daddr, dstr, sizeof(dstr)), dstport);
 		return FLOW_SIDX_NONE;
 	}
 
