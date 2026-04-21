@@ -326,6 +326,23 @@ static struct fwd_table fwd_out;
  */
 void fwd_rule_init(struct ctx *c)
 {
+	uint32_t caps = 0;
+
+	if (c->ifi4)
+		caps |= FWD_CAP_IPV4;
+	if (c->ifi6)
+		caps |= FWD_CAP_IPV6;
+	if (!c->no_tcp)
+		caps |= FWD_CAP_TCP;
+	if (!c->no_udp)
+		caps |= FWD_CAP_UDP;
+	if (c->mode == MODE_PASTA)
+		caps |= FWD_CAP_SCAN;
+	if (!c->no_bindtodevice)
+		caps |= FWD_CAP_IFNAME;
+
+	fwd_in.caps = fwd_out.caps = caps;
+
 	c->fwd[PIF_HOST] = &fwd_in;
 	if (c->mode == MODE_PASTA)
 		c->fwd[PIF_SPLICE] = &fwd_out;

@@ -435,31 +435,58 @@ Configure TCP port forwarding to guest or namespace. \fIspec\fR can be one of:
 Don't forward any ports
 
 .TP
-.BR all
-Forward all unbound, non-ephemeral ports, as permitted by current capabilities.
-For low (< 1024) ports, see \fBNOTES\fR. No failures are reported for
-unavailable ports, unless no ports could be forwarded at all.
+[\fIaddress\fR[\fB%\fR\fIinterface\fR]\fB/\fR]\fIports\fR ...
+Specific ports to forward.  Optionally, a specific listening address
+and interface name (since Linux 5.7) can be specified.  \fIports\fR
+may be either:
+.RS
+.TP
+\fBall\fR
+Forward all unbound, non-ephemeral ports, as permitted by current
+capabilities.  For low (< 1024) ports, see \fBNOTES\fR. No failures
+are reported for unavailable ports, unless no ports could be forwarded
+at all.
+.RE
+
+.RS
+or a comma-separated list of entries which may be any of:
+.TP
+\fIfirst\fR[\fB-\fR\fIlast\fR][\fB:\fR\fItofirst\fR[\fB-\fR\fItolast\fR]]
+Include range. Forward port numbers between \fIfirst\fR and \fIlast\fR
+(inclusive) to ports between \fItofirst\fR and \fItolast\fR.  If
+\fItofirst\fR and \fItolast\fR are omitted, assume the same as
+\fIfirst\fR and \fIlast\fR.  If \fIlast\fR is omitted, assume the same
+as \fIfirst\fR.
 
 .TP
-.BR auto " " (\fBpasta\fR " " only)
-Dynamically forward ports bound in the namespace. The list of ports is
+\fB~\fR\fIfirst\fR[\fB-\fR\fIlast\fR]
+Exclude range.  Don't forward port numbers between \fIfirst\fR and
+\fIlast\fR.  This takes precedences over include ranges.
+
+.TP
+.BR auto
+\fBpasta\fR only.  Only forward ports in the specified set if the
+target ports are bound in the namespace. The list of ports is
 periodically derived (every second) from listening sockets reported by
 \fI/proc/net/tcp\fR and \fI/proc/net/tcp6\fR, see \fBproc\fR(5).
+.RE
 
-.TP
-.BR ports
-A comma-separated list of ports, optionally ranged with \fI-\fR, and,
-optionally, with target ports after \fI:\fR, if they differ. Specific addresses
-can be bound as well, separated by \fI/\fR, and also, since Linux 5.7, limited
-to specific interfaces, prefixed by \fI%\fR. Within given ranges, selected ports
-and ranges can be excluded by an additional specification prefixed by \fI~\fR.
-
-Specifying excluded ranges only implies that all other ports are forwarded. In
-this case, no failures are reported for unavailable ports, unless no ports could
-be forwarded at all.
+Specifying excluded ranges only implies that all other non-ephemeral
+ports are forwarded. Specifying no ranges at all implies forwarding
+all non-ephemeral ports permitted by current capabilities.  In this
+case, no failures are reported for unavailable ports, unless no ports
+could be forwarded at all.
 
 Examples:
 .RS
+.TP
+-t all
+Forward all unbound, non-ephemeral ports as permitted by current
+capabilities to the corresponding port on the guest or namespace
+.TP
+-t ::1/all
+For the local address ::1, forward all unbound, non-ephemeral ports as
+permitted by current capabilities
 .TP
 -t 22
 Forward local port 22 to port 22 on the guest or namespace
@@ -495,6 +522,17 @@ and 30
 .TP
 -t ~20000-20010
 Forward all ports to the guest, except for the range from 20000 to 20010
+.TP
+-t auto
+Automatically forward any ports which are bound in the namespace
+.TP
+-t ::1/auto
+Automatically forward any ports which are bound in the namespace,
+listening only on local port ::1
+.TP
+-t 8000-8010,auto
+Forward ports in the range 8000-8010 if and only if they are bound in
+the namespace
 .RE
 
 Default is \fBnone\fR for \fBpasst\fR and \fBauto\fR for \fBpasta\fR.

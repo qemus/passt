@@ -52,6 +52,7 @@ struct fwd_listen_ref {
 
 /**
  * struct fwd_table - Forwarding state (per initiating pif)
+ * @caps:	Forwarding capabilities for this initiating pif
  * @count:	Number of forwarding rules
  * @rules:	Array of forwarding rules
  * @rulesocks:	Parallel array of @rules (@count valid entries) of pointers to
@@ -61,6 +62,7 @@ struct fwd_listen_ref {
  * @socks:	Listening sockets for forwarding
  */
 struct fwd_table {
+	uint32_t caps;
 	unsigned count;
 	struct fwd_rule rules[MAX_FWD_RULES];
 	int *rulesocks[MAX_FWD_RULES];

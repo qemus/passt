@@ -13,6 +13,7 @@
  */
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -113,11 +114,30 @@ static int parse_port_range(const char *s, const char **endptr,
 }
 
 /**
+ * parse_keyword() - Parse a literal keyword
+ * @s:		String to parse
+ * @endptr:	Update to the character after the keyword
+ * @kw:		Keyword to accept
+ *
+ * Return: 0, if @s starts with @kw, -EINVAL if it does not
+ */
+static int parse_keyword(const char *s, const char **endptr, const char *kw)
+{
+	size_t len = strlen(kw);
+
+	if (strlen(s) < len)
+		return -EINVAL;
+
+	if (memcmp(s, kw, len))
+		return -EINVAL;
+
+	*endptr = s + len;
+	return 0;
+}
+
+/**
  * conf_ports_range_except() - Set up forwarding for a range of ports minus a
  *                             bitmap of exclusions
- * @c:		Execution context
- * @optname:	Short option name, t, T, u, or U
- * @optarg:	Option argument (port specification)
  * @fwd:	Forwarding table to be updated
  * @proto:	Protocol to forward
  * @addr:	Listening address
@@ -128,9 +148,8 @@ static int parse_port_range(const char *s, const char **endptr,
  * @to:		Port to translate @first to when forwarding
  * @flags:	Flags for forwarding entries
  */
-static void conf_ports_range_except(const struct ctx *c, char optname,
-				    const char *optarg, struct fwd_table *fwd,
-				    uint8_t proto, const union inany_addr *addr,
+static void conf_ports_range_except(struct fwd_table *fwd, uint8_t proto,
+				    const union inany_addr *addr,
 				    const char *ifname,
 				    uint16_t first, uint16_t last,
 				    const uint8_t *exclude, uint16_t to,
@@ -172,42 +191,10 @@ static void conf_ports_range_except(const struct ctx *c, char optname,
 		rule.last = i - 1;
 		rule.to = base + delta;
 
-		if ((optname == 'T' || optname == 'U') && c->no_bindtodevice) {
-			/* FIXME: Once the fwd bitmaps are removed, move this
-			 * workaround to the caller
-			 */
-			struct fwd_rule rulev = {
-				.ifname = { 0 },
-				.flags = flags,
-				.first = base,
-				.last = i - 1,
-				.to = base + delta,
-			};
+		fwd_rule_conflict_check(&rule, fwd->rules, fwd->count);
+		if (fwd_rule_add(fwd, &rule) < 0)
+			goto fail;
 
-			assert(!addr && ifname && !strcmp(ifname, "lo"));
-			warn(
-"SO_BINDTODEVICE unavailable, forwarding only 127.0.0.1 and ::1 for '-%c %s'",
-			     optname, optarg);
-
-			if (c->ifi4) {
-				rulev.addr = inany_loopback4;
-				fwd_rule_conflict_check(&rulev,
-							fwd->rules, fwd->count);
-				if (fwd_rule_add(fwd, &rulev) < 0)
-					goto fail;
-			}
-			if (c->ifi6) {
-				rulev.addr = inany_loopback6;
-				fwd_rule_conflict_check(&rulev,
-							fwd->rules, fwd->count);
-				if (fwd_rule_add(fwd, &rulev) < 0)
-					goto fail;
-			}
-		} else {
-			fwd_rule_conflict_check(&rule, fwd->rules, fwd->count);
-			if (fwd_rule_add(fwd, &rule) < 0)
-				goto fail;
-		}
 		base = i - 1;
 	}
 	return;
@@ -231,35 +218,53 @@ fail:
 
 /**
  * conf_ports_spec() - Parse port range(s) specifier
- * @c:		Execution context
- * @optname:	Short option name, t, T, u, or U
- * @optarg:	Option argument (port specification)
  * @fwd:	Forwarding table to be updated
  * @proto:	Protocol to forward
  * @addr:	Listening address for forwarding
  * @ifname:	Interface name for listening
  * @spec:	Port range(s) specifier
  */
-static void conf_ports_spec(const struct ctx *c,
-			    char optname, const char *optarg,
-			    struct fwd_table *fwd, uint8_t proto,
+static void conf_ports_spec(struct fwd_table *fwd, uint8_t proto,
 			    const union inany_addr *addr, const char *ifname,
 			    const char *spec)
 {
 	uint8_t exclude[PORT_BITMAP_SIZE] = { 0 };
 	bool exclude_only = true;
 	const char *p, *ep;
+	uint8_t flags = 0;
 	unsigned i;
 
-	/* Mark all exclusions first, they might be given after base ranges */
+	if (!strcmp(spec, "all")) {
+		/* Treat "all" as equivalent to "": all non-ephemeral ports */
+		spec = "";
+	}
+
+	/* Parse excluded ranges and "auto" in the first pass */
 	for_each_chunk(p, ep, spec, ",") {
 		struct port_range xrange;
 
-		if (*p != '~') {
-			/* Not an exclude range, parse later */
+		if (isdigit(*p)) {
+			/* Include range, parse later */
 			exclude_only = false;
 			continue;
 		}
+
+		if (parse_keyword(p, &p, "auto") == 0) {
+			if (p != ep) /* Garbage after the keyword */
+				goto bad;
+
+			if (!(fwd->caps & FWD_CAP_SCAN)) {
+				die(
+"'auto' port forwarding is only allowed for pasta");
+			}
+
+			flags |= FWD_SCAN;
+			continue;
+		}
+
+		/* Should be an exclude range */
+		if (*p != '~')
+			goto bad;
 		p++;
 
 		if (parse_port_range(p, &p, &xrange))
@@ -275,10 +280,9 @@ static void conf_ports_spec(const struct ctx *c,
 		/* Exclude ephemeral ports */
 		fwd_port_map_ephemeral(exclude);
 
-		conf_ports_range_except(c, optname, optarg, fwd,
-					proto, addr, ifname,
+		conf_ports_range_except(fwd, proto, addr, ifname,
 					1, NUM_PORTS - 1, exclude,
-					1, FWD_WEAK);
+					1, flags | FWD_WEAK);
 		return;
 	}
 
@@ -286,8 +290,8 @@ static void conf_ports_spec(const struct ctx *c,
 	for_each_chunk(p, ep, spec, ",") {
 		struct port_range orig_range, mapped_range;
 
-		if (*p == '~')
-			/* Exclude range, already parsed */
+		if (!isdigit(*p))
+			/* Already parsed */
 			continue;
 
 		if (parse_port_range(p, &p, &orig_range))
@@ -307,31 +311,27 @@ static void conf_ports_spec(const struct ctx *c,
 			goto bad;
 
 		if (orig_range.first == 0) {
-			die("Can't forward port 0 for option '-%c %s'",
-			    optname, optarg);
+			die("Can't forward port 0 included in '%s'", spec);
 		}
 
-		conf_ports_range_except(c, optname, optarg, fwd,
-					proto, addr, ifname,
+		conf_ports_range_except(fwd, proto, addr, ifname,
 					orig_range.first, orig_range.last,
 					exclude,
-					mapped_range.first, 0);
+					mapped_range.first, flags);
 	}
 
 	return;
 bad:
-	die("Invalid port specifier %s", optarg);
+	die("Invalid port specifier '%s'", spec);
 }
 
 /**
  * conf_ports() - Parse port configuration options, initialise UDP/TCP sockets
- * @c:		Execution context
  * @optname:	Short option name, t, T, u, or U
  * @optarg:	Option argument (port specification)
  * @fwd:	Forwarding table to be updated
  */
-static void conf_ports(const struct ctx *c, char optname, const char *optarg,
-		       struct fwd_table *fwd)
+static void conf_ports(char optname, const char *optarg, struct fwd_table *fwd)
 {
 	union inany_addr addr_buf = inany_any6, *addr = &addr_buf;
 	char buf[BUFSIZ], *spec, *ifname = NULL;
@@ -356,34 +356,10 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 		return;
 	}
 
-	if (proto == IPPROTO_TCP && c->no_tcp)
+	if (proto == IPPROTO_TCP && !(fwd->caps & FWD_CAP_TCP))
 		die("TCP port forwarding requested but TCP is disabled");
-	if (proto == IPPROTO_UDP && c->no_udp)
+	if (proto == IPPROTO_UDP && !(fwd->caps & FWD_CAP_UDP))
 		die("UDP port forwarding requested but UDP is disabled");
-
-	if (!strcmp(optarg, "auto")) {
-		if (c->mode != MODE_PASTA)
-			die("'auto' port forwarding is only allowed for pasta");
-
-		conf_ports_range_except(c, optname, optarg, fwd,
-					proto, NULL, NULL,
-					1, NUM_PORTS - 1, NULL, 1, FWD_SCAN);
-
-		return;
-	}
-
-	if (!strcmp(optarg, "all")) {
-		uint8_t exclude[PORT_BITMAP_SIZE] = { 0 };
-
-		/* Exclude ephemeral ports */
-		fwd_port_map_ephemeral(exclude);
-
-		conf_ports_range_except(c, optname, optarg, fwd,
-					proto, NULL, NULL,
-					1, NUM_PORTS - 1, exclude,
-					1, FWD_WEAK);
-		return;
-	}
 
 	strncpy(buf, optarg, sizeof(buf) - 1);
 
@@ -430,25 +406,44 @@ static void conf_ports(const struct ctx *c, char optname, const char *optarg,
 	}
 
 	if (addr) {
-		if (!c->ifi4 && inany_v4(addr)) {
+		if (!(fwd->caps & FWD_CAP_IPV4) && inany_v4(addr)) {
 			die("IPv4 is disabled, can't use -%c %s",
 			    optname, optarg);
-		} else if (!c->ifi6 && !inany_v4(addr)) {
+		} else if (!(fwd->caps & FWD_CAP_IPV6) && !inany_v4(addr)) {
 			die("IPv6 is disabled, can't use -%c %s",
 			    optname, optarg);
 		}
 	}
 
-	if (ifname && c->no_bindtodevice) {
+	if (optname == 'T' || optname == 'U') {
+		assert(!addr && !ifname);
+
+		if (!(fwd->caps & FWD_CAP_IFNAME)) {
+			warn(
+"SO_BINDTODEVICE unavailable, forwarding only 127.0.0.1 and ::1 for '-%c %s'",
+			     optname, optarg);
+
+			if (fwd->caps & FWD_CAP_IPV4) {
+				conf_ports_spec(fwd, proto,
+						&inany_loopback4, NULL, spec);
+			}
+			if (fwd->caps & FWD_CAP_IPV6) {
+				conf_ports_spec(fwd, proto,
+						&inany_loopback6, NULL, spec);
+			}
+			return;
+		}
+
+		ifname = "lo";
+	}
+
+	if (ifname && !(fwd->caps & FWD_CAP_IFNAME)) {
 		die(
 "Device binding for '-%c %s' unsupported (requires kernel 5.7+)",
 		    optname, optarg);
 	}
-	/* Outbound forwards come from guest loopback */
-	if ((optname == 'T' || optname == 'U') && !ifname)
-		ifname = "lo";
 
-	conf_ports_spec(c, optname, optarg, fwd, proto, addr, ifname, spec);
+	conf_ports_spec(fwd, proto, addr, ifname, spec);
 }
 
 /**
@@ -1039,14 +1034,16 @@ static void usage(const char *name, FILE *f, int status)
 		"    can be specified multiple times\n"
 		"    SPEC can be:\n"
 		"      'none': don't forward any ports\n"
-		"      'all': forward all unbound, non-ephemeral ports\n"
+		"      [ADDR[%%IFACE]/]PORTS: forward specific ports\n"
+		"        PORTS is either 'all' (forward all unbound, non-ephemeral\n"
+		"        ports), or a comma-separated list of ports, optionally\n"
+		"        ranged with '-' and optional target ports after ':'.\n"
+		"        Ranges can be reduced by excluding ports or ranges\n"
+		"        prefixed by '~'.\n"
 		"%s"
-		"      a comma-separated list, optionally ranged with '-'\n"
-		"        and optional target ports after ':', with optional\n"
-		"        address specification suffixed by '/' and optional\n"
-		"        interface prefixed by '%%'. Ranges can be reduced by\n"
-		"        excluding ports or ranges prefixed by '~'\n"
 		"        Examples:\n"
+		"        -t all		Forward all ports\n"
+		"        -t ::1/all	Forward all ports from local address ::1\n"
 		"        -t 22		Forward local port 22 to 22 on %s\n"
 		"        -t 22:23	Forward local port 22 to 23 on %s\n"
 		"        -t 22,25	Forward ports 22, 25 to ports 22, 25\n"
@@ -1056,15 +1053,26 @@ static void usage(const char *name, FILE *f, int status)
 		"        -t 192.0.2.1/5	Bind port 5 of 192.0.2.1 to %s\n"
 		"        -t 5-25,~10-20	Forward ports 5 to 9, and 21 to 25\n"
 		"        -t ~25		Forward all ports except for 25\n"
+		"%s"
 		"    default: %s\n"
 		"  -u, --udp-ports SPEC	UDP port forwarding to %s\n"
 		"    SPEC is as described for TCP above\n"
 		"    default: %s\n",
 		guest,
 		strstr(name, "pasta") ?
-		"      'auto': forward all ports currently bound in namespace\n"
+		"        The 'auto' keyword may be given to only forward\n"
+		"        ports which are bound in the target namespace\n"
 		: "",
-		guest, guest, guest, fwd_default, guest, fwd_default);
+		guest, guest, guest,
+		strstr(name, "pasta") ?
+		"        -t auto\t	Forward all ports bound in namespace\n"
+		"        -t ::1/auto	Forward ports from ::1 if they are\n"
+		"        		bound in the namespace\n"
+		"        -t 80-82,auto	Forward ports 80-82 if they are bound\n"
+		"        		in the namespace\n"
+		: "",
+
+		fwd_default, guest, fwd_default);
 
 	if (strstr(name, "pasta"))
 		goto pasta_opts;
@@ -2173,16 +2181,16 @@ void conf(struct ctx *c, int argc, char **argv)
 
 		if (name == 't') {
 			opt_t = true;
-			conf_ports(c, name, optarg, c->fwd[PIF_HOST]);
+			conf_ports(name, optarg, c->fwd[PIF_HOST]);
 		} else if (name == 'u') {
 			opt_u = true;
-			conf_ports(c, name, optarg, c->fwd[PIF_HOST]);
+			conf_ports(name, optarg, c->fwd[PIF_HOST]);
 		} else if (name == 'T') {
 			opt_T = true;
-			conf_ports(c, name, optarg, c->fwd[PIF_SPLICE]);
+			conf_ports(name, optarg, c->fwd[PIF_SPLICE]);
 		} else if (name == 'U') {
 			opt_U = true;
-			conf_ports(c, name, optarg, c->fwd[PIF_SPLICE]);
+			conf_ports(name, optarg, c->fwd[PIF_SPLICE]);
 		}
 	} while (name != -1);
 
@@ -2234,13 +2242,13 @@ void conf(struct ctx *c, int argc, char **argv)
 
 	if (c->mode == MODE_PASTA) {
 		if (!opt_t)
-			conf_ports(c, 't', "auto", c->fwd[PIF_HOST]);
+			conf_ports('t', "auto", c->fwd[PIF_HOST]);
 		if (!opt_T)
-			conf_ports(c, 'T', "auto", c->fwd[PIF_SPLICE]);
+			conf_ports('T', "auto", c->fwd[PIF_SPLICE]);
 		if (!opt_u)
-			conf_ports(c, 'u', "auto", c->fwd[PIF_HOST]);
+			conf_ports('u', "auto", c->fwd[PIF_HOST]);
 		if (!opt_U)
-			conf_ports(c, 'U', "auto", c->fwd[PIF_SPLICE]);
+			conf_ports('U', "auto", c->fwd[PIF_SPLICE]);
 	}
 
 	if (!c->quiet)

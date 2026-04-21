@@ -17,6 +17,14 @@
 #include "inany.h"
 #include "bitmap.h"
 
+/* Forwarding capability bits */
+#define FWD_CAP_IPV4		BIT(0)
+#define FWD_CAP_IPV6		BIT(1)
+#define FWD_CAP_TCP		BIT(2)
+#define FWD_CAP_UDP		BIT(3)
+#define FWD_CAP_SCAN		BIT(4)
+#define FWD_CAP_IFNAME		BIT(5)
+
 /**
  * struct fwd_rule - Forwarding rule governing a range of ports
  * @addr:	Address to forward from
