@@ -1340,15 +1340,19 @@ int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
  * @conn:      Connection pointer
  * @flags:     TCP flags: if not set, send segment only if ACK is due
  *
- * Return: negative error code on connection reset, 0 otherwise
+ * Return: negative error code on fatal connection failure, 0 otherwise
  */
 static int tcp_send_flag(const struct ctx *c, struct tcp_tap_conn *conn,
 			 int flags)
 {
-	if (c->mode == MODE_VU)
-		return tcp_vu_send_flag(c, conn, flags);
+	int ret;
 
-	return tcp_buf_send_flag(c, conn, flags);
+	if (c->mode == MODE_VU)
+		ret = tcp_vu_send_flag(c, conn, flags);
+	else
+		ret = tcp_buf_send_flag(c, conn, flags);
+
+	return ret == -EAGAIN ? 0 : ret;
 }
 
 /**
@@ -1879,7 +1883,9 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 				   "keep-alive sequence: %u, previous: %u",
 				   seq, conn->seq_from_tap);
 
-			tcp_send_flag(c, conn, ACK);
+			if (tcp_send_flag(c, conn, ACK))
+				return -1;
+
 			tcp_timer_ctl(c, conn);
 
 			if (setsockopt(conn->sock, SOL_SOCKET, SO_KEEPALIVE,
@@ -2005,14 +2011,17 @@ eintr:
 			 *   Then swiftly looked away and left.
 			 */
 			conn->seq_from_tap = seq_from_tap;
-			tcp_send_flag(c, conn, ACK);
+			if (tcp_send_flag(c, conn, ACK))
+				return -1;
 		}
 
 		if (errno == EINTR)
 			goto eintr;
 
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			tcp_send_flag(c, conn, ACK | DUP_ACK);
+			if (tcp_send_flag(c, conn, ACK | DUP_ACK))
+				return -1;
+
 			uint32_t events = tcp_conn_epoll_events(conn->events,
 								conn->flags);
 			events |= EPOLLOUT;
@@ -2046,7 +2055,8 @@ out:
 		 */
 		if (conn->seq_dup_ack_approx != (conn->seq_from_tap & 0xff)) {
 			conn->seq_dup_ack_approx = conn->seq_from_tap & 0xff;
-			tcp_send_flag(c, conn, ACK | DUP_ACK);
+			if (tcp_send_flag(c, conn, ACK | DUP_ACK))
+				return -1;
 		}
 		return p->count - idx;
 	}
@@ -2060,7 +2070,8 @@ out:
 
 		conn_event(c, conn, TAP_FIN_RCVD);
 	} else {
-		tcp_send_flag(c, conn, ACK_IF_NEEDED);
+		if (tcp_send_flag(c, conn, ACK_IF_NEEDED))
+			return -1;
 	}
 
 	return p->count - idx;
@@ -2098,7 +2109,10 @@ static void tcp_conn_from_sock_finish(const struct ctx *c,
 		return;
 	}
 
-	tcp_send_flag(c, conn, ACK);
+	if (tcp_send_flag(c, conn, ACK)) {
+		tcp_rst(c, conn);
+		return;
+	}
 
 	/* The client might have sent data already, which we didn't
 	 * dequeue waiting for SYN,ACK from tap -- check now.
@@ -2284,7 +2298,9 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 				goto reset;
 			}
 
-			tcp_send_flag(c, conn, ACK);
+			if (tcp_send_flag(c, conn, ACK))
+				goto reset;
+
 			conn_event(c, conn, SOCK_FIN_SENT);
 
 			return 1;
@@ -2364,7 +2380,9 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		}
 
 		conn_event(c, conn, SOCK_FIN_SENT);
-		tcp_send_flag(c, conn, ACK);
+		if (tcp_send_flag(c, conn, ACK))
+			goto reset;
+
 		ack_due = 0;
 
 		/* If we received a FIN, but the socket is in TCP_ESTABLISHED
@@ -2412,8 +2430,10 @@ static void tcp_connect_finish(const struct ctx *c, struct tcp_tap_conn *conn)
 		return;
 	}
 
-	if (tcp_send_flag(c, conn, SYN | ACK))
+	if (tcp_send_flag(c, conn, SYN | ACK)) {
+		tcp_rst(c, conn);
 		return;
+	}
 
 	conn_event(c, conn, TAP_SYN_ACK_SENT);
 	conn_flag(c, conn, ACK_FROM_TAP_DUE);
@@ -2454,7 +2474,12 @@ static void tcp_tap_conn_from_sock(const struct ctx *c, union flow *flow,
 
 	conn->wnd_from_tap = WINDOW_DEFAULT;
 
-	tcp_send_flag(c, conn, SYN);
+	if (tcp_send_flag(c, conn, SYN)) {
+		conn_flag(c, conn, CLOSING);
+		FLOW_ACTIVATE(conn);
+		return;
+	}
+
 	conn_flag(c, conn, ACK_FROM_TAP_DUE);
 
 	tcp_get_sndbuf(conn);
@@ -2561,7 +2586,10 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 		return;
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
-		tcp_send_flag(c, conn, ACK_IF_NEEDED);
+		if (tcp_send_flag(c, conn, ACK_IF_NEEDED)) {
+			tcp_rst(c, conn);
+			return;
+		}
 		tcp_timer_ctl(c, conn);
 	} else if (conn->flags & ACK_FROM_TAP_DUE) {
 		if (!(conn->events & ESTABLISHED)) {
@@ -2574,7 +2602,10 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 				tcp_rst(c, conn);
 			} else {
 				flow_trace(conn, "SYN timeout, retry");
-				tcp_send_flag(c, conn, SYN);
+				if (tcp_send_flag(c, conn, SYN)) {
+					tcp_rst(c, conn);
+					return;
+				}
 				conn->retries++;
 				conn_flag(c, conn, SYN_RETRIED);
 				tcp_timer_ctl(c, conn);
@@ -2639,8 +2670,11 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 
 		if (events & EPOLLOUT) {
 			tcp_epoll_ctl(conn);
-			if (tcp_update_seqack_wnd(c, conn, false, NULL))
-				tcp_send_flag(c, conn, ACK);
+			if (tcp_update_seqack_wnd(c, conn, false, NULL) &&
+			    tcp_send_flag(c, conn, ACK)) {
+				tcp_rst(c, conn);
+				return;
+			}
 		}
 
 		return;
@@ -2880,7 +2914,8 @@ static void tcp_keepalive(struct ctx *c, const struct timespec *now)
 		if (conn->tap_inactive) {
 			flow_dbg(conn, "No tap activity for least %us, send keepalive",
 				 KEEPALIVE_INTERVAL);
-			tcp_send_flag(c, conn, KEEPALIVE);
+			if (tcp_send_flag(c, conn, KEEPALIVE))
+				tcp_rst(c, conn);
 		}
 
 		/* Ready to check fot next interval */
@@ -3903,7 +3938,9 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 	if (tcp_set_peek_offset(conn, peek_offset))
 		goto fail;
 
-	tcp_send_flag(c, conn, ACK);
+	if (tcp_send_flag(c, conn, ACK))
+		goto fail;
+
 	tcp_data_from_sock(c, conn);
 
 	if ((rc = tcp_epoll_ctl(conn))) {

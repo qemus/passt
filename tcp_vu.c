@@ -65,7 +65,9 @@ static size_t tcp_vu_hdrlen(bool v6)
  * @conn:	Connection pointer
  * @flags:	TCP flags: if not set, send segment only if ACK is due
  *
- * Return: negative error code on connection reset, 0 otherwise
+ * Return: -ECONNRESET on fatal connection error,
+ *         -EAGAIN if vhost-user buffers are unavailable,
+ *         0 otherwise
  */
 int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 {
@@ -91,7 +93,7 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 			      &flags_iov[0], 1, NULL,
 			      MAX(hdrlen + sizeof(*opts), ETH_ZLEN + VNET_HLEN), NULL);
 	if (elem_cnt != 1)
-		return -1;
+		return -EAGAIN;
 
 	assert(flags_elem[0].in_num == 1);
 	assert(flags_elem[0].in_sg[0].iov_len >=
