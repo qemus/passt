@@ -123,7 +123,7 @@ jobs:
       -
         name: Add packages to release
         if: env.exists == 'false'
-        uses: AButler/upload-release-assets@v3.0
+        uses: AButler/upload-release-assets@v4.0.0
         with:
           files: 'output/*'
           release-tag: "v${{ steps.meta.outputs.version }}"
