@@ -295,6 +295,7 @@
 #include <arpa/inet.h>
 
 #include <linux/sockios.h>
+#include <linux/sock_diag.h>
 
 #include "checksum.h"
 #include "util.h"
@@ -1018,6 +1019,90 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 }
 
 /**
+ * tcp_wnd_from_sndbuf() - Calculate window from available send buffer space
+ * @s:		Socket file descriptor
+ * @conn:	Connection pointer
+ * @tinfo:	tcp_info from kernel
+ *
+ * Return: window value to advertise, not scaled
+ */
+static uint32_t tcp_wnd_from_sndbuf(int s, struct tcp_tap_conn *conn,
+				     const struct tcp_info_linux *tinfo)
+{
+	uint32_t rtt_ms_ceiling = DIV_ROUND_UP(tinfo->tcpi_rtt, 1000);
+	uint32_t mem[SK_MEMINFO_VARS];
+	socklen_t mem_sl = sizeof(mem);
+	int mss = MSS_GET(conn);
+	uint32_t limit, sendq;
+
+	if (ioctl(s, SIOCOUTQ, &sendq)) {
+		debug_perror("SIOCOUTQ on socket %i, assuming 0", s);
+		sendq = 0;
+	}
+
+	if (getsockopt(s, SOL_SOCKET, SO_MEMINFO, &mem, &mem_sl)) {
+		tcp_get_sndbuf(conn);
+
+		if (sendq > SNDBUF_GET(conn)) /* Due to memory pressure? */
+			limit = 0;
+		else
+			limit = SNDBUF_GET(conn) - sendq;
+	} else {
+		uint32_t sndbuf = mem[SK_MEMINFO_SNDBUF];
+		uint32_t wmemq = mem[SK_MEMINFO_WMEM_QUEUED];
+		uint32_t scaled = clamped_scale(sndbuf, sndbuf, SNDBUF_SMALL,
+						SNDBUF_BIG, 75);
+
+		SNDBUF_SET(conn, MIN(INT_MAX, scaled));
+
+		if (wmemq > sndbuf) {
+			limit = 0;
+		} else if (!sendq || !mss || wmemq <= sendq) {
+			limit = SNDBUF_GET(conn) - wmemq;
+		} else {
+			uint32_t used_segs = MAX(sendq / mss, 1);
+			uint32_t overhead = (wmemq - sendq) / used_segs;
+			uint32_t remaining = sndbuf - wmemq;
+			uint32_t avail_segs = remaining / (mss + overhead);
+
+			limit = avail_segs * mss;
+		}
+	}
+
+	/* If the sender uses mechanisms to prevent Silly Window
+	 * Syndrome (SWS, described in RFC 813 Section 3) it's critical
+	 * that, should the window ever become less than the MSS, we
+	 * advertise a new value once it increases again to be above it.
+	 *
+	 * The mechanism to avoid SWS in the kernel is, implicitly,
+	 * implemented by Nagle's algorithm (which was proposed after
+	 * RFC 813).
+	 *
+	 * To this end, for simplicity, approximate a window value below
+	 * the MSS to zero, as we already have mechanisms in place to
+	 * force updates after the window becomes zero. This matches the
+	 * suggestion from RFC 813, Section 4.
+	 *
+	 * But don't do this if, either:
+	 *
+	 * - there's nothing in the outbound queue: the size of the
+	 *   sending buffer is limiting us, and it won't increase if we
+	 *   don't send data, so there's no point in waiting, or
+	 *
+	 * - we haven't sent data in a while (somewhat arbitrarily, ten
+	 *   times the RTT), as that might indicate that the receiver
+	 *   will only process data in batches that are large enough,
+	 *   but we won't send enough to fill one because we're stuck
+	 *   with pending data in the outbound queue
+	 */
+	if (limit < (uint32_t)MSS_GET(conn) && sendq &&
+	    tinfo->tcpi_last_data_sent < rtt_ms_ceiling * 10)
+		limit = 0;
+
+	return MIN(tinfo->tcpi_snd_wnd, limit);
+}
+
+/**
  * tcp_update_seqack_wnd() - Update ACK sequence and window to guest/tap
  * @c:		Execution context
  * @conn:	Connection pointer
@@ -1124,56 +1209,10 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 		}
 	}
 
-	if ((conn->flags & LOCAL) || tcp_rtt_dst_low(conn)) {
+	if ((conn->flags & LOCAL) || tcp_rtt_dst_low(conn))
 		new_wnd_to_tap = tinfo->tcpi_snd_wnd;
-	} else {
-		unsigned rtt_ms_ceiling = DIV_ROUND_UP(tinfo->tcpi_rtt, 1000);
-		uint32_t sendq;
-		int limit;
-
-		if (ioctl(s, SIOCOUTQ, &sendq)) {
-			debug_perror("SIOCOUTQ on socket %i, assuming 0", s);
-			sendq = 0;
-		}
-		tcp_get_sndbuf(conn);
-
-		if ((int)sendq > SNDBUF_GET(conn)) /* Due to memory pressure? */
-			limit = 0;
-		else
-			limit = SNDBUF_GET(conn) - (int)sendq;
-
-		/* If the sender uses mechanisms to prevent Silly Window
-		 * Syndrome (SWS, described in RFC 813 Section 3) it's critical
-		 * that, should the window ever become less than the MSS, we
-		 * advertise a new value once it increases again to be above it.
-		 *
-		 * The mechanism to avoid SWS in the kernel is, implicitly,
-		 * implemented by Nagle's algorithm (which was proposed after
-		 * RFC 813).
-		 *
-		 * To this end, for simplicity, approximate a window value below
-		 * the MSS to zero, as we already have mechanisms in place to
-		 * force updates after the window becomes zero. This matches the
-		 * suggestion from RFC 813, Section 4.
-		 *
-		 * But don't do this if, either:
-		 *
-		 * - there's nothing in the outbound queue: the size of the
-		 *   sending buffer is limiting us, and it won't increase if we
-		 *   don't send data, so there's no point in waiting, or
-		 *
-		 * - we haven't sent data in a while (somewhat arbitrarily, ten
-		 *   times the RTT), as that might indicate that the receiver
-		 *   will only process data in batches that are large enough,
-		 *   but we won't send enough to fill one because we're stuck
-		 *   with pending data in the outbound queue
-		 */
-		if (limit < MSS_GET(conn) && sendq &&
-		    tinfo->tcpi_last_data_sent < rtt_ms_ceiling * 10)
-			limit = 0;
-
-		new_wnd_to_tap = MIN((int)tinfo->tcpi_snd_wnd, limit);
-	}
+	else
+		new_wnd_to_tap = tcp_wnd_from_sndbuf(s, conn, tinfo);
 
 	new_wnd_to_tap = MIN(new_wnd_to_tap, MAX_WINDOW);
 	if (!(conn->events & ESTABLISHED))

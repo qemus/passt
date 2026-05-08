@@ -47,6 +47,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "inany.h"
+
 /**
  * struct siphash_state - Internal state of siphash calculation
  */
@@ -99,6 +101,17 @@ static inline void siphash_feed(struct siphash_state *state, uint64_t in)
 	state->v[3] ^= in;
 	sipround(state, 2);
 	state->v[0] ^= in;
+}
+
+/** siphash_feed_inany() - Fold IPv[46] address into an in-progress siphash
+ * @state:	siphash state
+ * @aa:		inany to hash
+ */
+static inline void siphash_feed_inany(struct siphash_state *state,
+				      const union inany_addr *aa)
+{
+	siphash_feed(state, (uint64_t)aa->u32[0] << 32 | aa->u32[1]);
+	siphash_feed(state, (uint64_t)aa->u32[2] << 32 | aa->u32[3]);
 }
 
 /**

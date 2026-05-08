@@ -46,6 +46,10 @@ enum epoll_type {
 	EPOLL_TYPE_REPAIR,
 	/* Netlink neighbour subscription socket */
 	EPOLL_TYPE_NL_NEIGH,
+	/* Configuration listening socket */
+	EPOLL_TYPE_CONF_LISTEN,
+	/* Configuration socket */
+	EPOLL_TYPE_CONF,
 
 	EPOLL_NUM_TYPES,
 };

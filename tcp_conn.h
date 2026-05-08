@@ -98,7 +98,7 @@ struct tcp_tap_conn {
 #define SNDBUF_BITS		24
 	unsigned int	sndbuf		:SNDBUF_BITS;
 #define SNDBUF_SET(conn, bytes)	(conn->sndbuf = ((bytes) >> (32 - SNDBUF_BITS)))
-#define SNDBUF_GET(conn)	(conn->sndbuf << (32 - SNDBUF_BITS))
+#define SNDBUF_GET(conn)	((uint32_t)(conn->sndbuf << (32 - SNDBUF_BITS)))
 
 	uint8_t		seq_dup_ack_approx;
 

@@ -1,0 +1,275 @@
+.\" SPDX-License-Identifier: GPL-2.0-or-later
+.\" Copyright Red Hat
+.\" Author: David Gibson <david@gibson.dropbear.id.au>
+.TH pesto 1
+
+.SH NAME
+.B pesto
+\- Configure a running \fBpasst\fR(1) or \fBpasta\fR(1) instance.
+
+.SH SYNOPSIS
+.B pesto
+[\fIOPTION\fR]... \fIPATH\fR
+
+.SH DESCRIPTION
+
+.B pesto
+is a client to view and update the port forwarding configuration of a running
+\fBpasst\fR(1) or \fBpasta\fR(1) instance.
+
+\fIPATH\fR gives the path to the UNIX domain socket created by \fBpasst\fR or
+\fBpasta\fR.  It should match the \fB-c\fR command line option given to that
+instance.
+
+.SH OPTIONS
+
+.TP
+.BR \-d ", " \-\-debug
+Be verbose.
+
+.TP
+.BR \-h ", " \-\-help
+Display a help message and exit.
+
+.TP
+.BR \-s ", " \-\-show
+Show the forwarding configuration before and after changes are applied.
+
+.TP
+.BR \-A ", " \-\-add
+Add the port forwarding specifiers following this option to the current
+forwarding table, rather than replacing it.
+
+This option can be given multiple times, as it might follow previous deletions
+(see \fB--delete\fR below), and implies that all the specifiers following it,
+before a further \fB--delete\fR option occurs, will be handled as additions.
+
+See the section \fBAdding, deleting, clearing rules\fR in the \fBNOTES\fR for
+more details.
+
+.TP
+.BR \-D ", " \-\-delete
+Delete the port forwarding specifiers following this option from the current
+forwarding table, rather than adding them to it.
+
+This option can be given multiple times, as it might follow previous additions
+(see \fB--add\fR above), and implies that all the specifiers following it,
+before a further \fB--add\fR option occurs, will be handled as deletions.
+
+See the section \fBAdding, deleting, clearing rules\fR in the \fBNOTES\fR for
+more details.
+
+.TP
+.BR \-C ", " \-\-clear " " \fIpif
+Clear the forwarding table associated to a given \fIpif\fR, that is, a
+conceptual type of interface in \fBpasst\fR(1) or \fBpasta\fR(1) representing a
+specific data path and direction.
+
+The available \fIpif\fR names can be obtained by querying the current forwarding
+configuration, which can be done by calling \fBpesto\fR(1) without options.
+
+See the section \fBAdding, deleting, clearing rules\fR in the \fBNOTES\fR for
+more details.
+
+.TP
+.BR \-t ", " \-\-tcp-ports " " \fIspec
+Configure TCP port forwarding to guest or namespace. \fIspec\fR can be one of:
+.RS
+
+.TP
+.BR none
+Don't forward any ports
+
+.TP
+[\fIaddress\fR[\fB%\fR\fIinterface\fR]\fB/\fR]\fIports\fR ...
+Specific ports to forward.  Optionally, a specific listening address
+and interface name (since Linux 5.7) can be specified.  \fIports\fR
+may be either:
+.RS
+.TP
+\fBall\fR
+Forward all unbound, non-ephemeral ports, as permitted by current capabilities.
+No failures are reported for unavailable ports, unless no ports could be
+forwarded at all.
+.RE
+
+.RS
+or a comma-separated list of entries which may be any of:
+.TP
+\fIfirst\fR[\fB-\fR\fIlast\fR][\fB:\fR\fItofirst\fR[\fB-\fR\fItolast\fR]]
+Include range. Forward port numbers between \fIfirst\fR and \fIlast\fR
+(inclusive) to ports between \fItofirst\fR and \fItolast\fR.  If
+\fItofirst\fR and \fItolast\fR are omitted, assume the same as
+\fIfirst\fR and \fIlast\fR.  If \fIlast\fR is omitted, assume the same
+as \fIfirst\fR.
+
+.TP
+\fB~\fR\fIfirst\fR[\fB-\fR\fIlast\fR]
+Exclude range.  Don't forward port numbers between \fIfirst\fR and
+\fIlast\fR.  This takes precedences over include ranges.
+
+.TP
+.BR auto
+\fBpasta\fR only.  Only forward ports in the specified set if the
+target ports are bound in the namespace. The list of ports is
+periodically derived (every second) from listening sockets reported by
+\fI/proc/net/tcp\fR and \fI/proc/net/tcp6\fR, see \fBproc\fR(5).
+.RE
+
+Specifying excluded ranges only implies that all other non-ephemeral
+ports are forwarded. Specifying no ranges at all implies forwarding
+all non-ephemeral ports permitted by current capabilities.  In this
+case, no failures are reported for unavailable ports, unless no ports
+could be forwarded at all.
+
+Examples:
+.RS
+.TP
+-t all
+Forward all unbound, non-ephemeral ports as permitted by current
+capabilities to the corresponding port on the guest or namespace
+.TP
+-t ::1/all
+For the local address ::1, forward all unbound, non-ephemeral ports as
+permitted by current capabilities
+.TP
+-t 22
+Forward local port 22 to port 22 on the guest or namespace
+.TP
+-t 22:23
+Forward local port 22 to port 23 on the guest or namespace
+.TP
+-t 22,25
+Forward local ports 22 and 25 to ports 22 and 25 on the guest or namespace
+.TP
+-t 22-80
+Forward local ports between 22 and 80 to corresponding ports on the guest or
+namespace
+.TP
+-t 22-80:32-90
+Forward local ports between 22 and 80 to ports between 32 and 90 on the guest or
+namespace
+.TP
+-t 192.0.2.1/22
+Forward local port 22, bound to 192.0.2.1, to port 22 on the guest or namespace
+.TP
+-t 192.0.2.1%eth0/22
+Forward local port 22, bound to 192.0.2.1 and interface eth0, to port 22
+.TP
+-t %eth0/22
+Forward local port 22, bound to any address on interface eth0, to port 22
+.TP
+-t 2000-5000,~3000-3010
+Forward local ports between 2000 and 5000, except for those between 3000 and
+3010
+.TP
+-t 192.0.2.1/20-30,~25
+For the local address 192.0.2.1, forward ports between 20 and 24 and between 26
+and 30
+.TP
+-t ~20000-20010
+Forward all ports to the guest, except for the range from 20000 to 20010
+.TP
+-t auto
+Automatically forward any ports which are bound in the namespace
+.TP
+-t ::1/auto
+Automatically forward any ports which are bound in the namespace,
+listening only on local port ::1
+.TP
+-t 8000-8010,auto
+Forward ports in the range 8000-8010 if and only if they are bound in
+the namespace
+.RE
+.RE
+
+.TP
+.BR \-u ", " \-\-udp-ports " " \fIspec
+Configure UDP port forwarding to guest. \fIspec\fR is as described for TCP
+above.
+
+.TP
+.BR \-T ", " \-\-tcp-ns " " \fIspec
+Configure TCP port forwarding from target namespace to init namespace.
+\fIspec\fR is as described above.
+
+.TP
+.BR \-U ", " \-\-udp-ns " " \fIspec
+Configure UDP port forwarding from target namespace to init namespace.
+\fIspec\fR is as described above.
+
+.TP
+.BR \-\-version
+Show version and exit.
+
+.SH NOTES
+
+.SS Adding, deleting, clearing rules
+
+The options \fB--add\fR, \fB--delete\fR, and \fB--clear\fR are handled as
+sequential commands to manipulate the current forwarding tables. If none of them
+is given, forwarding specifiers for a given table are intended as replacement of
+the corresponding table. That is:
+
+.nf
+	pesto -t 1024 -U 1025
+.fi
+
+will \fBreplace\fR the current TCP inbound port forwarding table with a single
+rule, forwarding port 1024, and will similarly replace the UDP outbound
+forwarding table with a single forwarding rule for port 1025. This usage is a
+short-hand form for:
+
+.nf
+	pesto -C HOST -t 1024 -C SPLICE -U 1025
+.fi
+
+The options \fB--add\fR and \fB--delete\fR are used to \fBadd new specific
+rules or delete existing ones\fR, instead of replacing tables. For example:
+
+.nf
+	pesto -A -t 2000 -D -t 3000 -U 5000
+.fi
+
+will add a forwarding rule for inbound TCP port 2000, and delete inbound TCP
+port 3000 as well as outbound UDP port 5000 from the existing set of rules.
+
+All these options are interpreted as sequential commands and can be arbitrarily
+combined. For example:
+
+.nf
+	pesto -A -t 2000 -C HOST -A -T 3000 -t 2001 -D -u 5000
+.fi
+
+will, in order:
+
+.RS
+- add inbound TCP port 2000
+- clear inbound ports, reverting the addition above
+- add outbound TCP port 3000
+- add inbound TCP port 2001
+- delete inbound UDP port 5000
+.RE
+
+.SH AUTHORS
+
+Stefano Brivio <sbrivio@redhat.com>,
+David Gibson <david@gibson.dropbear.id.au>.
+
+.SH REPORTING BUGS
+
+Please report issues on the bug tracker at https://bugs.passt.top/, or send a
+message to the passt-user@passt.top mailing list, see https://lists.passt.top/.
+
+.SH COPYRIGHT
+
+Copyright Red Hat
+
+\fBpesto\fR is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 2 of the License, or (at
+your option) any later version.
+
+.SH SEE ALSO
+
+\fBpasst\fR(1), \fBpasta\fR(1), \fBunix\fR(7).

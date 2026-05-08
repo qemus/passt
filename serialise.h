@@ -16,6 +16,7 @@ int write_all_buf(int fd, const void *buf, size_t len);
 	int read_u##bits(int fd, uint##bits##_t *val);			\
 	int write_u##bits(int fd, uint##bits##_t val);
 
+SERIALISE_UINT_DECL(8)
 SERIALISE_UINT_DECL(32)
 
 #endif /* SERIALISE_H */

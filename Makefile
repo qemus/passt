@@ -45,17 +45,18 @@ PASST_SRCS = arch.c arp.c bitmap.c checksum.c conf.c dhcp.c dhcpv6.c \
 	vhost_user.c virtio.c vu_common.c
 QRAP_SRCS = qrap.c
 PASST_REPAIR_SRCS = passt-repair.c
-SRCS = $(PASST_SRCS) $(QRAP_SRCS) $(PASST_REPAIR_SRCS)
+PESTO_SRCS = pesto.c bitmap.c fwd_rule.c inany.c ip.c lineread.c serialise.c
+SRCS = $(PASST_SRCS) $(QRAP_SRCS) $(PASST_REPAIR_SRCS) $(PESTO_SRCS)
 
-MANPAGES = passt.1 pasta.1 qrap.1 passt-repair.1
+MANPAGES = passt.1 pasta.1 pesto.1 qrap.1 passt-repair.1
 
-PASST_HEADERS = arch.h arp.h bitmap.h checksum.h conf.h dhcp.h dhcpv6.h \
-	epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h icmp_flow.h \
-	inany.h iov.h ip.h isolation.h lineread.h log.h migrate.h ndp.h \
-	netlink.h packet.h passt.h pasta.h pcap.h pif.h repair.h serialise.h \
-	siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h tcp_splice.h \
-	tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h vhost_user.h \
-	virtio.h vu_common.h
+PASST_HEADERS = arch.h arp.h bitmap.h checksum.h common.h conf.h dhcp.h \
+	dhcpv6.h epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h \
+	icmp_flow.h inany.h iov.h ip.h isolation.h lineread.h log.h migrate.h \
+	ndp.h netlink.h packet.h passt.h pasta.h pcap.h pesto.h pif.h repair.h \
+	serialise.h siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h \
+	tcp_splice.h tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h \
+	vhost_user.h virtio.h vu_common.h
 HEADERS = $(PASST_HEADERS) seccomp.h
 
 C := \#include <sys/random.h>\nint main(){int a=getrandom(0, 0, 0);}
@@ -76,9 +77,9 @@ mandir		?= $(datarootdir)/man
 man1dir		?= $(mandir)/man1
 
 ifeq ($(TARGET_ARCH),x86_64)
-BIN := passt passt.avx2 pasta pasta.avx2 qrap passt-repair
+BIN := passt passt.avx2 pasta pasta.avx2 qrap passt-repair pesto
 else
-BIN := passt pasta qrap passt-repair
+BIN := passt pasta qrap passt-repair pesto
 endif
 
 all: $(BIN) $(MANPAGES) docs
@@ -91,6 +92,9 @@ seccomp.h: seccomp.sh $(PASST_SRCS) $(PASST_HEADERS)
 
 seccomp_repair.h: seccomp.sh $(PASST_REPAIR_SRCS)
 	@ ARCH="$(TARGET_ARCH)" CC="$(CC)" ./seccomp.sh seccomp_repair.h $(PASST_REPAIR_SRCS)
+
+seccomp_pesto.h: seccomp.sh $(PESTO_SRCS)
+	@ ARCH="$(TARGET_ARCH)" CC="$(CC)" ./seccomp.sh seccomp_pesto.h $(PESTO_SRCS)
 
 passt: $(PASST_SRCS) $(HEADERS)
 	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) $(PASST_SRCS) -o passt $(LDFLAGS)
@@ -111,6 +115,9 @@ qrap: $(QRAP_SRCS) passt.h
 passt-repair: $(PASST_REPAIR_SRCS) seccomp_repair.h
 	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) $(PASST_REPAIR_SRCS) -o passt-repair $(LDFLAGS)
 
+pesto: $(PESTO_SRCS) $(PESTO_HEADERS) seccomp_pesto.h
+	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) -DPESTO $(PESTO_SRCS) -o pesto $(LDFLAGS)
+
 valgrind: EXTRA_SYSCALLS += rt_sigprocmask rt_sigtimedwait rt_sigaction	\
 			    rt_sigreturn getpid gettid kill clock_gettime \
 			    mmap|mmap2 munmap open unlink gettimeofday futex \
@@ -120,7 +127,7 @@ valgrind: all
 
 .PHONY: clean
 clean:
-	$(RM) $(BIN) *~ *.o seccomp.h seccomp_repair.h pasta.1 \
+	$(RM) $(BIN) *~ *.o seccomp.h seccomp_repair.h seccomp_pesto.h pasta.1 \
 		passt.tar passt.tar.gz *.deb *.rpm \
 		passt.pid README.plain.md
 

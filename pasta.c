@@ -521,7 +521,7 @@ void pasta_netns_quit_init(const struct ctx *c)
  * @c:		Execution context
  * @inotify_fd:	inotify file descriptor with watch on namespace directory
  */
-void pasta_netns_quit_inotify_handler(struct ctx *c, int inotify_fd)
+void pasta_netns_quit_inotify_handler(const struct ctx *c, int inotify_fd)
 {
 	char buf[sizeof(struct inotify_event) + NAME_MAX + 1]
 		__attribute__ ((aligned(__alignof__(struct inotify_event))));
@@ -547,7 +547,7 @@ void pasta_netns_quit_inotify_handler(struct ctx *c, int inotify_fd)
  * @c:		Execution context
  * @ref:	epoll reference for timer descriptor
  */
-void pasta_netns_quit_timer_handler(struct ctx *c, union epoll_ref ref)
+void pasta_netns_quit_timer_handler(const struct ctx *c, union epoll_ref ref)
 {
 	uint64_t expirations;
 	ssize_t n;

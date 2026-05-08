@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# PESTO - Programmable Extensible Socket Translation Orchestrator
+#  front-end for passt(1) and pasta(1) forwarding configuration
+#
+# contrib/apparmor/usr.bin.pesto - AppArmor profile for pesto(1)
+#
+# Copyright (c) 2026 Red Hat GmbH
+# Author: Stefano Brivio <sbrivio@redhat.com>
+
+abi <abi/4.0>,
+
+#include <tunables/global>
+
+profile pesto /usr/bin/pesto {
+  #include <abstractions/base>
+  /** rw,			# control socket might be anywhere
+  unix (connect, receive, send) type=stream,
+
+  capability dac_override,	# connect to passt's socket as root
+
+  network unix stream,		# connect and use UNIX domain socket
+}

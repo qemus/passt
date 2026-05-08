@@ -19,8 +19,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 
+#include "common.h"
 #include "lineread.h"
-#include "util.h"
 
 /**
  * lineread_init() - Prepare for line by line file reading without allocation

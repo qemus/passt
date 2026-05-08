@@ -1,9 +1,19 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright Red Hat
- * Author: David Gibson <david@gibson.dropbear.id.au>
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+/* PASST - Plug A Simple Socket Transport
+ *  for qemu/UNIX domain socket mode
+ *
+ * PASTA - Pack A Subtle Tap Abstraction
+ *  for network namespace/tap device mode
+ *
+ * PESTO - Programmable Extensible Socket Translation Orchestrator
+ *  front-end for passt(1) and pasta(1) forwarding configuration
  *
  * inany.c - Types and helpers for handling addresses which could be
  *           IPv6 or IPv4 (encoded as IPv4-mapped IPv6 addresses)
+ *
+ * Copyright Red Hat
+ * Author: David Gibson <david@gibson.dropbear.id.au>
  */
 
 #include <stdlib.h>
@@ -13,9 +23,8 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
-#include "util.h"
+#include "common.h"
 #include "ip.h"
-#include "siphash.h"
 #include "inany.h"
 #include "fwd.h"
 

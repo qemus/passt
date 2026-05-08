@@ -9,7 +9,7 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 
-#include "util.h"
+#include "common.h"
 
 #define IN4_IS_ADDR_UNSPECIFIED(a) \
 	(((struct in_addr *)(a))->s_addr == htonl_constant(INADDR_ANY))
@@ -116,8 +116,6 @@ static inline uint32_t ip6_get_flow_lbl(const struct ipv6hdr *ip6h)
 		ip6h->flow_lbl[1] << 8 |
 		ip6h->flow_lbl[2];
 }
-
-bool ipv6_l4hdr(struct iov_tail *data, uint8_t *proto, size_t *dlen);
 
 #define IPPROTO_STRLEN		(sizeof("<unknown protocol>"))
 const char *ipproto_name(uint8_t proto);

@@ -158,6 +158,7 @@ struct ip6_ctx {
  * @foreground:		Run in foreground, don't log to stderr by default
  * @nofile:		Maximum number of open files (ulimit -n)
  * @sock_path:		Path for UNIX domain socket
+ * @control_path:	Path for control/configuration UNIX domain socket
  * @repair_path:	TCP_REPAIR helper path, can be "none", empty for default
  * @pcap:		Path for packet capture file
  * @pidfile:		Path to PID file, empty string if not configured
@@ -169,6 +170,8 @@ struct ip6_ctx {
  * @epollfd:		File descriptor for epoll instance
  * @fd_tap_listen:	File descriptor for listening AF_UNIX socket, if any
  * @fd_tap:		AF_UNIX socket, tuntap device, or pre-opened socket
+ * @fd_control_listen:	Listening control/configuration socket, if any
+ * @fd_control:		Control/configuration socket, if any
  * @fd_repair_listen:	File descriptor for listening TCP_REPAIR socket, if any
  * @fd_repair:		Connected AF_UNIX socket for TCP_REPAIR helper
  * @our_tap_mac:	Pasta/passt's MAC on the tap link
@@ -185,6 +188,7 @@ struct ip6_ctx {
  * @pasta_ifi:		Index of namespace interface for pasta
  * @pasta_conf_ns:	Configure namespace after creating it
  * @fwd:		Forwarding tables
+ * @fwd_pending:	Pending forward tables
  * @no_tcp:		Disable TCP operation
  * @tcp:		Context for TCP protocol handler
  * @no_udp:		Disable UDP operation
@@ -223,6 +227,7 @@ struct ctx {
 	int foreground;
 	int nofile;
 	char sock_path[UNIX_PATH_MAX];
+	char control_path[UNIX_PATH_MAX];
 	char repair_path[UNIX_PATH_MAX];
 	char pcap[PATH_MAX];
 
@@ -240,6 +245,8 @@ struct ctx {
 	int epollfd;
 	int fd_tap_listen;
 	int fd_tap;
+	int fd_control_listen;
+	int fd_control;
 	int fd_repair_listen;
 	int fd_repair;
 	unsigned char our_tap_mac[ETH_ALEN];
@@ -264,6 +271,7 @@ struct ctx {
 	int pasta_conf_ns;
 
 	struct fwd_table *fwd[PIF_NUM_TYPES];
+	struct fwd_table *fwd_pending[PIF_NUM_TYPES];
 
 	int no_tcp;
 	struct tcp_ctx tcp;

@@ -756,6 +756,11 @@ resume:
 
 		if (IN4_IS_ADDR_LOOPBACK(&iph->saddr) ||
 		    IN4_IS_ADDR_LOOPBACK(&iph->daddr)) {
+			/* The scope of sstr and dstr could be in theory reduced
+			 * into the conditional block debug() expands to, but
+			 * it's awkward and unreadable, so ignore this warning.
+			 */
+			/* cppcheck-suppress [variableScope,unmatchedSuppression] */
 			char sstr[INET_ADDRSTRLEN], dstr[INET_ADDRSTRLEN];
 
 			debug("Loopback address on tap interface: %s -> %s",
@@ -874,6 +879,58 @@ append:
 	return in->count;
 }
 
+#define IPV6_NH_OPT(nh)							\
+	((nh) == 0   || (nh) == 43  || (nh) == 44  || (nh) == 50  ||	\
+	 (nh) == 51  || (nh) == 60  || (nh) == 135 || (nh) == 139 ||	\
+	 (nh) == 140 || (nh) == 253 || (nh) == 254)
+
+/**
+ * ipv6_l4hdr() - Find pointer to L4 header in IPv6 packet and extract protocol
+ * @data:	IPv6 packet
+ * @proto:	Filled with L4 protocol number
+ * @dlen:	Data length (payload excluding header extensions), set on return
+ *
+ * Return: true if the L4 header is found and @data, @proto, @dlen are set,
+ * 	   false on error. Outputs are indeterminate on failure.
+ */
+static bool ipv6_l4hdr(struct iov_tail *data, uint8_t *proto, size_t *dlen)
+{
+	struct ipv6_opt_hdr o_storage;
+	const struct ipv6_opt_hdr *o;
+	struct ipv6hdr ip6h_storage;
+	const struct ipv6hdr *ip6h;
+	int hdrlen;
+	uint8_t nh;
+
+	ip6h = IOV_REMOVE_HEADER(data, ip6h_storage);
+	if (!ip6h)
+		return false;
+
+	nh = ip6h->nexthdr;
+	if (!IPV6_NH_OPT(nh))
+		goto found;
+
+	while ((o = IOV_PEEK_HEADER(data, o_storage))) {
+		nh = o->nexthdr;
+		hdrlen = (o->hdrlen + 1) * 8;
+
+		if (IPV6_NH_OPT(nh))
+			iov_drop_header(data, hdrlen);
+		else
+			goto found;
+	}
+
+	return false;
+
+found:
+	if (nh == IPPROTO_NONE)
+		return false;
+
+	*dlen = iov_tail_size(data);
+	*proto = nh;
+	return true;
+}
+
 /**
  * tap6_handler() - IPv6 packet handler for tap file descriptor
  * @c:		Execution context
@@ -929,6 +986,11 @@ resume:
 			continue;
 
 		if (IN6_IS_ADDR_LOOPBACK(saddr) || IN6_IS_ADDR_LOOPBACK(daddr)) {
+			/* The scope of sstr and dstr could be in theory reduced
+			 * into the conditional block debug() expands to, but
+			 * it's awkward and unreadable, so ignore this warning.
+			 */
+			/* cppcheck-suppress [variableScope,unmatchedSuppression] */
 			char sstr[INET6_ADDRSTRLEN], dstr[INET6_ADDRSTRLEN];
 
 			debug("Loopback address on tap interface: %s -> %s",
@@ -1304,7 +1366,7 @@ void tap_handler_pasta(struct ctx *c, uint32_t events,
  * tap_backend_show_hints() - Give help information to start QEMU
  * @c:		Execution context
  */
-static void tap_backend_show_hints(struct ctx *c)
+static void tap_backend_show_hints(const struct ctx *c)
 {
 	switch (c->mode) {
 	case MODE_PASTA:

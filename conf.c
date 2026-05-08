@@ -13,7 +13,6 @@
  */
 
 #include <arpa/inet.h>
-#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -49,6 +48,10 @@
 #include "isolation.h"
 #include "log.h"
 #include "vhost_user.h"
+#include "epoll_ctl.h"
+#include "conf.h"
+#include "pesto.h"
+#include "serialise.h"
 
 #define NETNS_RUN_DIR	"/run/netns"
 
@@ -65,386 +68,6 @@
 				       0, 0, 0, 0, 0, 0, 0, 0x01 }}}
 
 const char *pasta_default_ifn = "tap0";
-
-/**
- * port_range() - Represents a non-empty range of ports
- * @first:	First port number in the range
- * @last:	Last port number in the range (inclusive)
- *
- * Invariant:	@last >= @first
- */
-struct port_range {
-	in_port_t first, last;
-};
-
-/**
- * parse_port_range() - Parse a range of port numbers '<first>[-<last>]'
- * @s:		String to parse
- * @endptr:	Update to the character after the parsed range (similar to
- *		strtol() etc.)
- * @range:	Update with the parsed values on success
- *
- * Return: -EINVAL on parsing error, -ERANGE on out of range port
- *	   numbers, 0 on success
- */
-static int parse_port_range(const char *s, const char **endptr,
-			    struct port_range *range)
-{
-	unsigned long first, last;
-	char *ep;
-
-	last = first = strtoul(s, &ep, 10);
-	if (ep == s) /* Parsed nothing */
-		return -EINVAL;
-	if (*ep == '-') { /* we have a last value too */
-		const char *lasts = ep + 1;
-		last = strtoul(lasts, &ep, 10);
-		if (ep == lasts) /* Parsed nothing */
-			return -EINVAL;
-	}
-
-	if ((last < first) || (last >= NUM_PORTS))
-		return -ERANGE;
-
-	range->first = first;
-	range->last = last;
-	*endptr = ep;
-
-	return 0;
-}
-
-/**
- * parse_keyword() - Parse a literal keyword
- * @s:		String to parse
- * @endptr:	Update to the character after the keyword
- * @kw:		Keyword to accept
- *
- * Return: 0, if @s starts with @kw, -EINVAL if it does not
- */
-static int parse_keyword(const char *s, const char **endptr, const char *kw)
-{
-	size_t len = strlen(kw);
-
-	if (strlen(s) < len)
-		return -EINVAL;
-
-	if (memcmp(s, kw, len))
-		return -EINVAL;
-
-	*endptr = s + len;
-	return 0;
-}
-
-/**
- * conf_ports_range_except() - Set up forwarding for a range of ports minus a
- *                             bitmap of exclusions
- * @fwd:	Forwarding table to be updated
- * @proto:	Protocol to forward
- * @addr:	Listening address
- * @ifname:	Listening interface
- * @first:	First port to forward
- * @last:	Last port to forward
- * @exclude:	Bitmap of ports to exclude (may be NULL)
- * @to:		Port to translate @first to when forwarding
- * @flags:	Flags for forwarding entries
- */
-static void conf_ports_range_except(struct fwd_table *fwd, uint8_t proto,
-				    const union inany_addr *addr,
-				    const char *ifname,
-				    uint16_t first, uint16_t last,
-				    const uint8_t *exclude, uint16_t to,
-				    uint8_t flags)
-{
-	struct fwd_rule rule = {
-		.addr = addr ? *addr : inany_any6,
-		.ifname = { 0 },
-		.proto = proto,
-		.flags = flags,
-	};
-	char rulestr[FWD_RULE_STRLEN];
-	unsigned delta = to - first;
-	unsigned base, i;
-
-	if (!addr)
-		rule.flags |= FWD_DUAL_STACK_ANY;
-	if (ifname) {
-		int ret;
-
-		ret = snprintf(rule.ifname, sizeof(rule.ifname),
-			       "%s", ifname);
-		if (ret <= 0 || (size_t)ret >= sizeof(rule.ifname))
-			die("Invalid interface name: %s", ifname);
-	}
-
-	assert(first != 0);
-
-	for (base = first; base <= last; base++) {
-		if (exclude && bitmap_isset(exclude, base))
-			continue;
-
-		for (i = base; i <= last; i++) {
-			if (exclude && bitmap_isset(exclude, i))
-				break;
-		}
-
-		rule.first = base;
-		rule.last = i - 1;
-		rule.to = base + delta;
-
-		fwd_rule_conflict_check(&rule, fwd->rules, fwd->count);
-		if (fwd_rule_add(fwd, &rule) < 0)
-			goto fail;
-
-		base = i - 1;
-	}
-	return;
-
-fail:
-	die("Unable to add rule %s",
-	    fwd_rule_fmt(&rule, rulestr, sizeof(rulestr)));
-}
-
-/*
- * for_each_chunk - Step through delimited chunks of a string
- * @p_:		Pointer to start of each chunk (updated)
- * @ep_:	Pointer to end of each chunk (updated)
- * @s_:		String to step through
- * @sep_:	String of all allowed delimiters
- */
-#define for_each_chunk(p_, ep_, s_, sep_)			\
-	for ((p_) = (s_);					\
-	     (ep_) = (p_) + strcspn((p_), (sep_)), *(p_);	\
-	     (p_) = *(ep_) ? (ep_) + 1 : (ep_))
-
-/**
- * conf_ports_spec() - Parse port range(s) specifier
- * @fwd:	Forwarding table to be updated
- * @proto:	Protocol to forward
- * @addr:	Listening address for forwarding
- * @ifname:	Interface name for listening
- * @spec:	Port range(s) specifier
- */
-static void conf_ports_spec(struct fwd_table *fwd, uint8_t proto,
-			    const union inany_addr *addr, const char *ifname,
-			    const char *spec)
-{
-	uint8_t exclude[PORT_BITMAP_SIZE] = { 0 };
-	bool exclude_only = true;
-	const char *p, *ep;
-	uint8_t flags = 0;
-	unsigned i;
-
-	if (!strcmp(spec, "all")) {
-		/* Treat "all" as equivalent to "": all non-ephemeral ports */
-		spec = "";
-	}
-
-	/* Parse excluded ranges and "auto" in the first pass */
-	for_each_chunk(p, ep, spec, ",") {
-		struct port_range xrange;
-
-		if (isdigit(*p)) {
-			/* Include range, parse later */
-			exclude_only = false;
-			continue;
-		}
-
-		if (parse_keyword(p, &p, "auto") == 0) {
-			if (p != ep) /* Garbage after the keyword */
-				goto bad;
-
-			if (!(fwd->caps & FWD_CAP_SCAN)) {
-				die(
-"'auto' port forwarding is only allowed for pasta");
-			}
-
-			flags |= FWD_SCAN;
-			continue;
-		}
-
-		/* Should be an exclude range */
-		if (*p != '~')
-			goto bad;
-		p++;
-
-		if (parse_port_range(p, &p, &xrange))
-			goto bad;
-		if (p != ep) /* Garbage after the range */
-			goto bad;
-
-		for (i = xrange.first; i <= xrange.last; i++)
-			bitmap_set(exclude, i);
-	}
-
-	if (exclude_only) {
-		/* Exclude ephemeral ports */
-		fwd_port_map_ephemeral(exclude);
-
-		conf_ports_range_except(fwd, proto, addr, ifname,
-					1, NUM_PORTS - 1, exclude,
-					1, flags | FWD_WEAK);
-		return;
-	}
-
-	/* Now process base ranges, skipping exclusions */
-	for_each_chunk(p, ep, spec, ",") {
-		struct port_range orig_range, mapped_range;
-
-		if (!isdigit(*p))
-			/* Already parsed */
-			continue;
-
-		if (parse_port_range(p, &p, &orig_range))
-			goto bad;
-
-		if (*p == ':') { /* There's a range to map to as well */
-			if (parse_port_range(p + 1, &p, &mapped_range))
-				goto bad;
-			if ((mapped_range.last - mapped_range.first) !=
-			    (orig_range.last - orig_range.first))
-				goto bad;
-		} else {
-			mapped_range = orig_range;
-		}
-
-		if (p != ep) /* Garbage after the ranges */
-			goto bad;
-
-		if (orig_range.first == 0) {
-			die("Can't forward port 0 included in '%s'", spec);
-		}
-
-		conf_ports_range_except(fwd, proto, addr, ifname,
-					orig_range.first, orig_range.last,
-					exclude,
-					mapped_range.first, flags);
-	}
-
-	return;
-bad:
-	die("Invalid port specifier '%s'", spec);
-}
-
-/**
- * conf_ports() - Parse port configuration options, initialise UDP/TCP sockets
- * @optname:	Short option name, t, T, u, or U
- * @optarg:	Option argument (port specification)
- * @fwd:	Forwarding table to be updated
- */
-static void conf_ports(char optname, const char *optarg, struct fwd_table *fwd)
-{
-	union inany_addr addr_buf = inany_any6, *addr = &addr_buf;
-	char buf[BUFSIZ], *spec, *ifname = NULL;
-	uint8_t proto;
-
-	if (optname == 't' || optname == 'T')
-		proto = IPPROTO_TCP;
-	else if (optname == 'u' || optname == 'U')
-		proto = IPPROTO_UDP;
-	else
-		assert(0);
-
-	if (!strcmp(optarg, "none")) {
-		unsigned i;
-
-		for (i = 0; i < fwd->count; i++) {
-			if (fwd->rules[i].proto == proto) {
-				die("-%c none conflicts with previous options",
-					optname);
-			}
-		}
-		return;
-	}
-
-	if (proto == IPPROTO_TCP && !(fwd->caps & FWD_CAP_TCP))
-		die("TCP port forwarding requested but TCP is disabled");
-	if (proto == IPPROTO_UDP && !(fwd->caps & FWD_CAP_UDP))
-		die("UDP port forwarding requested but UDP is disabled");
-
-	strncpy(buf, optarg, sizeof(buf) - 1);
-
-	if ((spec = strchr(buf, '/'))) {
-		*spec = 0;
-		spec++;
-
-		if (optname != 't' && optname != 'u')
-			die("Listening address not allowed for -%c %s",
-			    optname, optarg);
-
-		if ((ifname = strchr(buf, '%'))) {
-			*ifname = 0;
-			ifname++;
-
-			/* spec is already advanced one past the '/',
-			 * so the length of the given ifname is:
-			 * (spec - ifname - 1)
-			 */
-			if (spec - ifname - 1 >= IFNAMSIZ) {
-				die("Interface name '%s' is too long (max %u)",
-				    ifname, IFNAMSIZ - 1);
-			}
-		}
-
-		if (ifname == buf + 1) {	/* Interface without address */
-			addr = NULL;
-		} else {
-			char *p = buf;
-
-			/* Allow square brackets for IPv4 too for convenience */
-			if (*p == '[' && p[strlen(p) - 1] == ']') {
-				p[strlen(p) - 1] = '\0';
-				p++;
-			}
-
-			if (!inany_pton(p, addr))
-				die("Bad forwarding address '%s'", p);
-		}
-	} else {
-		spec = buf;
-
-		addr = NULL;
-	}
-
-	if (addr) {
-		if (!(fwd->caps & FWD_CAP_IPV4) && inany_v4(addr)) {
-			die("IPv4 is disabled, can't use -%c %s",
-			    optname, optarg);
-		} else if (!(fwd->caps & FWD_CAP_IPV6) && !inany_v4(addr)) {
-			die("IPv6 is disabled, can't use -%c %s",
-			    optname, optarg);
-		}
-	}
-
-	if (optname == 'T' || optname == 'U') {
-		assert(!addr && !ifname);
-
-		if (!(fwd->caps & FWD_CAP_IFNAME)) {
-			warn(
-"SO_BINDTODEVICE unavailable, forwarding only 127.0.0.1 and ::1 for '-%c %s'",
-			     optname, optarg);
-
-			if (fwd->caps & FWD_CAP_IPV4) {
-				conf_ports_spec(fwd, proto,
-						&inany_loopback4, NULL, spec);
-			}
-			if (fwd->caps & FWD_CAP_IPV6) {
-				conf_ports_spec(fwd, proto,
-						&inany_loopback6, NULL, spec);
-			}
-			return;
-		}
-
-		ifname = "lo";
-	}
-
-	if (ifname && !(fwd->caps & FWD_CAP_IFNAME)) {
-		die(
-"Device binding for '-%c %s' unsupported (requires kernel 5.7+)",
-		    optname, optarg);
-	}
-
-	conf_ports_spec(fwd, proto, addr, ifname, spec);
-}
 
 /**
  * add_dns4() - Possibly add the IPv4 address of a DNS resolver to configuration
@@ -689,7 +312,9 @@ static void conf_netns_opt(char *netns, const char *arg)
  * @argv:	Command line arguments
  */
 static void conf_pasta_ns(int *netns_only, char *userns, char *netns,
-			  int optind, int argc, char *argv[])
+			  int optind, int argc,
+/* cppcheck-suppress [constParameter, unmatchedSuppression] */
+			  char *argv[])
 {
 	if (*netns && optind != argc)
 		die("Both --netns and PID or command given");
@@ -922,6 +547,7 @@ static void usage(const char *name, FILE *f, int status)
 		"  --runas UID|UID:GID 	Run as given UID, GID, which can be\n"
 		"    numeric, or login and group names\n"
 		"    default: drop to user \"nobody\"\n"
+		"  -c, --conf-path PATH	Configuration socket path\n"
 		"  -h, --help		Display this help message and exit\n"
 		"  --version		Show version and exit\n");
 
@@ -1160,6 +786,9 @@ static void conf_print(const struct ctx *c)
 	char buf[INANY_ADDRSTRLEN];
 	int i;
 
+	if (c->fd_control_listen >= 0)
+		info("Configuration socket: %s", c->control_path);
+
 	if (c->ifi4 > 0 || c->ifi6 > 0) {
 		char ifn[IFNAMSIZ];
 
@@ -1283,7 +912,8 @@ dns6:
 			dir = "Inbound";
 
 		info("%s forwarding rules (%s):", dir, pif_name(i));
-		fwd_rules_info(c->fwd[i]->rules, c->fwd[i]->count);
+		fwd_rules_dump(info, c->fwd[i]->rules, c->fwd[i]->count,
+			       "    ", "");
 	}
 }
 
@@ -1452,6 +1082,19 @@ static void conf_open_files(struct ctx *c)
 		if (c->pidfile_fd < 0)
 			die_perror("Couldn't open PID file %s", c->pidfile);
 	}
+
+	c->fd_control = -1;
+	if (*c->control_path) {
+		c->fd_control_listen = sock_unix(c->control_path);
+		if (c->fd_control_listen < 0) {
+			die_perror("Couldn't open control socket %s",
+				   c->control_path);
+		}
+		if (fcntl(c->fd_control_listen, F_SETFL, O_NONBLOCK))
+			die_perror("Couldn't set O_NONBLOCK on control socket");
+	} else {
+		c->fd_control_listen = -1;
+	}
 }
 
 /**
@@ -1485,6 +1128,25 @@ static void parse_mac(unsigned char mac[ETH_ALEN], const char *str)
 
 fail:
 	die("Invalid MAC address: %s", str);
+}
+
+/**
+ * conf_sock_listen() - Start listening for connections on configuration socket
+ * @c:		Execution context
+ */
+static void conf_sock_listen(const struct ctx *c)
+{
+	union epoll_ref ref = { .type = EPOLL_TYPE_CONF_LISTEN };
+
+	if (c->fd_control_listen < 0)
+		return;
+
+	if (listen(c->fd_control_listen, 0))
+		die_perror("Couldn't listen on configuration socket");
+
+	ref.fd = c->fd_control_listen;
+	if (epoll_add(c->epollfd, EPOLLIN | EPOLLET, ref))
+		die_perror("Couldn't add configuration socket to epoll");
 }
 
 /**
@@ -1569,9 +1231,10 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"migrate-exit", no_argument,		NULL,		29 },
 		{"migrate-no-linger", no_argument,	NULL,		30 },
 		{"stats", required_argument,		NULL,		31 },
+		{"conf-path",	required_argument,	NULL,		'c' },
 		{ 0 },
 	};
-	const char *optstring = "+dqfel:hs:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
+	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
 	const char *logname = (c->mode == MODE_PASTA) ? "pasta" : "passt";
 	bool opt_t = false, opt_T = false, opt_u = false, opt_U = false;
 	char userns[PATH_MAX] = { 0 }, netns[PATH_MAX] = { 0 };
@@ -1828,6 +1491,13 @@ void conf(struct ctx *c, int argc, char **argv)
 				die("Invalid socket path: %s", optarg);
 
 			c->fd_tap = -1;
+			break;
+		case 'c':
+			ret = snprintf(c->control_path, sizeof(c->control_path),
+				       "%s", optarg);
+			if (ret <= 0 || ret >= (int)sizeof(c->control_path))
+				die("Invalid configuration path: %s", optarg);
+			c->fd_control_listen = c->fd_control = -1;
 			break;
 		case 'F':
 			errno = 0;
@@ -2181,16 +1851,16 @@ void conf(struct ctx *c, int argc, char **argv)
 
 		if (name == 't') {
 			opt_t = true;
-			conf_ports(name, optarg, c->fwd[PIF_HOST]);
+			fwd_rule_parse(name, false, optarg, c->fwd[PIF_HOST]);
 		} else if (name == 'u') {
 			opt_u = true;
-			conf_ports(name, optarg, c->fwd[PIF_HOST]);
+			fwd_rule_parse(name, false, optarg, c->fwd[PIF_HOST]);
 		} else if (name == 'T') {
 			opt_T = true;
-			conf_ports(name, optarg, c->fwd[PIF_SPLICE]);
+			fwd_rule_parse(name, false, optarg, c->fwd[PIF_SPLICE]);
 		} else if (name == 'U') {
 			opt_U = true;
-			conf_ports(name, optarg, c->fwd[PIF_SPLICE]);
+			fwd_rule_parse(name, false, optarg, c->fwd[PIF_SPLICE]);
 		}
 	} while (name != -1);
 
@@ -2242,15 +1912,257 @@ void conf(struct ctx *c, int argc, char **argv)
 
 	if (c->mode == MODE_PASTA) {
 		if (!opt_t)
-			conf_ports('t', "auto", c->fwd[PIF_HOST]);
+			fwd_rule_parse('t', false, "auto", c->fwd[PIF_HOST]);
 		if (!opt_T)
-			conf_ports('T', "auto", c->fwd[PIF_SPLICE]);
+			fwd_rule_parse('T', false, "auto", c->fwd[PIF_SPLICE]);
 		if (!opt_u)
-			conf_ports('u', "auto", c->fwd[PIF_HOST]);
+			fwd_rule_parse('u', false, "auto", c->fwd[PIF_HOST]);
 		if (!opt_U)
-			conf_ports('U', "auto", c->fwd[PIF_SPLICE]);
+			fwd_rule_parse('U', false, "auto", c->fwd[PIF_SPLICE]);
 	}
+
+	conf_sock_listen(c);
 
 	if (!c->quiet)
 		conf_print(c);
+}
+
+static void conf_accept(struct ctx *c);
+
+/**
+ * conf_send_rules() - Send current forwarding rules to config client (pesto)
+ * @c:		Execution context
+ * @fd:		Socket to the client
+ *
+ * Return: 0 on success, -1 on failure
+ *
+ * FIXME: So far only sends pif ids and names
+ */
+static int conf_send_rules(const struct ctx *c, int fd)
+{
+	unsigned pif;
+
+	for (pif = 0; pif < PIF_NUM_TYPES; pif++) {
+		struct fwd_table *fwd = c->fwd[pif];
+		struct pesto_pif_info info = { 0 };
+		unsigned i;
+		int rc;
+
+		if (!fwd)
+			continue;
+
+		assert(pif != PIF_NONE);
+
+		rc = snprintf(info.name, sizeof(info.name), "%s", pif_name(pif));
+		assert(rc >= 0 && (size_t)rc < sizeof(info.name));
+		info.caps = htonl(fwd->caps);
+		info.count = htonl(fwd->count);
+
+		if (write_u8(fd, pif) < 0)
+			return -1;
+		if (write_all_buf(fd, &info, sizeof(info)) < 0)
+			return -1;
+
+		for (i = 0; i < fwd->count; i++) {
+			if (fwd_rule_write(fd, &fwd->rules[i]))
+				return -1;
+		}
+	}
+
+	if (write_u8(fd, PIF_NONE) < 0)
+		return -1;
+
+	return 0;
+}
+
+/**
+ * conf_recv_rules() - Receive forwarding rules from configuration client
+ * @c:		Execution context
+ * @fd:		Socket to the client
+ *
+ * Return: 0 on success, -1 on failure
+ */
+static int conf_recv_rules(const struct ctx *c, int fd)
+{
+	while (1) {
+		struct fwd_table *fwd;
+		struct fwd_rule r;
+		uint32_t count;
+		uint8_t pif;
+		unsigned i;
+
+		if (read_u8(fd, &pif))
+			return -1;
+
+		if (pif == PIF_NONE)
+			break;
+
+		if (pif >= ARRAY_SIZE(c->fwd_pending) ||
+		    !(fwd = c->fwd_pending[pif])) {
+			err("Received rules for non-existent table");
+			return -1;
+		}
+
+		if (read_u32(fd, &count))
+			return -1;
+
+		if (count > MAX_FWD_RULES) {
+			err("Received %"PRIu32" rules (maximum %u)",
+			    count, MAX_FWD_RULES);
+			return -1;
+		}
+
+		for (i = 0; i < count; i++) {
+			if (fwd_rule_read(fd, &r))
+				return -1;
+
+			if (r.ifname[sizeof(r.ifname) - 1]) {
+				err("Interface name was not NULL terminated");
+				return -1;
+			}
+			/* Redundant, to make static checkers happy */
+			r.ifname[sizeof(r.ifname) - 1] = '\0';
+
+			if (fwd_rule_add(fwd, &r) < 0)
+				return -1;
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * conf_close() - Close configuration / control socket and clean up
+ * @c:		Execution context
+ */
+static void conf_close(struct ctx *c)
+{
+	debug("Closing configuration socket");
+	epoll_ctl(c->epollfd, EPOLL_CTL_DEL, c->fd_control, NULL);
+	close(c->fd_control);
+	c->fd_control = -1;
+}
+
+/**
+ * conf_listen_handler() - Handle events on configuration listening socket
+ * @c:		Execution context
+ * @events:	epoll events
+ */
+void conf_listen_handler(struct ctx *c, uint32_t events)
+{
+	if (events != EPOLLIN) {
+		err("Unexpected event 0x%04x on configuration socket", events);
+		return;
+	}
+
+	if (c->fd_control >= 0) {
+		/* Ignore the new connection for now, blocking it until the
+		 * current one finishes.
+		 */
+		return;
+	}
+
+	conf_accept(c);
+}
+
+/**
+ * conf_accept() - Accept a new control connection
+ * @c:		Execution context
+ */
+static void conf_accept(struct ctx *c)
+{
+	struct pesto_hello hello = {
+		.magic = PESTO_SERVER_MAGIC,
+		.version = htonl(PESTO_PROTOCOL_VERSION),
+		.pif_name_size = htonl(PIF_NAME_SIZE),
+		.ifnamsiz = htonl(IFNAMSIZ),
+	};
+	union epoll_ref ref = { .type = EPOLL_TYPE_CONF };
+	struct ucred uc = { 0 };
+	socklen_t len = sizeof(uc);
+	int fd, rc;
+
+retry:
+	fd = accept4(c->fd_control_listen, NULL, NULL, SOCK_CLOEXEC);
+	if (fd < 0) {
+		if (errno != EAGAIN)
+			warn_perror("accept4() on configuration listening socket");
+		return;
+	}
+
+	if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &uc, &len) < 0)
+		warn_perror("Can't get configuration client credentials");
+
+	c->fd_control = ref.fd = fd;
+	rc = epoll_add(c->epollfd, EPOLLIN | EPOLLET, ref);
+	if (rc < 0) {
+		warn_perror("epoll_ctl() on configuration socket");
+		goto fail;
+	}
+
+	rc = write_all_buf(fd, &hello, sizeof(hello));
+	if (rc < 0) {
+		warn_perror("Error writing configuration protocol hello");
+		goto fail;
+	}
+
+	info("Accepted configuration client, PID %i", uc.pid);
+	if (!PESTO_PROTOCOL_VERSION) {
+		warn(
+"Warning: Using experimental unsupported configuration protocol");
+	}
+
+	if (conf_send_rules(c, fd) < 0)
+		goto fail;
+
+	return;
+
+fail:
+	conf_close(c);
+	goto retry;
+}
+
+/**
+ * conf_handler() - Handle events on configuration socket
+ * @c:		Execution context
+ * @events:	epoll events
+ */
+void conf_handler(struct ctx *c, uint32_t events)
+{
+	if (events & EPOLLIN) {
+		unsigned pif;
+
+		/* Clear pending tables */
+		for (pif = 0; pif < PIF_NUM_TYPES; pif++)
+			fwd_rule_clear(c->fwd_pending[pif]);
+
+		/* FIXME: this could block indefinitely if the client doesn't
+		 * write as much as it should
+		 */
+		if (conf_recv_rules(c, c->fd_control) < 0)
+			goto close;
+
+		for (pif = 0; pif < PIF_NUM_TYPES; pif++) {
+			struct fwd_table *fwd = c->fwd_pending[pif];
+
+			if (!fwd)
+				continue;
+
+			info("New forwarding rules for %s:", pif_name(pif));
+			fwd_rules_dump(info, fwd->rules, fwd->count,
+				       "    ", "");
+		}
+
+		fwd_listen_switch(c);
+	}
+
+	if (events & EPOLLHUP) {
+		debug("Configuration client hangup");
+	}
+
+close:
+	conf_close(c);
+
+	/* Check if any other clients are waiting to connect */
+	conf_accept(c);
 }

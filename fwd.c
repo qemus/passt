@@ -34,12 +34,6 @@
 #include "arp.h"
 #include "ndp.h"
 
-/* Ephemeral port range: values from RFC 6335 */
-static in_port_t fwd_ephemeral_min = (1 << 15) + (1 << 14);
-static in_port_t fwd_ephemeral_max = NUM_PORTS - 1;
-
-#define PORT_RANGE_SYSCTL	"/proc/sys/net/ipv4/ip_local_port_range"
-
 #define NEIGH_TABLE_SLOTS    1024
 #define NEIGH_TABLE_SIZE     (NEIGH_TABLE_SLOTS / 2)
 static_assert((NEIGH_TABLE_SLOTS & (NEIGH_TABLE_SLOTS - 1)) == 0,
@@ -86,7 +80,7 @@ static size_t neigh_table_slot(const struct ctx *c,
 	struct siphash_state st = SIPHASH_INIT(c->hash_secret);
 	uint32_t i;
 
-	inany_siphash_feed(&st, key);
+	siphash_feed_inany(&st, key);
 	i = siphash_final(&st, sizeof(*key), 0);
 
 	return ((size_t)i) & (NEIGH_TABLE_SIZE - 1);
@@ -249,76 +243,12 @@ void fwd_neigh_table_init(const struct ctx *c)
 		fwd_neigh_table_update(c, &mga, c->our_tap_mac, true);
 }
 
-/** fwd_probe_ephemeral() - Determine what ports this host considers ephemeral
- *
- * Work out what ports the host thinks are emphemeral and record it for later
- * use by fwd_port_is_ephemeral().  If we're unable to probe, assume the range
- * recommended by RFC 6335.
- */
-void fwd_probe_ephemeral(void)
-{
-	char *line, *tab, *end;
-	struct lineread lr;
-	long min, max;
-	ssize_t len;
-	int fd;
-
-	fd = open(PORT_RANGE_SYSCTL, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) {
-		warn_perror("Unable to open %s", PORT_RANGE_SYSCTL);
-		return;
-	}
-
-	lineread_init(&lr, fd);
-	len = lineread_get(&lr, &line);
-	close(fd);
-
-	if (len < 0)
-		goto parse_err;
-
-	tab = strchr(line, '\t');
-	if (!tab)
-		goto parse_err;
-	*tab = '\0';
-
-	errno = 0;
-	min = strtol(line, &end, 10);
-	if (*end || errno)
-		goto parse_err;
-
-	errno = 0;
-	max = strtol(tab + 1, &end, 10);
-	if (*end || errno)
-		goto parse_err;
-
-	if (min < 0 || min >= (long)NUM_PORTS ||
-	    max < 0 || max >= (long)NUM_PORTS)
-		goto parse_err;
-
-	fwd_ephemeral_min = min;
-	fwd_ephemeral_max = max;
-
-	return;
-
-parse_err:
-	warn("Unable to parse %s", PORT_RANGE_SYSCTL);
-}
-
-/**
- * fwd_port_map_ephemeral() - Mark ephemeral ports in a bitmap
- * @map:	Bitmap to update
- */
-void fwd_port_map_ephemeral(uint8_t *map)
-{
-	unsigned port;
-
-	for (port = fwd_ephemeral_min; port <= fwd_ephemeral_max; port++)
-		bitmap_set(map, port);
-}
-
 /* Forwarding table storage, generally accessed via pointers in struct ctx */
 static struct fwd_table fwd_in;
 static struct fwd_table fwd_out;
+
+static struct fwd_table fwd_in_pending;
+static struct fwd_table fwd_out_pending;
 
 /**
  * fwd_rule_init() - Initialise forwarding tables
@@ -342,62 +272,15 @@ void fwd_rule_init(struct ctx *c)
 		caps |= FWD_CAP_IFNAME;
 
 	fwd_in.caps = fwd_out.caps = caps;
+	fwd_in_pending.caps = fwd_out_pending.caps = caps;
 
 	c->fwd[PIF_HOST] = &fwd_in;
-	if (c->mode == MODE_PASTA)
+	c->fwd_pending[PIF_HOST] = &fwd_in_pending;
+
+	if (c->mode == MODE_PASTA) {
 		c->fwd[PIF_SPLICE] = &fwd_out;
-}
-
-/**
- * fwd_rule_add() - Validate and add a rule to a forwarding table
- * @fwd:	Table to add to
- * @new:	Rule to add
- *
- * Return: 0 on success, negative error code on failure
- */
-int fwd_rule_add(struct fwd_table *fwd, const struct fwd_rule *new)
-{
-	/* Flags which can be set from the caller */
-	const uint8_t allowed_flags = FWD_WEAK | FWD_SCAN | FWD_DUAL_STACK_ANY;
-	unsigned num = (unsigned)new->last - new->first + 1;
-	unsigned port;
-
-	if (new->first > new->last) {
-		warn("Rule has invalid port range %u-%u",
-		     new->first, new->last);
-		return -EINVAL;
+		c->fwd_pending[PIF_SPLICE] = &fwd_out_pending;
 	}
-	if (new->flags & ~allowed_flags) {
-		warn("Rule has invalid flags 0x%hhx",
-		     new->flags & ~allowed_flags);
-		return -EINVAL;
-	}
-	if (new->flags & FWD_DUAL_STACK_ANY &&
-	    !inany_equals(&new->addr, &inany_any6)) {
-		char astr[INANY_ADDRSTRLEN];
-
-		warn("Dual stack rule has non-wildcard address %s",
-		     inany_ntop(&new->addr, astr, sizeof(astr)));
-		return -EINVAL;
-	}
-
-	if (fwd->count >= ARRAY_SIZE(fwd->rules)) {
-		warn("Too many rules (maximum %u)", ARRAY_SIZE(fwd->rules));
-		return -ENOSPC;
-	}
-	if ((fwd->sock_count + num) > ARRAY_SIZE(fwd->socks)) {
-		warn("Rules require too many listening sockets (maximum %u)",
-		     ARRAY_SIZE(fwd->socks));
-		return -ENOSPC;
-	}
-
-	fwd->rulesocks[fwd->count] = &fwd->socks[fwd->sock_count];
-	for (port = new->first; port <= new->last; port++)
-		fwd->rulesocks[fwd->count][port - new->first] = -1;
-
-	fwd->rules[fwd->count++] = *new;
-	fwd->sock_count += num;
-	return 0;
 }
 
 /**
@@ -649,6 +532,40 @@ int fwd_listen_init(const struct ctx *c)
 	}
 
 	return 0;
+}
+
+/**
+ * fwd_listen_switch() - Switch from current to pending rules table
+ * @c:		Execution context
+ */
+void fwd_listen_switch(struct ctx *c)
+{
+	struct fwd_table *tmp[PIF_NUM_TYPES];
+	unsigned i;
+
+	/* Stop listening on the old tables */
+	for (i = 0; i < PIF_NUM_TYPES; i++) {
+		struct fwd_table *fwd = c->fwd[i];
+
+		if (!fwd)
+			continue;
+
+		debug("Flushing %u old %s rules", fwd->count, pif_name(i));
+		fwd_listen_close(fwd);
+		fwd->count = fwd->sock_count = 0;
+	}
+
+	/* Swap active and pending tables */
+	static_assert(sizeof(tmp) == sizeof(c->fwd) &&
+		      sizeof(tmp) == sizeof(c->fwd_pending),
+		      "Temporary has wrong size");
+	memcpy(&tmp, (void *)c->fwd, sizeof(tmp));
+	memcpy((void *)c->fwd, (void *)c->fwd_pending, sizeof(c->fwd));
+	memcpy((void *)c->fwd_pending, &tmp, sizeof(c->fwd_pending));
+
+	/* Start listening on the new tables */
+	if (fwd_listen_init(c) < 0)
+		err("Error switching to new forwarding rules");
 }
 
 /* See enum in kernel's include/net/tcp_states.h */

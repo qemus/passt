@@ -6,6 +6,9 @@
  * PASTA - Pack A Subtle Tap Abstraction
  *  for network namespace/tap device mode
  *
+ * PESTO - Programmable Extensible Socket Translation Orchestrator
+ *  front-end for passt(1) and pasta(1) forwarding configuration
+ *
  * serialise.c - Serialisation of data structures over bytestreams
  *
  * Copyright Red Hat
@@ -118,6 +121,10 @@ int write_all_buf(int fd, const void *buf, size_t len)
 		return write_all_buf(fd, &beval, sizeof(beval));	\
 	}
 
+#define	be8toh(x)	(x)
+#define	htobe8(x)	(x)
+
+SERIALISE_UINT(8)
 SERIALISE_UINT(32)
 
 #undef SERIALISE_UINT

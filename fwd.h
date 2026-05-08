@@ -19,15 +19,8 @@
 #include "fwd_rule.h"
 
 struct flowside;
+struct ctx;
 
-/* Number of ports for both TCP and UDP */
-#define	NUM_PORTS	(1U << 16)
-
-void fwd_probe_ephemeral(void);
-void fwd_port_map_ephemeral(uint8_t *map);
-
-#define FWD_RULE_BITS	8
-#define MAX_FWD_RULES	MAX_FROM_BITS(FWD_RULE_BITS)
 #define FWD_NO_HINT	(-1)
 
 /**
@@ -41,36 +34,6 @@ struct fwd_listen_ref {
 	uint8_t		pif;
 	unsigned	rule :FWD_RULE_BITS;
 };
-
-/* Maximum number of listening sockets (per pif)
- *
- * Rationale: This lets us listen on every port for two addresses and two
- * protocols (which we need for -T auto -U auto without SO_BINDTODEVICE), plus a
- * comfortable number of extras.
- */
-#define MAX_LISTEN_SOCKS	(NUM_PORTS * 5)
-
-/**
- * struct fwd_table - Forwarding state (per initiating pif)
- * @caps:	Forwarding capabilities for this initiating pif
- * @count:	Number of forwarding rules
- * @rules:	Array of forwarding rules
- * @rulesocks:	Parallel array of @rules (@count valid entries) of pointers to
- *		@socks entries giving the start of the corresponding rule's
- *		sockets within the larger array
- * @sock_count:	Number of entries used in @socks (for all rules combined)
- * @socks:	Listening sockets for forwarding
- */
-struct fwd_table {
-	uint32_t caps;
-	unsigned count;
-	struct fwd_rule rules[MAX_FWD_RULES];
-	int *rulesocks[MAX_FWD_RULES];
-	unsigned sock_count;
-	int socks[MAX_LISTEN_SOCKS];
-};
-
-#define PORT_BITMAP_SIZE	DIV_ROUND_UP(NUM_PORTS, 8)
 
 /**
  * struct fwd_scan - Port scanning state for a protocol+direction
@@ -87,7 +50,6 @@ struct fwd_scan {
 #define FWD_PORT_SCAN_INTERVAL		1000	/* ms */
 
 void fwd_rule_init(struct ctx *c);
-int fwd_rule_add(struct fwd_table *fwd, const struct fwd_rule *new);
 const struct fwd_rule *fwd_rule_search(const struct fwd_table *fwd,
 				       const struct flowside *ini,
 				       uint8_t proto, int hint);
@@ -99,6 +61,7 @@ int fwd_listen_sync(const struct ctx *c, uint8_t pif,
 		    const struct fwd_scan *tcp, const struct fwd_scan *udp);
 void fwd_listen_close(const struct fwd_table *fwd);
 int fwd_listen_init(const struct ctx *c);
+void fwd_listen_switch(struct ctx *c);
 
 bool nat_inbound(const struct ctx *c, const union inany_addr *addr,
 		 union inany_addr *translated);

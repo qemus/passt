@@ -6,8 +6,57 @@
 #ifndef LOG_H
 #define LOG_H
 
-#include <stdarg.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#ifdef PESTO
+
+#include <errno.h>
+
+#include "common.h"
+
+extern bool debug_flag;
+
+#define msg(...)							\
+	do {								\
+		FPRINTF(stderr, __VA_ARGS__);				\
+		FPRINTF(stderr, "\n");					\
+	} while (0)
+
+#define msg_perror(...)							\
+	do {								\
+		int errno_ = errno;					\
+		FPRINTF(stderr, __VA_ARGS__);				\
+		FPRINTF(stderr, ": %s\n", strerror_(errno_));		\
+	} while (0)
+
+#define die(...)							\
+	do {								\
+		msg(__VA_ARGS__);					\
+		exit(EXIT_FAILURE);					\
+	} while (0)
+
+#define die_perror(...)							\
+	do {								\
+		msg_perror(__VA_ARGS__);				\
+		exit(EXIT_FAILURE);					\
+	} while (0)
+
+#define warn(...)		msg(__VA_ARGS__)
+#define warn_perror(...)	msg_perror(__VA_ARGS__)
+#define info(...)		msg(__VA_ARGS__)
+#define info_perror(...)	msg_perror(__VA_ARGS__)
+
+#define debug(...)							\
+	do {								\
+		if (debug_flag)						\
+			msg(__VA_ARGS__);				\
+	} while (0)
+
+#else /* !PESTO */
+
+#include <stdarg.h>
 #include <stddef.h>
 #include <syslog.h>
 
@@ -108,5 +157,7 @@ void trace_init(int enable);
 void __openlog(const char *ident, int option, int facility);
 void logfile_init(const char *name, const char *path, size_t size);
 void __setlogmask(int mask);
+
+#endif /* !PESTO */
 
 #endif /* LOG_H */

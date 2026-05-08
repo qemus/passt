@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# PESTO - Programmable Extensible Socket Translation Orchestrator
+#  front-end for passt(1) and pasta(1) forwarding configuration
+#
+# contrib/selinux/pesto.te - SELinux: Type Enforcement for pesto
+#
+# Copyright (c) 2026 Red Hat GmbH
+# Author: Stefano Brivio <sbrivio@redhat.com>
+
+policy_module(pesto, 0.1)
+
+require {
+	type unconfined_t;
+	type passt_t;
+	type pasta_t;
+	role unconfined_r;
+	class process transition;
+
+	class file { read execute execute_no_trans entrypoint open map };
+	class capability { dac_override dac_read_search };
+	class chr_file { append open getattr read write ioctl };
+
+	type net_conf_t;
+	type proc_net_t;
+	type sysctl_net_t;
+
+	class unix_stream_socket { create connect sendto };
+	class sock_file { read write };
+
+	type console_device_t;
+	type user_devpts_t;
+	type user_tmp_t;
+	type tmp_t;
+
+	# Workaround: pesto needs to needs to access socket files
+	# that passt, started by libvirt, might create under different
+	# labels, depending on whether passt is started as root or not.
+	#
+	# However, libvirt doesn't maintain its own policy, which makes
+	# updates particularly complicated. To avoid breakage in the short
+	# term, deal with that in passt's own policy.
+	type qemu_var_run_t;
+	type virt_var_run_t;
+}
+
+type pesto_t;
+domain_type(pesto_t);
+type pesto_exec_t;
+corecmd_executable_file(pesto_exec_t);
+
+role unconfined_r types pesto_t;
+
+allow pesto_t pesto_exec_t:file { read execute execute_no_trans entrypoint open map };
+type_transition unconfined_t pesto_exec_t:process pesto_t;
+allow unconfined_t pesto_t:process transition;
+
+allow pesto_t self:capability { dac_override dac_read_search };
+
+allow pesto_t proc_net_t:file read;
+kernel_search_network_sysctl(pesto_t)
+allow pesto_t sysctl_net_t:dir search;
+allow pesto_t sysctl_net_t:file { open read };
+
+allow pesto_t console_device_t:chr_file { append open getattr read write ioctl };
+allow pesto_t user_devpts_t:chr_file { append open getattr read write ioctl };
+
+allow pesto_t unconfined_t:unix_stream_socket { connectto read write };
+allow pesto_t passt_t:unix_stream_socket { connectto read write };
+allow pesto_t pasta_t:unix_stream_socket { connectto read write };
+allow pesto_t user_tmp_t:unix_stream_socket { connectto read write };
+
+allow pesto_t user_tmp_t:dir { getattr read search watch };
+
+allow pesto_t unconfined_t:sock_file { getattr read write };
+allow pesto_t passt_t:sock_file { getattr read write };
+allow pesto_t pasta_t:sock_file { getattr read write };
+allow pesto_t user_tmp_t:sock_file { getattr read write };
+allow pesto_t tmp_t:sock_file { getattr read write };
+
+# Workaround: pesto needs to needs to access socket files
+# that passt, started by libvirt, might create under different
+# labels, depending on whether passt is started as root or not.
+#
+# However, libvirt doesn't maintain its own policy, which makes
+# updates particularly complicated. To avoid breakage in the short
+# term, deal with that in passt's own policy.
+allow pesto_t qemu_var_run_t:unix_stream_socket { connectto read write };
+allow pesto_t virt_var_run_t:unix_stream_socket { connectto read write };
+
+allow pesto_t qemu_var_run_t:dir { getattr read search watch };
+allow pesto_t virt_var_run_t:dir { getattr read search watch };
+
+allow pesto_t qemu_var_run_t:sock_file { getattr read write };
+allow pesto_t virt_var_run_t:sock_file { getattr read write };

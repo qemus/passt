@@ -17,7 +17,7 @@
 #include "inany.h"
 #include "epoll_ctl.h"
 
-const char *pif_type_str[] = {
+const char pif_type_str[][PIF_NAME_SIZE] = {
 	[PIF_NONE]		= "<none>",
 	[PIF_HOST]		= "HOST",
 	[PIF_TAP]		= "TAP",

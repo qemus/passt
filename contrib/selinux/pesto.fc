@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# PESTO - Programmable Extensible Socket Translation Orchestrator
+#  front-end for passt(1) and pasta(1) forwarding configuration
+#
+# contrib/selinux/pesto.fc - SELinux: File Context for pesto
+#
+# Copyright (c) 2026 Red Hat GmbH
+# Author: Stefano Brivio <sbrivio@redhat.com>
+
+/usr/bin/pesto			system_u:object_r:pesto_exec_t:s0

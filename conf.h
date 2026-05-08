@@ -8,5 +8,7 @@
 
 enum passt_modes conf_mode(int argc, char *argv[]);
 void conf(struct ctx *c, int argc, char **argv);
+void conf_listen_handler(struct ctx *c, uint32_t events);
+void conf_handler(struct ctx *c, uint32_t events);
 
 #endif /* CONF_H */

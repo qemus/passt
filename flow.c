@@ -680,8 +680,8 @@ static uint64_t flow_hash(const struct ctx *c, uint8_t proto, uint8_t pif,
 {
 	struct siphash_state state = SIPHASH_INIT(c->hash_secret);
 
-	inany_siphash_feed(&state, &side->oaddr);
-	inany_siphash_feed(&state, &side->eaddr);
+	siphash_feed_inany(&state, &side->oaddr);
+	siphash_feed_inany(&state, &side->eaddr);
 
 	return siphash_final(&state, 38, (uint64_t)proto << 40 |
 			     (uint64_t)pif << 32 |

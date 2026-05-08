@@ -10,12 +10,12 @@
 #define INANY_H
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 
+#include "common.h"
 #include "ip.h"
-#include "siphash.h"
-
-struct siphash_state;
 
 /** union inany_addr - Represents either an IPv4 or IPv6 address
  * @a6:			Address as an IPv6 address, may be IPv4-mapped
@@ -297,17 +297,6 @@ static inline int inany_from_sockaddr(union inany_addr *dst, in_port_t *port,
 	}
 
 	return -1;
-}
-
-/** inany_siphash_feed- Fold IPv[46] address into an in-progress siphash
- * @state:	siphash state
- * @aa:		inany to hash
- */
-static inline void inany_siphash_feed(struct siphash_state *state,
-				      const union inany_addr *aa)
-{
-	siphash_feed(state, (uint64_t)aa->u32[0] << 32 | aa->u32[1]);
-	siphash_feed(state, (uint64_t)aa->u32[2] << 32 | aa->u32[3]);
 }
 
 #define INANY_ADDRSTRLEN	MAX(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)
