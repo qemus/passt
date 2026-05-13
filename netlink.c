@@ -170,7 +170,7 @@ static int nl_status(const struct nlmsghdr *nh, ssize_t n, uint32_t seq)
 		return 0;
 	}
 	if (nh->nlmsg_type == NLMSG_ERROR) {
-		struct nlmsgerr *errmsg = (struct nlmsgerr *)NLMSG_DATA(nh);
+		const struct nlmsgerr *errmsg = NLMSG_DATA(nh);
 		return errmsg->error;
 	}
 
@@ -224,6 +224,7 @@ static struct nlmsghdr *nl_next(int s, char *buf, struct nlmsghdr *nh, ssize_t *
 	nl_foreach((nh), (status), (s), (buf), (seq))			\
 		if ((nh)->nlmsg_type != (type)) {			\
 			warn("netlink: Unexpected message type");	\
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
 		} else
 
 /**

@@ -51,6 +51,8 @@ static int packet_check_range(const struct pool *p, const char *ptr, size_t len,
 {
 	struct vdev_memory *memory;
 
+	assert(p->buf);
+
 	if (len > PACKET_MAX_LEN) {
 		debug("packet range length %zu (max %zu), %s:%i",
 		      len, PACKET_MAX_LEN, func, line);

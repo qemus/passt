@@ -67,9 +67,11 @@ static_assert(ARRAY_SIZE(flow_epoll) == FLOW_NUM_TYPES,
 
 #define foreach_established_tcp_flow(flow)				\
 	flow_foreach_of_type((flow), FLOW_TCP)				\
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
 		if (!tcp_flow_is_established(&(flow)->tcp))		\
 			/* NOLINTNEXTLINE(bugprone-branch-clone) */	\
 			continue;					\
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
 		else
 
 /* Global Flow Table */

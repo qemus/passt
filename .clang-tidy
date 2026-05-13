@@ -86,6 +86,17 @@ Checks:
     # #if directives.  Don't insist on #ifdef instead.
     - "-readability-use-concise-preprocessor-directives"
 
+    # clang-tidy, at least version 22.1.4 seems to generate a heap of
+    # false positives for this warning, asking us to make things
+    # static that are already used in other modules.
+    - "-misc-use-internal-linkage"
+
+    # Warning about bool/int conversions could sometimes be useful.
+    # Unfortunately (as of clang-tidy 22.1.4) it warns in some really
+    # dumb situations, like not allowing !, && etc. on bool inputs to
+    # be treated directly as a bool.
+    - "-readability-implicit-bool-conversion"
+
 WarningsAsErrors: "*"
 HeaderFileExtensions:
     - h

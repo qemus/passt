@@ -85,7 +85,7 @@ static int logtime_fmt(char *buf, size_t size, const struct timespec *ts)
 }
 
 /* Prefixes for log file messages, indexed by priority */
-const char *logfile_prefix[] = {
+static const char *logfile_prefix[] = {
 	NULL, NULL, NULL,	/* Unused: LOG_EMERG, LOG_ALERT, LOG_CRIT */
 	"ERROR:   ",
 	"WARNING: ",

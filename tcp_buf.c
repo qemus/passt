@@ -45,8 +45,8 @@ static struct ethhdr		tcp_eth_hdr[TCP_FRAMES_MEM];
 static struct tap_hdr		tcp_payload_tap_hdr[TCP_FRAMES_MEM];
 
 /* IP headers for IPv4 and IPv6 */
-struct iphdr		tcp4_payload_ip[TCP_FRAMES_MEM];
-struct ipv6hdr		tcp6_payload_ip[TCP_FRAMES_MEM];
+static struct iphdr		tcp4_payload_ip[TCP_FRAMES_MEM];
+static struct ipv6hdr		tcp6_payload_ip[TCP_FRAMES_MEM];
 
 /* TCP segments with payload for IPv4 and IPv6 frames */
 static struct tcp_payload_t	tcp_payload[TCP_FRAMES_MEM];

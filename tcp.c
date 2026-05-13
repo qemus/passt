@@ -370,8 +370,8 @@ enum {
  */
 #define TCP_MIGRATE_SND_QUEUE_MAX	(64 << 20)
 #define TCP_MIGRATE_RCV_QUEUE_MAX	(64 << 20)
-uint8_t tcp_migrate_snd_queue		[TCP_MIGRATE_SND_QUEUE_MAX];
-uint8_t tcp_migrate_rcv_queue		[TCP_MIGRATE_RCV_QUEUE_MAX];
+static uint8_t tcp_migrate_snd_queue	[TCP_MIGRATE_SND_QUEUE_MAX];
+static uint8_t tcp_migrate_rcv_queue	[TCP_MIGRATE_RCV_QUEUE_MAX];
 
 #define TCP_MIGRATE_RESTORE_CHUNK_MIN	1024 /* Try smaller when above this */
 
@@ -420,7 +420,7 @@ char		tcp_buf_discard		[BUF_DISCARD_SIZE];
 bool peek_offset_cap;
 
 /* Size of data returned by TCP_INFO getsockopt() */
-socklen_t tcp_info_size;
+static socklen_t tcp_info_size;
 
 #define tcp_info_cap(f_)						\
 	((offsetof(struct tcp_info_linux, tcpi_##f_) +			\

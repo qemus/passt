@@ -67,7 +67,7 @@
 				{{{ 0xfe, 0x80, 0, 0, 0, 0, 0, 0,	\
 				       0, 0, 0, 0, 0, 0, 0, 0x01 }}}
 
-const char *pasta_default_ifn = "tap0";
+static const char *pasta_default_ifn = "tap0";
 
 /**
  * add_dns4() - Possibly add the IPv4 address of a DNS resolver to configuration
@@ -925,7 +925,8 @@ dns6:
  *
  * Return: 0 on success, negative error code on failure
  */
-static int conf_runas(const char *opt, unsigned int *uid, unsigned int *gid)
+/* cppcheck-suppress [constParameterPointer,unmatchedSuppression] */
+static int conf_runas(char *opt, unsigned int *uid, unsigned int *gid)
 {
 	const char *uopt, *gopt = NULL;
 	char *sep = strchr(opt, ':');
@@ -977,7 +978,7 @@ static int conf_runas(const char *opt, unsigned int *uid, unsigned int *gid)
  * @uid:	User ID, set on success
  * @gid:	Group ID, set on success
  */
-static void conf_ugid(const char *runas, uid_t *uid, gid_t *gid)
+static void conf_ugid(char *runas, uid_t *uid, gid_t *gid)
 {
 	/* If user has specified --runas, that takes precedence... */
 	if (runas) {
@@ -1247,7 +1248,7 @@ void conf(struct ctx *c, int argc, char **argv)
 	uint8_t prefix_len_from_opt = 0;
 	unsigned int ifi4 = 0, ifi6 = 0;
 	const char *logfile = NULL;
-	const char *runas = NULL;
+	char *runas = NULL;
 	size_t logsize = 0;
 	long fd_tap_opt;
 	int name, ret;

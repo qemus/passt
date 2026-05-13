@@ -630,9 +630,9 @@ static void vu_log_queue_fill(const struct vu_dev *vdev, struct vu_virtq *vq,
 {
 	struct vring_desc desc_buf[VIRTQUEUE_MAX_SIZE];
 	struct vring_desc *desc = vq->vring.desc;
-	unsigned int max, min;
 	unsigned num_bufs = 0;
 	uint64_t read_len;
+	unsigned int max;
 
 	if (!vdev->log_table || !len || !vu_has_feature(vdev, VHOST_F_LOG_ALL))
 		return;
@@ -672,7 +672,7 @@ static void vu_log_queue_fill(const struct vu_dev *vdev, struct vu_virtq *vq,
 			die("Looped descriptor");
 
 		if (le16toh(desc[index].flags) & VRING_DESC_F_WRITE) {
-			min = MIN(le32toh(desc[index].len), len);
+			unsigned min = MIN(le32toh(desc[index].len), len);
 			vu_log_write(vdev, le64toh(desc[index].addr), min);
 			len -= min;
 		}

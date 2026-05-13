@@ -599,7 +599,8 @@ static void procfs_scan_listen(int fd, unsigned int lstate, uint8_t *map)
 	lineread_init(&lr, fd);
 	lineread_get(&lr, &line); /* throw away header */
 	while (lineread_get(&lr, &line) > 0) {
-		/* NOLINTNEXTLINE(cert-err34-c): != 2 if conversion fails */
+		/* != 2 if conversion fails */
+		/* NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion,cert-err34-c) */
 		if (sscanf(line, "%*u: %*x:%lx %*x:%*x %x", &port, &state) != 2)
 			continue;
 

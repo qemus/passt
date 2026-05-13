@@ -67,8 +67,10 @@ extern union flow flowtab[];
  */
 #define flow_foreach(flow)						\
 	flow_foreach_slot((flow))					\
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
 		if ((flow)->f.state == FLOW_STATE_FREE)			\
 			(flow) += (flow)->free.n - 1;			\
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
 		else if ((flow)->f.state != FLOW_STATE_ACTIVE) {	\
 			flow_err((flow), "Bad flow state during traversal"); \
 			continue;					\
@@ -81,10 +83,12 @@ extern union flow flowtab[];
  */
 #define flow_foreach_of_type(flow, type_)				\
 	flow_foreach((flow))						\
-	if ((flow)->f.type != (type_))					\
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
+		if ((flow)->f.type != (type_))				\
 			/* NOLINTNEXTLINE(bugprone-branch-clone) */	\
 			continue;					\
-		else
+		/* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */\
+		else							\
 
 
 /** flow_idx() - Index of flow from common structure
