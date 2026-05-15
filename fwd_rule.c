@@ -650,8 +650,9 @@ bad:
 void fwd_rule_parse(char optname, bool del, const char *optarg,
 		    struct fwd_table *fwd)
 {
-	union inany_addr addr_buf = inany_any6, *addr = &addr_buf;
 	char buf[BUFSIZ], *spec, *ifname = NULL;
+	union inany_addr addr_buf = inany_any6;
+	const union inany_addr *addr = &addr_buf;
 	uint8_t proto;
 
 	if (optname == 't' || optname == 'T')
@@ -708,7 +709,9 @@ void fwd_rule_parse(char optname, bool del, const char *optarg,
 				p++;
 			}
 
-			if (!inany_pton(p, addr))
+			if (strcmp(p, "*") == 0)
+				addr = NULL;
+			else if (!inany_pton(p, &addr_buf))
 				die("Bad forwarding address '%s'", p);
 		}
 	} else {
@@ -740,6 +743,12 @@ void fwd_rule_parse(char optname, bool del, const char *optarg,
 
 		ifname = "lo";
 	}
+
+	/* No need for dual stack if we only have one IP version */
+	if (!addr && !(fwd->caps & FWD_CAP_IPV4))
+		addr = &inany_any6;
+	else if (!addr && !(fwd->caps & FWD_CAP_IPV6))
+		addr = &inany_any4;
 
 	if (ifname && !(fwd->caps & FWD_CAP_IFNAME)) {
 		die(
