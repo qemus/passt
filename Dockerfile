@@ -24,8 +24,6 @@ RUN set -eu && \
 
 # Override isolation code
 COPY ./isolation.shim /src/isolation.c
-# Temp: Apply dual stack patch for bug 205
-COPY ./fwd_rule.c /src/
 
 WORKDIR /src
 
