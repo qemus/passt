@@ -68,10 +68,27 @@ def test_make(target: str, expected_files: list[str]) -> None:
             assert not p.exists(), f"{p} existed after make clean"
 
 
-exeter.register('make_passt', test_make, 'passt', ['passt'])
-exeter.register('make_pasta', test_make, 'pasta', ['pasta'])
-exeter.register('make_qrap', test_make, 'qrap', ['qrap'])
-exeter.register('make_all', test_make, 'all', ['passt', 'pasta', 'qrap'])
+BINARIES = ['passt', 'pasta', 'qrap', 'passt-repair', 'pesto']
+
+
+for bin in BINARIES:
+    exeter.register(f'make_{bin.replace('-', '_')}', test_make, bin, [bin])
+
+exeter.register('make_all', test_make, 'all', BINARIES)
+
+
+@exeter.test
+def test_ndebug() -> None:
+    """Test build with -NDEBUG
+
+    Tests that we can build all binaries with -DNDEBUG (warnings are
+    expected, though).  Doesn't test that they actually work.
+    """
+
+    with clone_sources():
+        sh('make all CPPFLAGS="-DNDEBUG" CFLAGS="-w"')
+        for b in BINARIES:
+            assert Path(b).exists(), f"{b} wasn't made"
 
 
 @exeter.test

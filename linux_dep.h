@@ -145,7 +145,7 @@ struct tcp_info_linux {
 #endif
 
 __attribute__ ((weak))
-/* cppcheck-suppress [funcArgNamesDifferent,unmatchedSuppression] */
+/* cppcheck-suppress [funcArgNamesDifferent,unusedFunction,unmatchedSuppression] */
 int close_range(unsigned int first, unsigned int last, int flags) {
 	return syscall(SYS_close_range, first, last, flags);
 }

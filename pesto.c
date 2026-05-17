@@ -410,7 +410,6 @@ int main(int argc, char **argv)
 		    s_version, PESTO_PROTOCOL_VERSION);
 	}
 
-	/* cppcheck-suppress knownConditionTrueFalse */
 	if (!s_version) {
 		if (PESTO_PROTOCOL_VERSION)
 			die("Unsupported experimental server protocol");

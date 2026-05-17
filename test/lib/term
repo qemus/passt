@@ -198,7 +198,7 @@ pane_run() {
 # pane_wait() - Wait for command to be done in given pane name
 # $1:	Pane name
 pane_wait() {
-	__lc="$(echo "${1}" | tr [A-Z] [a-z])"
+	__lc="$(echo "${1}" | tr '[A-Z]' '[a-z]')"
 	sleep 0.01 || sleep 1
 
 	__done=0
@@ -213,7 +213,7 @@ pane_wait() {
 # pane_parse() - Print last line, @EMPTY@ if command had no output
 # $1:	Pane name
 pane_parse() {
-	__pane_lc="$(echo "${1}" | tr [A-Z] [a-z])"
+	__pane_lc="$(echo "${1}" | tr '[A-Z]' '[a-z]')"
 
 	__buf="$(tail -n2 ${LOGDIR}/pane_${__pane_lc}.log | head -n1 | sed 's/^[^\r]*\r\([^\r]\)/\1/;s/[]][^]*[\]//g' | tr -d '\r\n')"
 
@@ -267,7 +267,7 @@ pane_or_context_run() {
 		# Redirect stdin to stop ssh from eating the test instructions file we have on stdin
 		context_run "${__name}" "$@" >/dev/null 2>&1 < /dev/null
 	else
-		__uc="$(echo "${__name}" | tr [a-z] [A-Z])"
+		__uc="$(echo "${__name}" | tr '[a-z]' '[A-Z]')"
 		pane_run "${__uc}" "$@"
 		pane_status "${__uc}"
 	fi
@@ -283,7 +283,7 @@ pane_or_context_run_bg() {
 		# Redirect stdin to stop ssh from eating the test instructions file we have on stdin
 		context_run_bg "${__name}" "$@" >/dev/null 2>&1 < /dev/null
 	else
-		__uc="$(echo "${__name}" | tr [a-z] [A-Z])"
+		__uc="$(echo "${__name}" | tr '[a-z]' '[A-Z]')"
 		pane_run "${__uc}" "$@"
 	fi
 }
@@ -303,7 +303,7 @@ pane_or_context_output() {
 			echo "${__output}"
 		fi
 	else
-		__uc="$(echo "${__name}" | tr [a-z] [A-Z])"
+		__uc="$(echo "${__name}" | tr '[a-z]' '[A-Z]')"
 		pane_run "${__uc}" "$@"
 		pane_wait "${__uc}"
 		pane_parse "${__uc}"
@@ -318,7 +318,7 @@ pane_or_context_wait() {
 	if context_exists "${__name}"; then
 		context_wait "${__name}"
 	else
-		__uc="$(echo "${__name}" | tr [a-z] [A-Z])"
+		__uc="$(echo "${__name}" | tr '[a-z]' '[A-Z]')"
 		pane_wait "${__uc}"
 	fi
 }

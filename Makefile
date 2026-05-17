@@ -30,12 +30,17 @@ ifeq ($(shell $(CC) -O2 -dM -E - < /dev/null 2>&1 | grep ' _FORTIFY_SOURCE ' > /
 FORTIFY_FLAG := -D_FORTIFY_SOURCE=2
 endif
 
-FLAGS := -Wall -Wextra -Wno-format-zero-length -Wformat-security
-FLAGS += -pedantic -std=c11 -D_XOPEN_SOURCE=700 -D_GNU_SOURCE
-FLAGS +=  $(FORTIFY_FLAG) -O2 -pie -fPIE
-FLAGS += -DPAGE_SIZE=$(shell getconf PAGE_SIZE)
-FLAGS += -DVERSION=\"$(VERSION)\"
-FLAGS += -DDUAL_STACK_SOCKETS=$(DUAL_STACK_SOCKETS)
+# Mandatory preprocessor flags that won't be overridden with $(CPPFLAGS)
+# FIXME: Could some of these be default, rather than required?
+BASE_CPPFLAGS := -D_XOPEN_SOURCE=700 -D_GNU_SOURCE $(FORTIFY_FLAG)
+BASE_CPPFLAGS += -DPAGE_SIZE=$(shell getconf PAGE_SIZE)
+BASE_CPPFLAGS += -DVERSION=\"$(VERSION)\"
+BASE_CPPFLAGS += -DDUAL_STACK_SOCKETS=$(DUAL_STACK_SOCKETS)
+
+# Mandatory compiler flags that won't be overridden with $(CFLAGS)
+# FIXME: Could some of these be default, rather than required?
+BASE_CFLAGS := -std=c11 -pie -fPIE -O2
+BASE_CFLAGS += -pedantic -Wall -Wextra -Wno-format-zero-length -Wformat-security
 
 PASST_SRCS = arch.c arp.c bitmap.c checksum.c conf.c dhcp.c dhcpv6.c \
 	epoll_ctl.c flow.c fwd.c fwd_rule.c icmp.c igmp.c inany.c iov.c ip.c \
@@ -50,22 +55,23 @@ SRCS = $(PASST_SRCS) $(QRAP_SRCS) $(PASST_REPAIR_SRCS) $(PESTO_SRCS)
 
 MANPAGES = passt.1 pasta.1 pesto.1 qrap.1 passt-repair.1
 
-PASST_HEADERS = arch.h arp.h bitmap.h checksum.h common.h conf.h dhcp.h \
-	dhcpv6.h epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h \
-	icmp_flow.h inany.h iov.h ip.h isolation.h lineread.h log.h migrate.h \
-	ndp.h netlink.h packet.h passt.h pasta.h pcap.h pesto.h pif.h repair.h \
-	serialise.h siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h \
-	tcp_splice.h tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h \
-	vhost_user.h virtio.h vu_common.h
-HEADERS = $(PASST_HEADERS) seccomp.h
+PASST_HEADERS = arch.h arp.h bitmap.h checksum.h conf.h dhcp.h dhcpv6.h \
+	epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h icmp_flow.h \
+	inany.h iov.h ip.h isolation.h lineread.h log.h migrate.h ndp.h \
+	netlink.h packet.h passt.h pasta.h pcap.h pif.h repair.h serialise.h \
+	siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h tcp_splice.h \
+	tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h vhost_user.h \
+	virtio.h vu_common.h
+QRAP_HEADERS = arp.h ip.h passt.h util.h
+PASST_REPAIR_HEADERS = linux_dep.h
 
 C := \#include <sys/random.h>\nint main(){int a=getrandom(0, 0, 0);}
 ifeq ($(shell printf "$(C)" | $(CC) -S -xc - -o - >/dev/null 2>&1; echo $$?),0)
-	FLAGS += -DHAS_GETRANDOM
+	BASE_CPPFLAGS += -DHAS_GETRANDOM
 endif
 
 ifeq ($(shell :|$(CC) -fstack-protector-strong -S -xc - -o - >/dev/null 2>&1; echo $$?),0)
-	FLAGS += -fstack-protector-strong
+	BASE_CFLAGS += -fstack-protector-strong
 endif
 
 prefix		?= /usr/local
@@ -76,53 +82,56 @@ docdir		?= $(datarootdir)/doc/passt
 mandir		?= $(datarootdir)/man
 man1dir		?= $(mandir)/man1
 
+BASEBIN := passt qrap passt-repair pesto
 ifeq ($(TARGET_ARCH),x86_64)
-BIN := passt passt.avx2 pasta pasta.avx2 qrap passt-repair pesto
-else
-BIN := passt pasta qrap passt-repair pesto
+BASEBIN += passt.avx2
+endif
+
+BIN = $(BASEBIN) pasta
+ifeq ($(TARGET_ARCH),x86_64)
+BIN += pasta.avx2
 endif
 
 all: $(BIN) $(MANPAGES) docs
 
-static: FLAGS += -static -DGLIBC_NO_STATIC_NSS
+static: BASE_CPPFLAGS += -DGLIBC_NO_STATIC_NSS
+static: BASE_CFLAGS += -static
 static: clean all
 
 seccomp.h: seccomp.sh $(PASST_SRCS) $(PASST_HEADERS)
 	@ EXTRA_SYSCALLS="$(EXTRA_SYSCALLS)" ARCH="$(TARGET_ARCH)" CC="$(CC)" ./seccomp.sh seccomp.h $(PASST_SRCS) $(PASST_HEADERS)
 
-seccomp_repair.h: seccomp.sh $(PASST_REPAIR_SRCS)
+seccomp_repair.h: seccomp.sh $(PASST_REPAIR_SRCS) $(PASST_REPAIR_HEADERS)
 	@ ARCH="$(TARGET_ARCH)" CC="$(CC)" ./seccomp.sh seccomp_repair.h $(PASST_REPAIR_SRCS)
 
 seccomp_pesto.h: seccomp.sh $(PESTO_SRCS)
 	@ ARCH="$(TARGET_ARCH)" CC="$(CC)" ./seccomp.sh seccomp_pesto.h $(PESTO_SRCS)
 
-passt: $(PASST_SRCS) $(HEADERS)
-	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) $(PASST_SRCS) -o passt $(LDFLAGS)
+$(BASEBIN): %:
+	$(CC) $(BASE_CPPFLAGS) $(CPPFLAGS) $(BASE_CFLAGS) $(CFLAGS) $(LDFLAGS) $(filter %.c,$^) -o $@
 
-passt.avx2: FLAGS += -Ofast -mavx2 -ftree-vectorize -funroll-loops
-passt.avx2: $(PASST_SRCS) $(HEADERS)
-	$(CC) $(filter-out -O2,$(FLAGS)) $(CFLAGS) $(CPPFLAGS) \
-		$(PASST_SRCS) -o passt.avx2 $(LDFLAGS)
+passt: $(PASST_SRCS) $(PASST_HEADERS) seccomp.h
 
-passt.avx2: passt
+passt.avx2: BASE_CFLAGS += -Ofast -mavx2 -ftree-vectorize -funroll-loops
+passt.avx2: $(PASST_SRCS) $(PASST_HEADERS) seccomp.h
 
 pasta.avx2 pasta.1 pasta: pasta%: passt%
 	ln -sf $< $@
 
-qrap: $(QRAP_SRCS) passt.h
-	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) -DARCH=\"$(TARGET_ARCH)\" $(QRAP_SRCS) -o qrap $(LDFLAGS)
+qrap: BASE_CPPFLAGS += -DARCH=\"$(TARGET_ARCH)\"
+qrap: $(QRAP_SRCS) $(QRAP_HEADERS)
 
-passt-repair: $(PASST_REPAIR_SRCS) seccomp_repair.h
-	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) $(PASST_REPAIR_SRCS) -o passt-repair $(LDFLAGS)
+passt-repair: $(PASST_REPAIR_SRCS) $(PASST_REPAIR_HEADERS) seccomp_repair.h
 
+pesto: BASE_CPPFLAGS += -DPESTO
 pesto: $(PESTO_SRCS) $(PESTO_HEADERS) seccomp_pesto.h
-	$(CC) $(FLAGS) $(CFLAGS) $(CPPFLAGS) -DPESTO $(PESTO_SRCS) -o pesto $(LDFLAGS)
 
 valgrind: EXTRA_SYSCALLS += rt_sigprocmask rt_sigtimedwait rt_sigaction	\
 			    rt_sigreturn getpid gettid kill clock_gettime \
 			    mmap|mmap2 munmap open unlink gettimeofday futex \
 			    statx readlink
-valgrind: FLAGS += -g -DVALGRIND
+valgrind: BASE_CPPFLAGS += -DVALGRIND
+valgrind: BASE_CFLAGS += -g
 valgrind: all
 
 .PHONY: clean
@@ -181,21 +190,49 @@ docs: README.md
 		done < README.md;					\
 	) > README.plain.md
 
-clang-tidy: $(PASST_SRCS)
-	clang-tidy $^ -- $(filter-out -pie,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) \
-	           -DCLANG_TIDY_58992
+CLANG_TIDY = clang-tidy
+CLANG_TIDY_FLAGS = -DCLANG_TIDY_58992
 
-cppcheck: $(PASST_SRCS) $(HEADERS)
-	if cppcheck --check-level=exhaustive /dev/null > /dev/null 2>&1; then \
-		CPPCHECK_EXHAUSTIVE="--check-level=exhaustive";		\
-	else								\
-		CPPCHECK_EXHAUSTIVE=;					\
-	fi;								\
-	cppcheck --std=c11 --error-exitcode=1 --enable=all --force	\
+clang-tidy: passt.clang-tidy passt-repair.clang-tidy pesto.clang-tidy
+
+.PHONY: %.clang-tidy
+%.clang-tidy:
+	$(CLANG_TIDY) $(filter %.c,$^) -- $(BASE_CPPFLAGS) $(CPPFLAGS) $(CLANG_TIDY_FLAGS)
+
+passt.clang-tidy: $(PASST_SRCS) $(PASST_HEADERS) seccomp.h
+passt-repair.clang-tidy: $(PASST_REPAIR_SRCS) $(PASST_REPAIR_HEADERS) seccomp_repair.h
+pesto.clang-tidy: $(PESTO_SRCS) $(PESTO_HEADERS) seccomp_pesto.h
+
+CPPCHECK = cppcheck
+CPPCHECK_FLAGS = --std=c11 --error-exitcode=1 --enable=all --force	\
 	--inconclusive --library=posix --quiet				\
-	$${CPPCHECK_EXHAUSTIVE}						\
 	--inline-suppr							\
-	--suppress=missingIncludeSystem \
-	--suppress=unusedStructMember					\
-	$(filter -D%,$(FLAGS) $(CFLAGS) $(CPPFLAGS)) -D CPPCHECK_6936	\
-	$^
+	$(shell if $(CPPCHECK) --quiet --check-level=exhaustive /dev/null; then \
+		echo "--check-level=exhaustive";			\
+	else								\
+		echo "";						\
+	fi)								\
+	--suppress=missingIncludeSystem					\
+	 -D CPPCHECK_6936
+
+cppcheck: passt.cppcheck passt-repair.cppcheck pesto.cppcheck
+
+.PHONY: %.cppcheck
+%.cppcheck:
+	$(CPPCHECK) $(CPPCHECK_FLAGS) $(BASE_CPPFLAGS) $^
+
+passt.cppcheck: BASE_CPPFLAGS += -UPESTO
+passt.cppcheck: CPPCHECK_FLAGS += --suppress=unusedStructMember
+passt.cppcheck: $(PASST_SRCS) $(PASST_HEADERS) seccomp.h
+
+passt-repair.cppcheck: CPPCHECK_FLAGS += --suppress=unusedStructMember
+passt-repair.cppcheck: $(PASST_REPAIR_SRCS) $(PASST_REPAIR_HEADERS) seccomp_repair.h
+
+pesto.cppcheck: BASE_CPPFLAGS += -DPESTO
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:bitmap.c
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:inany.h
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:inany.c
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:ip.h
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:serialise.c
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=staticFunction:fwd_rule.c
+pesto.cppcheck: $(PESTO_SRCS) $(PESTO_HEADERS) seccomp_pesto.h
