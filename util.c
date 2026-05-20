@@ -722,31 +722,54 @@ int do_clone(int (*fn)(void *), char *stack_area, size_t stack_size, int flags,
  * @iov:	IO vector
  * @iovcnt:	Number of entries in @iov
  * @skip:	Number of bytes of the vector to skip writing
+ * @length:	Maximum number of bytes of the vector to write
  *
  * Return: 0 on success, -1 on error (with errno set)
  *
  * #syscalls writev
  */
-int write_remainder(int fd, const struct iovec *iov, size_t iovcnt, size_t skip)
+int write_remainder(int fd, const struct iovec *iov, size_t iovcnt,
+		    size_t skip, size_t length)
 {
 	size_t i = 0, offset;
 
-	while ((i += iov_skip_bytes(iov + i, iovcnt - i, skip, &offset)) < iovcnt) {
+	while (length &&
+	       (i += iov_skip_bytes(iov + i, iovcnt - i, skip, &offset)) < iovcnt) {
 		ssize_t rc;
+		size_t end;
 
 		if (offset) {
+			size_t len = MIN(length, iov[i].iov_len - offset);
+
 			/* Write the remainder of the partially written buffer */
 			if (write_all_buf(fd, (char *)iov[i].iov_base + offset,
-					  iov[i].iov_len - offset) < 0)
+					  len) < 0)
 				return -1;
+
+			length -= len;
 			i++;
+
+			if (!length || i >= iovcnt)
+				break;
+		}
+
+		end = iov_skip_bytes(iov + i, iovcnt - i, length, NULL);
+
+		/* Write a trailing partial buffer */
+		if (!end) {
+			size_t len = MIN(length, iov[i].iov_len);
+
+			if (write_all_buf(fd, iov[i].iov_base, len) < 0)
+				return -1;
+			break;
 		}
 
 		/* Write as much of the remaining whole buffers as we can */
-		rc = writev(fd, &iov[i], iovcnt - i);
+		rc = writev(fd, &iov[i], end);
 		if (rc < 0)
 			return -1;
 
+		length -= rc;
 		skip = rc;
 	}
 	return 0;

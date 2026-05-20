@@ -52,12 +52,12 @@ struct pcap_pkthdr {
  * @iov:	IO vector containing frame (with L2 headers and tap headers)
  * @iovcnt:	Number of buffers (@iov entries) in frame
  * @offset:	Byte offset of the L2 headers within @iov
+ * @l2len:	Length of L2 frame data to capture
  * @now:	Timestamp
  */
 static void pcap_frame(const struct iovec *iov, size_t iovcnt,
-		       size_t offset, const struct timespec *now)
+		       size_t offset, size_t l2len, const struct timespec *now)
 {
-	size_t l2len = iov_size(iov, iovcnt) - offset;
 	struct pcap_pkthdr h = {
 		.tv_sec = now->tv_sec,
 		.tv_usec = DIV_ROUND_CLOSEST(now->tv_nsec, 1000),
@@ -65,9 +65,15 @@ static void pcap_frame(const struct iovec *iov, size_t iovcnt,
 		.len = l2len
 	};
 
-	if (write_all_buf(pcap_fd, &h, sizeof(h)) < 0 ||
-	    write_remainder(pcap_fd, iov, iovcnt, offset) < 0)
+	if (write_all_buf(pcap_fd, &h, sizeof(h)) < 0) {
+		debug_perror("Cannot log packet, packet header error");
+		return;
+	}
+
+	if (write_remainder(pcap_fd, iov, iovcnt, offset, l2len) < 0) {
 		debug_perror("Cannot log packet, length %zu", l2len);
+		return;
+	}
 }
 
 /**
@@ -87,7 +93,7 @@ void pcap(const char *pkt, size_t l2len)
 	if (clock_gettime(CLOCK_REALTIME, &now))
 		err_perror("Failed to get CLOCK_REALTIME time");
 
-	pcap_frame(&iov, 1, 0, &now);
+	pcap_frame(&iov, 1, 0, l2len, &now);
 }
 
 /**
@@ -109,8 +115,11 @@ void pcap_multiple(const struct iovec *iov, size_t frame_parts, unsigned int n,
 	if (clock_gettime(CLOCK_REALTIME, &now))
 		err_perror("Failed to get CLOCK_REALTIME time");
 
-	for (i = 0; i < n; i++)
-		pcap_frame(iov + i * frame_parts, frame_parts, offset, &now);
+	for (i = 0; i < n; i++) {
+		pcap_frame(iov + i * frame_parts, frame_parts, offset,
+			   iov_size(iov + i * frame_parts, frame_parts) - offset,
+			   &now);
+	}
 }
 
 /**
@@ -120,8 +129,10 @@ void pcap_multiple(const struct iovec *iov, size_t frame_parts, unsigned int n,
  *		containing packet data to write, including L2 header
  * @iovcnt:	Number of buffers (@iov entries)
  * @offset:	Offset of the L2 frame within the full data length
+ * @l2len:	Length of L2 frame data to capture
  */
-void pcap_iov(const struct iovec *iov, size_t iovcnt, size_t offset)
+void pcap_iov(const struct iovec *iov, size_t iovcnt, size_t offset,
+	      size_t l2len)
 {
 	struct timespec now = { 0 };
 
@@ -131,7 +142,7 @@ void pcap_iov(const struct iovec *iov, size_t iovcnt, size_t offset)
 	if (clock_gettime(CLOCK_REALTIME, &now))
 		err_perror("Failed to get CLOCK_REALTIME time");
 
-	pcap_frame(iov, iovcnt, offset, &now);
+	pcap_frame(iov, iovcnt, offset, l2len, &now);
 }
 
 /**

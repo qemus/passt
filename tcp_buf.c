@@ -190,7 +190,8 @@ static void tcp_l2_buf_fill_headers(const struct ctx *c,
 	else
 		ip6h = iov[TCP_IOV_IP].iov_base;
 
-	l2len = tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &tail, check, seq,
+	l2len = tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &tail,
+				 iov_tail_size(&tail), check, seq,
 				 no_tcp_csum);
 	tap_hdr_update(taph, l2len);
 }

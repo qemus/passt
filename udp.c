@@ -289,7 +289,7 @@ size_t udp_update_hdr4(struct iphdr *ip4h, struct udp_payload_t *bp,
 			.iov_len = dlen
 		};
 		struct iov_tail data = IOV_TAIL(&iov, 1, 0);
-		csum_udp4(&bp->uh, *src, *dst, &data);
+		csum_udp4(&bp->uh, *src, *dst, &data, dlen);
 	}
 
 	return l4len;
@@ -334,7 +334,8 @@ size_t udp_update_hdr6(struct ipv6hdr *ip6h, struct udp_payload_t *bp,
 			.iov_len = dlen
 		};
 		struct iov_tail data = IOV_TAIL(&iov, 1, 0);
-		csum_udp6(&bp->uh, &toside->oaddr.a6, &toside->eaddr.a6, &data);
+		csum_udp6(&bp->uh, &toside->oaddr.a6, &toside->eaddr.a6, &data,
+			  dlen);
 	}
 
 	return l4len;

@@ -251,7 +251,7 @@ void *tap_push_uh4(struct udphdr *uh, struct in_addr src, in_port_t sport,
 	uh->source = htons(sport);
 	uh->dest = htons(dport);
 	uh->len = htons(l4len);
-	csum_udp4(uh, src, dst, &payload);
+	csum_udp4(uh, src, dst, &payload, dlen);
 	return (char *)uh + sizeof(*uh);
 }
 
@@ -356,7 +356,7 @@ void *tap_push_uh6(struct udphdr *uh,
 	uh->source = htons(sport);
 	uh->dest = htons(dport);
 	uh->len = htons(l4len);
-	csum_udp6(uh, src, dst, &payload);
+	csum_udp6(uh, src, dst, &payload, dlen);
 	return (char *)uh + sizeof(*uh);
 }
 
@@ -499,7 +499,8 @@ static size_t tap_send_frames_passt(const struct ctx *c,
 		/* Number of unsent or partially sent buffers for the frame */
 		size_t rembufs = bufs_per_frame - (i % bufs_per_frame);
 
-		if (write_remainder(c->fd_tap, &iov[i], rembufs, buf_offset) < 0) {
+		if (write_remainder(c->fd_tap, &iov[i], rembufs, buf_offset,
+				    SIZE_MAX) < 0) {
 			err_perror("tap: partial frame send");
 			return i;
 		}
@@ -1157,10 +1158,11 @@ void tap_handler(struct ctx *c, const struct timespec *now)
 void tap_add_packet(struct ctx *c, struct iov_tail *data,
 		    const struct timespec *now)
 {
+	size_t l2len = iov_tail_size(data);
 	struct ethhdr eh_storage;
 	const struct ethhdr *eh;
 
-	pcap_iov(data->iov, data->cnt, data->off);
+	pcap_iov(data->iov, data->cnt, data->off, l2len);
 
 	eh = IOV_PEEK_HEADER(data, eh_storage);
 	if (!eh)
@@ -1477,7 +1479,7 @@ void tap_listen_handler(struct ctx *c, uint32_t events)
 	/* Another client is already connected: accept and close right away. */
 	if (c->fd_tap != -1) {
 		int discard = accept4(c->fd_tap_listen, NULL, NULL,
-				      SOCK_NONBLOCK);
+				      SOCK_NONBLOCK | SOCK_CLOEXEC);
 
 		if (discard == -1)
 			return;
@@ -1490,7 +1492,16 @@ void tap_listen_handler(struct ctx *c, uint32_t events)
 		return;
 	}
 
-	c->fd_tap = accept4(c->fd_tap_listen, NULL, NULL, 0);
+	/* Because we generally only access the accepted socket from epoll
+	 * events, it usually doesn't matter if it's blocking or non-blocking.
+	 * However, in rare cases when the socket buffer fills we need (briefly,
+	 * we hope) blocking writes (write_remainder() in send_frames_passt()).
+	 */
+	c->fd_tap = accept4(c->fd_tap_listen, NULL, NULL, SOCK_CLOEXEC);
+	if (c->fd_tap < 0) {
+		warn_perror("Error accepting tap client");
+		return;
+	}
 
 	if (!getsockopt(c->fd_tap, SOL_SOCKET, SO_PEERCRED, &ucred, &len))
 		info("accepted connection from PID %i", ucred.pid);

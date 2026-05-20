@@ -171,6 +171,83 @@ size_t iov_truncate(struct iovec *iov, size_t iov_cnt, size_t size)
 }
 
 /**
+ * iov_memset() - Set bytes of an IO vector to a given value
+ * @iov:	IO vector
+ * @iov_cnt:	Number of elements in @iov
+ * @offset:	Byte offset in the iovec at which to start
+ * @c:		Byte value to fill with
+ * @length:	Number of bytes to set
+ * 		Will write less than @length bytes if it runs out of space in
+ * 		the iov
+ */
+void iov_memset(const struct iovec *iov, size_t iov_cnt, size_t offset, int c,
+		size_t length)
+{
+	size_t i;
+
+	i = iov_skip_bytes(iov, iov_cnt, offset, &offset);
+
+	for ( ; i < iov_cnt && length; i++) {
+		size_t n = MIN(iov[i].iov_len - offset, length);
+
+		memset((char *)iov[i].iov_base + offset, c, n);
+		offset = 0;
+		length -= n;
+	}
+}
+
+/**
+ * iov_memcpy() - Copy data between two iovec arrays
+ * @dst_iov:		Destination iovec array
+ * @dst_iov_cnt:	Number of elements in destination iovec array
+ * @dst_offset:		Destination offset
+ * @src_iov:		Source iovec array
+ * @src_iov_cnt:	Number of elements in source iovec array
+ * @offs:		Source offset
+ * @length:		Number of bytes to copy
+ *
+ * Return: total number of bytes copied
+ */
+/* cppcheck-suppress unusedFunction */
+size_t iov_memcpy(struct iovec *dst_iov, size_t dst_iov_cnt, size_t dst_offset,
+		  const struct iovec *src_iov, size_t src_iov_cnt,
+		  size_t src_offset, size_t length)
+{
+	size_t i, j, total = 0;
+
+	i = iov_skip_bytes(src_iov, src_iov_cnt, src_offset, &src_offset);
+	j = iov_skip_bytes(dst_iov, dst_iov_cnt, dst_offset, &dst_offset);
+
+	/* copying data */
+	while (length && i < src_iov_cnt && j < dst_iov_cnt) {
+		size_t n = MIN(dst_iov[j].iov_len - dst_offset,
+			       src_iov[i].iov_len - src_offset);
+
+		if (n > length)
+			n = length;
+
+		memcpy((char *)dst_iov[j].iov_base + dst_offset,
+		       (const char *)src_iov[i].iov_base + src_offset, n);
+
+		dst_offset += n;
+		src_offset += n;
+		total += n;
+		length -= n;
+
+		if (dst_offset == dst_iov[j].iov_len) {
+			dst_offset = 0;
+			j++;
+		}
+		if (src_offset == src_iov[i].iov_len) {
+			src_offset = 0;
+			i++;
+		}
+	}
+
+	return total;
+}
+
+/**
  * iov_tail_prune() - Remove any unneeded buffers from an IOV tail
  * @tail:	IO vector tail (modified)
  *

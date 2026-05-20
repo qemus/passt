@@ -187,7 +187,7 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 			struct ethhdr *eh,
 			struct iphdr *ip4h, struct ipv6hdr *ip6h,
 			struct tcphdr *th, struct iov_tail *payload,
-			const uint16_t *ip4_check, uint32_t seq,
+			size_t dlen, const uint16_t *ip4_check, uint32_t seq,
 			bool no_tcp_csum);
 
 int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,

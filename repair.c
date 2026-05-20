@@ -87,7 +87,7 @@ int repair_listen_handler(struct ctx *c, uint32_t events)
 	/* Another client is already connected: accept and close right away. */
 	if (c->fd_repair != -1) {
 		int discard = accept4(c->fd_repair_listen, NULL, NULL,
-				      SOCK_NONBLOCK);
+				      SOCK_NONBLOCK | SOCK_CLOEXEC);
 
 		if (discard == -1)
 			return errno;
@@ -99,7 +99,12 @@ int repair_listen_handler(struct ctx *c, uint32_t events)
 		return EEXIST;
 	}
 
-	if ((c->fd_repair = accept4(c->fd_repair_listen, NULL, NULL, 0)) < 0) {
+	/* We want the accepted socket to be blocking; we use it during
+	 * migration which is a synchronous interruption to our normal
+	 * non-blocking behaviour.
+	 */
+	if ((c->fd_repair = accept4(c->fd_repair_listen, NULL, NULL,
+				    SOCK_CLOEXEC)) < 0) {
 		rc = errno;
 		debug_perror("accept4() on TCP_REPAIR helper listening socket");
 		return rc;

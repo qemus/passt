@@ -182,21 +182,22 @@ static uint16_t csum(const void *buf, size_t len, uint32_t init)
  * @saddr:	IPv4 source address
  * @daddr:	IPv4 destination address
  * @data:	UDP payload (as IO vector tail)
+ * @dlen:	UDP payload length
  */
 void csum_udp4(struct udphdr *udp4hr,
 	       struct in_addr saddr, struct in_addr daddr,
-	       struct iov_tail *data)
+	       struct iov_tail *data, size_t dlen)
 {
 	/* UDP checksums are optional, so don't bother */
 	udp4hr->check = 0;
 
 	if (UDP4_REAL_CHECKSUMS) {
-		uint16_t l4len = iov_tail_size(data) + sizeof(struct udphdr);
-		uint32_t psum = proto_ipv4_header_psum(l4len, IPPROTO_UDP,
-						       saddr, daddr);
+		uint32_t psum = proto_ipv4_header_psum(sizeof(*udp4hr) + dlen,
+						       IPPROTO_UDP, saddr,
+						       daddr);
 
-		psum = csum_unfolded(udp4hr, sizeof(struct udphdr), psum);
-		udp4hr->check = csum_iov_tail(data, psum);
+		psum = csum_unfolded(udp4hr, sizeof(*udp4hr), psum);
+		udp4hr->check = csum_iov_tail(data, psum, dlen);
 	}
 }
 
@@ -245,19 +246,19 @@ uint32_t proto_ipv6_header_psum(uint16_t payload_len, uint8_t protocol,
  * @saddr:	Source address
  * @daddr:	Destination address
  * @data:	UDP payload (as IO vector tail)
+ * @dlen:	UDP payload length
  */
 void csum_udp6(struct udphdr *udp6hr,
 	       const struct in6_addr *saddr, const struct in6_addr *daddr,
-	       struct iov_tail *data)
+	       struct iov_tail *data, size_t dlen)
 {
-	uint16_t l4len = iov_tail_size(data) + sizeof(struct udphdr);
-	uint32_t psum = proto_ipv6_header_psum(l4len, IPPROTO_UDP,
-					       saddr, daddr);
+	uint32_t psum = proto_ipv6_header_psum(dlen + sizeof(*udp6hr),
+					       IPPROTO_UDP, saddr, daddr);
 
 	udp6hr->check = 0;
 
-	psum = csum_unfolded(udp6hr, sizeof(struct udphdr), psum);
-	udp6hr->check = csum_iov_tail(data, psum);
+	psum = csum_unfolded(udp6hr, sizeof(*udp6hr), psum);
+	udp6hr->check = csum_iov_tail(data, psum, dlen);
 }
 
 /**
@@ -604,20 +605,26 @@ uint32_t csum_unfolded(const void *buf, size_t len, uint32_t init)
 /**
  * csum_iov_tail() - Calculate unfolded checksum for the tail of an IO vector
  * @tail:	IO vector tail to checksum
- * @init	Initial 32-bit checksum, 0 for no pre-computed checksum
+ * @init:	Initial 32-bit checksum, 0 for no pre-computed checksum
+ * @len:	Number of bytes to checksum from @tail
  *
  * Return: 16-bit folded, complemented checksum
  */
-uint16_t csum_iov_tail(struct iov_tail *tail, uint32_t init)
+uint16_t csum_iov_tail(struct iov_tail *tail, uint32_t init, size_t len)
 {
 	if (iov_tail_prune(tail)) {
-		size_t i;
+		size_t i, n;
 
+		n = MIN(len, tail->iov[0].iov_len - tail->off);
 		init = csum_unfolded((char *)tail->iov[0].iov_base + tail->off,
-				     tail->iov[0].iov_len - tail->off, init);
-		for (i = 1; i < tail->cnt; i++) {
+				     n, init);
+		len -= n;
+
+		for (i = 1; len && i < tail->cnt; i++) {
 			const struct iovec *iov = &tail->iov[i];
-			init = csum_unfolded(iov->iov_base, iov->iov_len, init);
+			n = MIN(len, iov->iov_len);
+			init = csum_unfolded(iov->iov_base, n, init);
+			len -= n;
 		}
 	}
 	return (uint16_t)~csum_fold(init);

@@ -2084,6 +2084,13 @@ static void conf_accept(struct ctx *c)
 	int fd, rc;
 
 retry:
+	/* Currently we perform the configuration transaction more-or-less
+	 * synchronously, so we want the accepted socket to be blocking.
+	 *
+	 * FIXME: We should make the configuration update asynchronous, like
+	 * most of our operation, so a misbehaving configuration client can't
+	 * block the main forwarding loop.
+	 */
 	fd = accept4(c->fd_control_listen, NULL, NULL, SOCK_CLOEXEC);
 	if (fd < 0) {
 		if (errno != EAGAIN)
