@@ -30,15 +30,11 @@ ifeq ($(shell $(CC) -O2 -dM -E - < /dev/null 2>&1 | grep ' _FORTIFY_SOURCE ' > /
 FORTIFY_FLAG := -D_FORTIFY_SOURCE=2
 endif
 
-# Mandatory preprocessor flags that won't be overridden with $(CPPFLAGS)
-# FIXME: Could some of these be default, rather than required?
 BASE_CPPFLAGS := -D_XOPEN_SOURCE=700 -D_GNU_SOURCE $(FORTIFY_FLAG)
 BASE_CPPFLAGS += -DPAGE_SIZE=$(shell getconf PAGE_SIZE)
 BASE_CPPFLAGS += -DVERSION=\"$(VERSION)\"
 BASE_CPPFLAGS += -DDUAL_STACK_SOCKETS=$(DUAL_STACK_SOCKETS)
 
-# Mandatory compiler flags that won't be overridden with $(CFLAGS)
-# FIXME: Could some of these be default, rather than required?
 BASE_CFLAGS := -std=c11 -pie -fPIE -O2
 BASE_CFLAGS += -pedantic -Wall -Wextra -Wno-format-zero-length -Wformat-security
 

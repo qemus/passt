@@ -55,45 +55,33 @@ static size_t udp_vu_hdrlen(bool v6)
 
 /**
  * udp_vu_sock_recv() - Receive datagrams from socket into vhost-user buffers
- * @iov:	IO vector for the frame (in/out)
- * @cnt:	Number of available entries in @iov (input)
- * 		Number of used entries in @iov to store the datagram (output)
+ * @payload:	Buffer(s) for UDP payload
+ * @cnt:	Number of used entries in @payload to store the datagram (output)
  * 		Unchanged on failure
  * @s:		Socket to receive from
- * @v6:		Set for IPv6 connections
  *
  * Return: size of received data, -1 on error
  */
-static ssize_t udp_vu_sock_recv(struct iovec *iov, size_t *cnt, int s, bool v6)
+static ssize_t udp_vu_sock_recv(struct iov_tail *payload, size_t *cnt, int s)
 {
+	struct iovec msg_iov[VIRTQUEUE_MAX_SIZE];
 	struct msghdr msg  = { 0 };
-	size_t hdrlen, iov_used;
+	size_t iov_used;
 	ssize_t dlen;
 
-	/* compute L2 header length */
-	hdrlen = udp_vu_hdrlen(v6);
-
-	/* reserve space for the headers */
-	assert(iov[0].iov_len >= MAX(hdrlen, ETH_ZLEN + VNET_HLEN));
-	iov[0].iov_base = (char *)iov[0].iov_base + hdrlen;
-	iov[0].iov_len -= hdrlen;
+	msg.msg_iov = msg_iov;
+	msg.msg_iovlen = iov_tail_clone(msg.msg_iov, ARRAY_SIZE(msg_iov),
+					payload);
 
 	/* read data from the socket */
-	msg.msg_iov = iov;
-	msg.msg_iovlen = *cnt;
-
 	dlen = recvmsg(s, &msg, 0);
 	if (dlen < 0)
 		return -1;
 
-	/* restore the pointer to the headers address */
-	iov[0].iov_base = (char *)iov[0].iov_base - hdrlen;
-	iov[0].iov_len += hdrlen;
-
-	iov_used = iov_skip_bytes(iov, *cnt,
-				  MAX(dlen + hdrlen, VNET_HLEN + ETH_ZLEN),
-				  NULL);
-	if (iov_used < *cnt)
+	iov_used = iov_skip_bytes(payload->iov, payload->cnt,
+				  MAX(dlen + payload->off,
+				      VNET_HLEN + ETH_ZLEN), NULL);
+	if (iov_used < payload->cnt)
 		iov_used++;
 	*cnt = iov_used; /* one iovec per element */
 
@@ -103,69 +91,47 @@ static ssize_t udp_vu_sock_recv(struct iovec *iov, size_t *cnt, int s, bool v6)
 /**
  * udp_vu_prepare() - Prepare the packet header
  * @c:		Execution context
- * @iov:	IO vector for the frame (including vnet header)
+ * @data:	IO vector tail for the L2 frame, on return points to the L4 header
+ * @payload:	UDP payload
  * @toside:	Address information for one side of the flow
  * @dlen:	Packet data length
  */
-static void udp_vu_prepare(const struct ctx *c, const struct iovec *iov,
-			     const struct flowside *toside, ssize_t dlen)
+static void udp_vu_prepare(const struct ctx *c, struct iov_tail *data,
+			   struct iov_tail *payload,
+			   const struct flowside *toside, size_t dlen)
 {
-	struct ethhdr *eh;
+	bool ipv4 = inany_v4(&toside->eaddr) && inany_v4(&toside->oaddr);
+	struct ethhdr eh;
+	struct udphdr uh;
+	bool no_csum;
 
 	/* ethernet header */
-	eh = vu_eth(iov[0].iov_base);
+	memcpy(eh.h_dest, c->guest_mac, sizeof(eh.h_dest));
+	memcpy(eh.h_source, c->our_tap_mac, sizeof(eh.h_source));
 
-	memcpy(eh->h_dest, c->guest_mac, sizeof(eh->h_dest));
-	memcpy(eh->h_source, c->our_tap_mac, sizeof(eh->h_source));
+	if (ipv4)
+		eh.h_proto = htons(ETH_P_IP);
+	else
+		eh.h_proto = htons(ETH_P_IPV6);
+	IOV_PUSH_HEADER(data, eh);
+
+	no_csum = vu_has_feature(c->vdev, VIRTIO_NET_F_GUEST_CSUM) && !*c->pcap;
 
 	/* initialize header */
-	if (inany_v4(&toside->eaddr) && inany_v4(&toside->oaddr)) {
-		struct iphdr *iph = vu_ip(iov[0].iov_base);
-		struct udp_payload_t *bp = vu_payloadv4(iov[0].iov_base);
+	if (ipv4) {
+		struct iphdr iph = (struct iphdr)L2_BUF_IP4_INIT(IPPROTO_UDP);
 
-		eh->h_proto = htons(ETH_P_IP);
+		udp_update_hdr4(&iph, &uh, payload, toside, dlen, no_csum);
 
-		*iph = (struct iphdr)L2_BUF_IP4_INIT(IPPROTO_UDP);
-
-		udp_update_hdr4(iph, bp, toside, dlen, true);
+		IOV_PUSH_HEADER(data, iph);
 	} else {
-		struct ipv6hdr *ip6h = vu_ip(iov[0].iov_base);
-		struct udp_payload_t *bp = vu_payloadv6(iov[0].iov_base);
+		struct ipv6hdr ip6h = (struct ipv6hdr)L2_BUF_IP6_INIT(IPPROTO_UDP);
 
-		eh->h_proto = htons(ETH_P_IPV6);
+		udp_update_hdr6(&ip6h, &uh, payload, toside, dlen, no_csum);
 
-		*ip6h = (struct ipv6hdr)L2_BUF_IP6_INIT(IPPROTO_UDP);
-
-		udp_update_hdr6(ip6h, bp, toside, dlen, true);
+		IOV_PUSH_HEADER(data, ip6h);
 	}
-}
-
-/**
- * udp_vu_csum() - Calculate and set checksum for a UDP packet
- * @toside:	Address information for one side of the flow
- * @iov:	IO vector for the frame
- * @cnt:	Number of IO vector entries
- * @dlen:	Data length
- */
-static void udp_vu_csum(const struct flowside *toside, const struct iovec *iov,
-			size_t cnt, size_t dlen)
-{
-	const struct in_addr *src4 = inany_v4(&toside->oaddr);
-	const struct in_addr *dst4 = inany_v4(&toside->eaddr);
-	char *base = iov[0].iov_base;
-	struct udp_payload_t *bp;
-	struct iov_tail data;
-
-	if (src4 && dst4) {
-		bp = vu_payloadv4(base);
-		data = IOV_TAIL(iov, cnt, (char *)&bp->data - base);
-		csum_udp4(&bp->uh, *src4, *dst4, &data, dlen);
-	} else {
-		bp = vu_payloadv6(base);
-		data = IOV_TAIL(iov, cnt, (char *)&bp->data - base);
-		csum_udp6(&bp->uh, &toside->oaddr.a6, &toside->eaddr.a6, &data,
-			  dlen);
-	}
+	IOV_PUSH_HEADER(data, uh);
 }
 
 /**
@@ -202,7 +168,8 @@ void udp_vu_sock_to_tap(const struct ctx *c, int s, int n, flow_sidx_t tosidx)
 	}
 
 	for (i = 0; i < n; i++) {
-		unsigned elem_cnt, elem_used;
+		unsigned elem_cnt, elem_used, j, k;
+		struct iov_tail payload;
 		size_t iov_cnt;
 		ssize_t dlen;
 
@@ -212,23 +179,30 @@ void udp_vu_sock_to_tap(const struct ctx *c, int s, int n, flow_sidx_t tosidx)
 		if (elem_cnt == 0)
 			break;
 
-		assert((size_t)elem_cnt == iov_cnt);	/* one iovec per element */
-
-		dlen = udp_vu_sock_recv(iov_vu, &iov_cnt, s, v6);
+		payload = IOV_TAIL(iov_vu, iov_cnt, hdrlen);
+		dlen = udp_vu_sock_recv(&payload, &iov_cnt, s);
 		if (dlen < 0) {
 			vu_queue_rewind(vq, elem_cnt);
 			break;
 		}
 
-		elem_used = iov_cnt; /* one iovec per element */
+		elem_used = 0;
+		for (j = 0, k = 0; k < iov_cnt && j < elem_cnt; j++) {
+			size_t iov_still_needed = iov_cnt - k;
+
+			if (elem[j].in_num > iov_still_needed)
+				elem[j].in_num = iov_still_needed;
+			k += elem[j].in_num;
+			elem_used++;
+		}
 
 		/* release unused buffers */
 		vu_queue_rewind(vq, elem_cnt - elem_used);
 
 		if (iov_cnt > 0) {
-			udp_vu_prepare(c, iov_vu, toside, dlen);
+			struct iov_tail data = IOV_TAIL(iov_vu, iov_cnt, VNET_HLEN);
+			udp_vu_prepare(c, &data, &payload, toside, dlen);
 			if (*c->pcap) {
-				udp_vu_csum(toside, iov_vu, iov_cnt, dlen);
 				pcap_iov(iov_vu, iov_cnt, VNET_HLEN,
 					 hdrlen + dlen - VNET_HLEN);
 			}

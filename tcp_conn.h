@@ -206,8 +206,7 @@ struct tcp_tap_transfer_ext {
  * @f:			Generic flow information
  * @s:			File descriptor for sockets
  * @pipe:		File descriptors for pipes
- * @read:		Bytes read (not fully written to other side in one shot)
- * @written:		Bytes written (not fully written from one other side read)
+ * @pending:		Bytes currently in each pipe
  * @events:		Events observed/actions performed on connection
  * @flags:		Connection flags (attributes, not events)
  */
@@ -218,8 +217,7 @@ struct tcp_splice_conn {
 	int s[SIDES];
 	int pipe[SIDES][2];
 
-	uint32_t read[SIDES];
-	uint32_t written[SIDES];
+	uint32_t pending[SIDES];
 
 	uint8_t events;
 #define SPLICE_CLOSED			0

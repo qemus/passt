@@ -34,10 +34,12 @@
 const char *ipproto_name(uint8_t proto)
 {
 	switch (proto) {
-#define CASE(s)								\
-		static_assert(sizeof(s) <= IPPROTO_STRLEN,		\
-			      "Increase IPPROTO_STRLEN to contain " #s); \
-		return s;
+#define CASE(s)								  \
+		{							  \
+			static_assert(sizeof(s) <= IPPROTO_STRLEN,	  \
+			       "Increase IPPROTO_STRLEN to contain " #s); \
+			return s;					  \
+		}
 	case IPPROTO_ICMP:
 		CASE("ICMP");
 	case IPPROTO_TCP:

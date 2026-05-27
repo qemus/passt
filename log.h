@@ -103,9 +103,10 @@ void logmsg_perror(int pri, const char *format, ...)
 /**
  * logmsg_ratelimit() - Log a message with rate limiting
  * @fn:		Logging function name (e.g. warn, info, debug)
+ * @fn_s:	Logging function name for suppression messages
  * @now:	Current timestamp
  */
-#define logmsg_ratelimit(fn, now, ...)					\
+#define logmsg_ratelimit(fn, fn_s, now, ...)				\
 	do {								\
 		static unsigned int rl_suppressed_;			\
 		static unsigned int rl_printed_;			\
@@ -119,27 +120,27 @@ void logmsg_perror(int pri, const char *format, ...)
 		if (rl_printed_ < LOG_RATELIMIT_BURST) {		\
 			fn(__VA_ARGS__);				\
 			if (rl_suppressed_) {				\
-				fn("(suppressed %u similar messages)",	\
-				   rl_suppressed_);			\
+				fn_s("(suppressed %u similar messages)", \
+				     rl_suppressed_);			\
 				rl_suppressed_ = 0;			\
 			}						\
 			rl_printed_++;					\
 			if (rl_printed_ == LOG_RATELIMIT_BURST)		\
-				fn("(suppressing further similar"	\
-				   " messages)");			\
+				fn_s("(suppressing further similar"	\
+				     " messages)");			\
 		} else {						\
 			rl_suppressed_++;				\
 		}							\
 	} while (0)
 
 #define err_ratelimit(now, ...)						\
-	logmsg_ratelimit(err, now, __VA_ARGS__)
+	logmsg_ratelimit(err, err, now, __VA_ARGS__)
 #define warn_ratelimit(now, ...)					\
-	logmsg_ratelimit(warn, now, __VA_ARGS__)
+	logmsg_ratelimit(warn, warn, now, __VA_ARGS__)
 #define info_ratelimit(now, ...)					\
-	logmsg_ratelimit(info, now, __VA_ARGS__)
+	logmsg_ratelimit(info, info, now, __VA_ARGS__)
 #define debug_ratelimit(now, ...)					\
-	logmsg_ratelimit(debug, now, __VA_ARGS__)
+	logmsg_ratelimit(debug, debug, now, __VA_ARGS__)
 
 extern int log_file;
 extern int log_trace;

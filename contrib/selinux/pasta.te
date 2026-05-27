@@ -253,6 +253,8 @@ allow pasta_t container_var_run_t:dir { add_name open rmdir write };
 allow pasta_t ifconfig_var_run_t:dir { add_name open rmdir write };
 allow pasta_t container_var_run_t:file { create open write };
 allow pasta_t ifconfig_var_run_t:file { create open write };
+allow pasta_t container_var_run_t:sock_file { getattr create open read write };
+allow pasta_t ifconfig_var_run_t:sock_file { getattr create open read write };
 allow systemd_user_runtimedir_t ifconfig_var_run_t:dir rmdir;
 
 # Allow pasta to bind to any port

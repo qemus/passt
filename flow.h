@@ -311,4 +311,11 @@ void flow_log_details_(const struct flow_common *f, int pri,
 #define flow_dbg_details(f_)	flow_log_details((f_), LOG_DEBUG)
 #define flow_err_details(f_)	flow_log_details((f_), LOG_ERR)
 
+#define flow_dbg_ratelimit(f, now, ...)					\
+	logmsg_ratelimit(flow_dbg, debug, now, f, __VA_ARGS__)
+#define flow_err_ratelimit(f, now, ...)					\
+	logmsg_ratelimit(flow_err, err, now, f, __VA_ARGS__)
+#define flow_perror_ratelimit(f, now, ...)				\
+	logmsg_ratelimit(flow_perror, err, now, f, __VA_ARGS__)
+
 #endif /* FLOW_H */

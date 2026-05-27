@@ -56,10 +56,12 @@
 #define NLBUFSIZ 65536
 
 /* Socket in init, in target namespace, sequence (just needs to be monotonic) */
-int nl_sock		 = -1;
-int nl_sock_ns		 = -1;
-static int nl_sock_neigh = -1;
-static int nl_seq	 = 1;
+int nl_sock			= -1;
+int nl_sock_ns			= -1;
+static int nl_seq		=  1;
+
+/* Socket for neighbour event notifier */
+static int nl_sock_neigh	= -1;
 
 /**
  * nl_sock_init_do() - Set up netlink sockets in init or target namespace
@@ -1206,24 +1208,23 @@ static void nl_neigh_msg_read(const struct ctx *c, struct nlmsghdr *nh)
  * @proto:	Protocol, AF_INET or AF_INET6
  * @ifi:	Interface index
  */
-static void nl_neigh_sync(const struct ctx *c, int proto, int ifi)
+static void nl_neigh_sync(const struct ctx *c, int proto)
 {
 	struct {
 		struct nlmsghdr nlh;
 		struct ndmsg    ndm;
 	} req = {
-		.ndm.ndm_family  = proto,
-		.ndm.ndm_ifindex = ifi,
+		.ndm.ndm_family = proto,
 	};
 	struct nlmsghdr *nh;
 	char buf[NLBUFSIZ];
 	ssize_t status;
 	uint32_t seq;
 
-	seq = nl_send(nl_sock_neigh, &req, RTM_GETNEIGH,
-		      NLM_F_DUMP, sizeof(req));
-	nl_foreach_oftype(nh, status, nl_sock_neigh, buf, seq, RTM_NEWNEIGH)
+	seq = nl_send(nl_sock, &req, RTM_GETNEIGH, NLM_F_DUMP, sizeof(req));
+	nl_foreach_oftype(nh, status, nl_sock, buf, seq, RTM_NEWNEIGH)
 		nl_neigh_msg_read(c, nh);
+
 	if (status < 0)
 		warn("netlink: RTM_GETNEIGH failed: %s", strerror_(-status));
 }
@@ -1298,8 +1299,8 @@ int nl_neigh_notify_init(const struct ctx *c)
 		return -1;
 	}
 
-	nl_neigh_sync(c, AF_INET, c->ifi4);
-	nl_neigh_sync(c, AF_INET6, c->ifi6);
+	nl_neigh_sync(c, AF_INET);
+	nl_neigh_sync(c, AF_INET6);
 
 	return 0;
 }

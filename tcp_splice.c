@@ -292,7 +292,7 @@ bool tcp_splice_flow_defer(struct tcp_splice_conn *conn)
 			conn->s[sidei] = -1;
 		}
 
-		conn->read[sidei] = conn->written[sidei] = 0;
+		conn->pending[sidei] = 0;
 	}
 
 	conn->events = SPLICE_CLOSED;
@@ -474,67 +474,27 @@ void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0)
 }
 
 /**
- * tcp_splice_sock_handler() - Handler for socket mapped to spliced connection
+ * tcp_splice_forward() - Forward data in one direction using splice()
  * @c:		Execution context
- * @ref:	epoll reference
- * @events:	epoll events bitmap
+ * @conn:	Connection to forward data for
+ * @fromsidei:	Side to forward data from
+ * @now:	Current timestamp
+ *
+ * Return: 0 on success, -1 on error (connection should be reset)
  *
  * #syscalls:pasta splice
  */
-void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
-			     uint32_t events)
+static int tcp_splice_forward(struct ctx *c,
+			      struct tcp_splice_conn *conn, unsigned fromsidei,
+			      const struct timespec *now)
 {
-	struct tcp_splice_conn *conn = conn_at_sidx(ref.flowside);
-	unsigned evsidei = ref.flowside.sidei, fromsidei;
-	uint8_t lowat_set_flag, lowat_act_flag;
-	int eof, never_read;
-
-	assert(conn->f.type == FLOW_TCP_SPLICE);
-
-	if (conn->events == SPLICE_CLOSED)
-		return;
-
-	if (events & EPOLLERR) {
-		int err, rc;
-		socklen_t sl = sizeof(err);
-
-		rc = getsockopt(ref.fd, SOL_SOCKET, SO_ERROR, &err, &sl);
-		if (rc)
-			flow_perror(conn, "Error retrieving SO_ERROR");
-		else
-			flow_trace(conn, "Error event on socket: %s",
-				   strerror_(err));
-
-		goto reset;
-	}
-
-	if (conn->events == SPLICE_CONNECT) {
-		if (!(events & EPOLLOUT))
-			goto reset;
-		if (tcp_splice_connect_finish(c, conn))
-			goto reset;
-	}
-
-	if (events & EPOLLOUT) {
-		fromsidei = !evsidei;
-		conn_event(conn, ~OUT_WAIT(evsidei));
-	} else {
-		fromsidei = evsidei;
-	}
-
-	if (events & EPOLLRDHUP)
-		/* For side 0 this is fake, but implied */
-		conn_event(conn, FIN_RCVD(evsidei));
-
-swap:
-	eof = 0;
-	never_read = 1;
-
-	lowat_set_flag = RCVLOWAT_SET(fromsidei);
-	lowat_act_flag = RCVLOWAT_ACT(fromsidei);
+	uint8_t lowat_set_flag = RCVLOWAT_SET(fromsidei);
+	uint8_t lowat_act_flag = RCVLOWAT_ACT(fromsidei);
+	int never_read = 1;
+	int eof = 0;
 
 	while (1) {
-		ssize_t readlen, written, pending;
+		ssize_t readlen, written;
 		int more = 0;
 
 retry:
@@ -545,8 +505,12 @@ retry:
 					 SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
 		while (readlen < 0 && errno == EINTR);
 
-		if (readlen < 0 && errno != EAGAIN)
-			goto reset;
+		if (readlen < 0 && errno != EAGAIN) {
+			flow_perror_ratelimit(
+				conn, now, "Splicing from %s socket",
+				pif_name(conn->f.pif[fromsidei]));
+			return -1;
+		}
 
 		flow_trace(conn, "%zi from read-side call", readlen);
 
@@ -569,13 +533,17 @@ retry:
 					 SPLICE_F_MOVE | more | SPLICE_F_NONBLOCK);
 		while (written < 0 && errno == EINTR);
 
-		if (written < 0 && errno != EAGAIN)
-			goto reset;
+		if (written < 0 && errno != EAGAIN) {
+			flow_perror_ratelimit(
+				conn, now, "Splicing to %s socket",
+				pif_name(conn->f.pif[!fromsidei]));
+			return -1;
+		}
 
 		flow_trace(conn, "%zi from write-side call (passed %zi)",
 			   written, c->tcp.pipe_size);
 
-		/* Most common case: skip updating counters. */
+		/* Most common case: skip updating count of pending bytes */
 		if (readlen > 0 && readlen == written) {
 			if (readlen >= (long)c->tcp.pipe_size * 10 / 100)
 				continue;
@@ -596,14 +564,14 @@ retry:
 				}
 			}
 
-			break;
+			continue;
 		}
 
-		conn->read[fromsidei]    += readlen > 0 ? readlen : 0;
-		conn->written[fromsidei] += written > 0 ? written : 0;
+		conn->pending[fromsidei] += readlen > 0 ? readlen : 0;
+		conn->pending[fromsidei] -= written > 0 ? written : 0;
 
 		if (written < 0) {
-			if (conn->read[fromsidei] == conn->written[fromsidei])
+			if (!conn->pending[fromsidei])
 				break;
 
 			conn_event(conn, OUT_WAIT(!fromsidei));
@@ -613,25 +581,92 @@ retry:
 		if (never_read && written == (long)(c->tcp.pipe_size))
 			goto retry;
 
-		pending = conn->read[fromsidei] - conn->written[fromsidei];
-		if (!never_read && written > 0 && written < pending)
+		if (!never_read && written > 0 &&
+		    written < conn->pending[fromsidei])
 			goto retry;
 
 		if (eof)
 			break;
 	}
 
-	if (conn->read[fromsidei] == conn->written[fromsidei] && eof) {
+	if (!conn->pending[fromsidei] && eof) {
 		unsigned sidei;
 
 		flow_foreach_sidei(sidei) {
 			if ((conn->events & FIN_RCVD(sidei)) &&
 			    !(conn->events & FIN_SENT(!sidei))) {
-				if (shutdown(conn->s[!sidei], SHUT_WR) < 0)
-					goto reset;
+				if (shutdown(conn->s[!sidei], SHUT_WR) < 0) {
+					flow_perror_ratelimit(
+						conn, now, "shutdown() on %s",
+						pif_name(conn->f.pif[!sidei]));
+					return -1;
+				}
 				conn_event(conn, FIN_SENT(!sidei));
 			}
 		}
+	}
+
+	return 0;
+}
+
+/**
+ * tcp_splice_sock_handler() - Handler for socket mapped to spliced connection
+ * @c:		Execution context
+ * @ref:	epoll reference
+ * @events:	epoll events bitmap
+ * @now:	Current timestamp
+ */
+void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
+			     uint32_t events, const struct timespec *now)
+{
+	struct tcp_splice_conn *conn = conn_at_sidx(ref.flowside);
+	unsigned evsidei = ref.flowside.sidei;
+
+	assert(conn->f.type == FLOW_TCP_SPLICE);
+
+	if (conn->events == SPLICE_CLOSED)
+		return;
+
+	if (events & EPOLLERR) {
+		int err, rc;
+		socklen_t sl = sizeof(err);
+
+		rc = getsockopt(ref.fd, SOL_SOCKET, SO_ERROR, &err, &sl);
+		if (rc)
+			flow_perror(conn, "Error retrieving SO_ERROR");
+		else
+			flow_dbg_ratelimit(conn, now,
+					   "Error event on %s socket: %s",
+					   pif_name(conn->f.pif[evsidei]),
+					   strerror_(err));
+		goto reset;
+	}
+
+	if (conn->events == SPLICE_CONNECT) {
+		if (!(events & EPOLLOUT)) {
+			flow_err_ratelimit(
+				conn, now,
+				"Unexpected events 0x%x during connect",
+				events);
+			goto reset;
+		}
+		if (tcp_splice_connect_finish(c, conn))
+			goto reset;
+	}
+
+	if (events & EPOLLRDHUP)
+		/* For side 0 this is fake, but implied */
+		conn_event(conn, FIN_RCVD(evsidei));
+
+	if (events & EPOLLOUT) {
+		if (tcp_splice_forward(c, conn, !evsidei, now))
+			goto reset;
+		conn_event(conn, ~OUT_WAIT(evsidei));
+	}
+
+	if (events & EPOLLIN) {
+		if (tcp_splice_forward(c, conn, evsidei, now))
+			goto reset;
 	}
 
 	if (CONN_HAS(conn, FIN_SENT(0) | FIN_SENT(1))) {
@@ -640,15 +675,11 @@ retry:
 		return;
 	}
 
-	if ((events & (EPOLLIN | EPOLLOUT)) == (EPOLLIN | EPOLLOUT)) {
-		events = EPOLLIN;
-
-		fromsidei = !fromsidei;
-		goto swap;
-	}
-
-	if (events & EPOLLHUP)
+	if (events & EPOLLHUP) {
+		flow_dbg_ratelimit(conn, now, "Hangup from %s socket",
+				   pif_name(conn->f.pif[evsidei]));
 		goto reset;
+	}
 
 	return;
 

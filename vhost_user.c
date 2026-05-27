@@ -322,6 +322,7 @@ static bool vu_get_features_exec(struct vu_dev *vdev,
 {
 	uint64_t features =
 		1ULL << VIRTIO_F_VERSION_1 |
+		1ULL << VIRTIO_NET_F_GUEST_CSUM |
 		1ULL << VIRTIO_NET_F_MRG_RXBUF |
 		1ULL << VHOST_F_LOG_ALL |
 		1ULL << VHOST_USER_F_PROTOCOL_FEATURES;

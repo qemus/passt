@@ -940,9 +940,10 @@ static void tcp_fill_header(struct tcphdr *th,
  * @th:			Pointer to TCP header
  * @payload:		TCP payload
  * @dlen:		TCP payload length
- * @ip4_check:		IPv4 checksum, if already known
+ * @csum_flags:		TCP_CSUM if TCP checksum must be computed,
+ *                      IP4_CSUM if IPv4 checksum must be computed,
+ *                      otherwise IPv4 checksum is provided in IP4_CMASK
  * @seq:		Sequence number for this segment
- * @no_tcp_csum:	Do not set TCP checksum
  *
  * Return: frame length (including L2 headers)
  */
@@ -950,8 +951,7 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 			struct ethhdr *eh,
 			struct iphdr *ip4h, struct ipv6hdr *ip6h,
 			struct tcphdr *th, struct iov_tail *payload,
-			size_t dlen, const uint16_t *ip4_check, uint32_t seq,
-			bool no_tcp_csum)
+			size_t dlen, uint32_t csum_flags, uint32_t seq)
 {
 	const struct flowside *tapside = TAPFLOW(conn);
 	size_t l4len = dlen + sizeof(*th);
@@ -971,13 +971,14 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 		ip4h->saddr = src4->s_addr;
 		ip4h->daddr = dst4->s_addr;
 
-		if (ip4_check)
-			ip4h->check = *ip4_check;
-		else
+		if (csum_flags & IP4_CSUM) {
 			ip4h->check = csum_ip4_header(l3len, IPPROTO_TCP,
 						      *src4, *dst4);
+		} else {
+			ip4h->check = csum_flags & IP4_CMASK;
+		}
 
-		if (!no_tcp_csum) {
+		if (csum_flags & TCP_CSUM) {
 			psum = proto_ipv4_header_psum(l4len, IPPROTO_TCP,
 						      *src4, *dst4);
 		}
@@ -997,7 +998,7 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 
 		ip6_set_flow_lbl(ip6h, conn->sock);
 
-		if (!no_tcp_csum) {
+		if (csum_flags & TCP_CSUM) {
 			psum = proto_ipv6_header_psum(l4len, IPPROTO_TCP,
 						      &ip6h->saddr,
 						      &ip6h->daddr);
@@ -1012,10 +1013,10 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 
 	tcp_fill_header(th, conn, seq);
 
-	if (no_tcp_csum)
-		th->check = 0;
-	else
+	if (csum_flags & TCP_CSUM)
 		tcp_update_csum(psum, th, payload, dlen);
+	else
+		th->check = 0;
 
 	return MAX(l3len + sizeof(struct ethhdr), ETH_ZLEN);
 }

@@ -93,6 +93,7 @@ bool iov_tail_prune(struct iov_tail *tail);
 size_t iov_tail_size(struct iov_tail *tail);
 bool iov_drop_header(struct iov_tail *tail, size_t len);
 void *iov_peek_header_(struct iov_tail *tail, void *v, size_t len, size_t align);
+size_t iov_push_header_(struct iov_tail *tail, const void *v, size_t len);
 void *iov_remove_header_(struct iov_tail *tail, void *v, size_t len, size_t align);
 ssize_t iov_tail_clone(struct iovec *dst_iov, size_t dst_iov_cnt,
 		       struct iov_tail *tail);
@@ -114,6 +115,16 @@ ssize_t iov_tail_clone(struct iovec *dst_iov, size_t dst_iov_cnt,
 	((__typeof__(var_) *)(iov_peek_header_((tail_), &(var_),	\
 					       sizeof(var_),		\
 					       __alignof__(var_))))
+
+/**
+ * IOV_PUSH_HEADER() - Write a new header to an IOV tail
+ * @tail_:	IOV tail to write header to
+ * @var_:	A variable containing the header data to write
+ *
+ * Return: number of bytes written
+ */
+#define IOV_PUSH_HEADER(tail_, var_)					\
+	(iov_push_header_((tail_), &(var_), sizeof(var_)))
 
 /**
  * IOV_REMOVE_HEADER() - Remove and return typed header from an IOV tail

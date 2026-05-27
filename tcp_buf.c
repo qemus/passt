@@ -166,14 +166,15 @@ static void tcp_l2_buf_pad(struct iovec *iov)
  * @c:		Execution context
  * @conn:	Connection pointer
  * @iov:	Pointer to an array of iovec of TCP pre-cooked buffers
- * @check:	Checksum, if already known
+ * @csum_flags:	TCP_CSUM if TCP checksum must be computed,
+ * 		IP4_CSUM if IPv4 checksum must be computed,
+ * 		otherwise IPv4 checksum is provided in IP4_CMASK
  * @seq:	Sequence number for this segment
- * @no_tcp_csum: Do not set TCP checksum
  */
 static void tcp_l2_buf_fill_headers(const struct ctx *c,
 				    struct tcp_tap_conn *conn,
-				    struct iovec *iov, const uint16_t *check,
-				    uint32_t seq, bool no_tcp_csum)
+				    struct iovec *iov, uint32_t csum_flags,
+				    uint32_t seq)
 {
 	struct iov_tail tail = IOV_TAIL(&iov[TCP_IOV_PAYLOAD], 1, 0);
 	struct tcphdr th_storage, *th = IOV_REMOVE_HEADER(&tail, th_storage);
@@ -191,8 +192,7 @@ static void tcp_l2_buf_fill_headers(const struct ctx *c,
 		ip6h = iov[TCP_IOV_IP].iov_base;
 
 	l2len = tcp_fill_headers(c, conn, eh, ip4h, ip6h, th, &tail,
-				 iov_tail_size(&tail), check, seq,
-				 no_tcp_csum);
+				 iov_tail_size(&tail), csum_flags, seq);
 	tap_hdr_update(taph, l2len);
 }
 
@@ -234,7 +234,7 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	if (flags & KEEPALIVE)
 		seq--;
 
-	tcp_l2_buf_fill_headers(c, conn, iov, NULL, seq, false);
+	tcp_l2_buf_fill_headers(c, conn, iov, IP4_CSUM | TCP_CSUM, seq);
 
 	tcp_l2_buf_pad(iov);
 
@@ -271,7 +271,7 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 			    ssize_t dlen, int no_csum, uint32_t seq, bool push)
 {
 	struct tcp_payload_t *payload;
-	const uint16_t *check = NULL;
+	uint32_t check = IP4_CSUM;
 	struct iovec *iov;
 
 	conn->seq_to_tap = seq + dlen;
@@ -280,9 +280,10 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 	if (CONN_V4(conn)) {
 		if (no_csum) {
 			struct iovec *iov_prev = tcp_l2_iov[tcp_payload_used - 1];
-			struct iphdr *iph = iov_prev[TCP_IOV_IP].iov_base;
+			const struct iphdr *iph = iov_prev[TCP_IOV_IP].iov_base;
 
-			check = &iph->check;
+			/* overwrite IP4_CSUM flag as we set the checksum */
+			check = iph->check;
 		}
 		iov[TCP_IOV_IP] = IOV_OF_LVALUE(tcp4_payload_ip[tcp_payload_used]);
 	} else if (CONN_V6(conn)) {
@@ -296,7 +297,7 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 	payload->th.ack = 1;
 	payload->th.psh = push;
 	iov[TCP_IOV_PAYLOAD].iov_len = dlen + sizeof(struct tcphdr);
-	tcp_l2_buf_fill_headers(c, conn, iov, check, seq, false);
+	tcp_l2_buf_fill_headers(c, conn, iov, TCP_CSUM | check, seq);
 
 	tcp_l2_buf_pad(iov);
 

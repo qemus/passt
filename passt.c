@@ -273,7 +273,7 @@ static void passt_worker(void *opaque, int nfds, struct epoll_event *events)
 			tcp_sock_handler(c, ref, eventmask);
 			break;
 		case EPOLL_TYPE_TCP_SPLICE:
-			tcp_splice_sock_handler(c, ref, eventmask);
+			tcp_splice_sock_handler(c, ref, eventmask, &now);
 			break;
 		case EPOLL_TYPE_TCP_LISTEN:
 			tcp_listen_handler(c, ref, &now);

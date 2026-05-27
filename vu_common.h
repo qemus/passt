@@ -15,26 +15,6 @@
 #include "ip.h"
 #include "virtio.h"
 
-static inline void *vu_eth(void *base)
-{
-	return ((char *)base + VNET_HLEN);
-}
-
-static inline void *vu_ip(void *base)
-{
-	return (struct ethhdr *)vu_eth(base) + 1;
-}
-
-static inline void *vu_payloadv4(void *base)
-{
-	return (struct iphdr *)vu_ip(base) + 1;
-}
-
-static inline void *vu_payloadv6(void *base)
-{
-	return (struct ipv6hdr *)vu_ip(base) + 1;
-}
-
 int vu_collect(const struct vu_dev *vdev, struct vu_virtq *vq,
 	       struct vu_virtq_element *elem, int max_elem,
 	       struct iovec *in_sg, size_t max_in_sg, size_t *in_total,

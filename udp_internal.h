@@ -25,10 +25,12 @@ struct udp_payload_t {
 } __attribute__ ((packed, aligned(__alignof__(unsigned int))));
 #endif
 
-size_t udp_update_hdr4(struct iphdr *ip4h, struct udp_payload_t *bp,
+size_t udp_update_hdr4(struct iphdr *ip4h, struct udphdr *uh,
+		       struct iov_tail *payload,
 		       const struct flowside *toside, size_t dlen,
 		       bool no_udp_csum);
-size_t udp_update_hdr6(struct ipv6hdr *ip6h, struct udp_payload_t *bp,
+size_t udp_update_hdr6(struct ipv6hdr *ip6h, struct udphdr *uh,
+		       struct iov_tail *payload,
 		       const struct flowside *toside, size_t dlen,
 		       bool no_udp_csum);
 void udp_sock_fwd(const struct ctx *c, int s, int rule_hint,
