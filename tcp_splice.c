@@ -240,28 +240,14 @@ static void conn_event_do(struct tcp_splice_conn *conn, unsigned long event)
  */
 static void tcp_splice_rst(struct tcp_splice_conn *conn)
 {
-	const struct linger linger0 = {
-		.l_onoff = 1,
-		.l_linger = 0,
-	};
 	unsigned sidei;
 
 	if (conn->flags & CLOSING)
 		return; /* Nothing to do */
 
-	/* Force RST on sockets to inform the peer
-	 *
-	 * We do this by setting SO_LINGER with 0 timeout, which means that
-	 * close() will send an RST (unless the connection is already closed in
-	 * both directions).
-	 */
-	flow_foreach_sidei(sidei) {
-		if (setsockopt(conn->s[sidei], SOL_SOCKET,
-			       SO_LINGER, &linger0, sizeof(linger0)) < 0) {
-			flow_dbg_perror(conn,
-"SO_LINGER failed, may not send RST to peer");
-		}
-	}
+	/* Force RST on sockets to inform the peer */
+	flow_foreach_sidei(sidei)
+		tcp_linger0(conn, conn->s[sidei]);
 
 	conn_flag(conn, CLOSING);
 }

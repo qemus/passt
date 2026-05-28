@@ -1398,29 +1398,36 @@ static int tcp_send_flag(const struct ctx *c, struct tcp_tap_conn *conn,
 }
 
 /**
- * tcp_sock_rst() - Close TCP connection forcing RST on socket side
- * @c:		Execution context
- * @conn:	Connection pointer
+ * tcp_linger0_() - Set SO_LINGER with 0 timeout on socket
+ * @f:		Flow header (only for debug logging)
+ * @s:		Socket to modify
  */
-static void tcp_sock_rst(const struct ctx *c, struct tcp_tap_conn *conn)
+void tcp_linger0_(const struct flow_common *f, int s)
 {
 	const struct linger linger0 = {
 		.l_onoff = 1,
 		.l_linger = 0,
 	};
 
-	/* Force RST on socket to inform the peer
-	 *
-	 * We do this by setting SO_LINGER with 0 timeout, which means that
-	 * close() will send an RST (unless the connection is already closed in
-	 * both directions).
+	/* Setting SO_LINGER with 0 timeout, means that close() will send an RST
+	 * (unless the connection is already closed in both directions).
 	 */
-	if (setsockopt(conn->sock, SOL_SOCKET,
-		       SO_LINGER, &linger0, sizeof(linger0)) < 0) {
-		flow_dbg_perror(conn,
-				"SO_LINGER failed, may not send RST to peer");
+	if (setsockopt(s, SOL_SOCKET, SO_LINGER,
+		       &linger0, sizeof(linger0)) < 0) {
+		flow_log_perror_(f, LOG_DEBUG,
+				 "SO_LINGER failed, may not send RST to peer");
 	}
+}
 
+/**
+ * tcp_sock_rst() - Close TCP connection forcing RST on socket side
+ * @c:		Execution context
+ * @conn:	Connection pointer
+ */
+static void tcp_sock_rst(const struct ctx *c, struct tcp_tap_conn *conn)
+{
+	/* Force RST on socket to inform the peer */
+	tcp_linger0(conn, conn->sock);
 	conn_event(c, conn, CLOSED);
 }
 
@@ -2571,11 +2578,11 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 
 		err("Invalid endpoint from TCP accept(): %s",
 		    sockaddr_ntop(&sa, sastr, sizeof(sastr)));
-		goto cancel;
+		goto rst;
 	}
 
 	if (!flow_target(c, flow, ref.listen.rule, IPPROTO_TCP))
-		goto cancel;
+		goto rst;
 
 	switch (flow->f.pif[TGTSIDE]) {
 	case PIF_SPLICE:
@@ -2591,11 +2598,14 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 		flow_err(flow, "No support for forwarding TCP from %s to %s",
 			 pif_name(flow->f.pif[INISIDE]),
 			 pif_name(flow->f.pif[TGTSIDE]));
-		goto cancel;
+		goto rst;
 	}
 
 	return;
 
+rst:
+	tcp_linger0(flow, s);
+	close(s);
 cancel:
 	flow_alloc_cancel(flow);
 }

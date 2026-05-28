@@ -239,6 +239,9 @@ struct tcp_splice_conn {
 extern int init_sock_pool4	[TCP_SOCK_POOL_SIZE];
 extern int init_sock_pool6	[TCP_SOCK_POOL_SIZE];
 
+void tcp_linger0_(const struct flow_common *f, int s);
+#define tcp_linger0(flow_, s_)	tcp_linger0_(&(flow_)->f, (s_))
+
 bool tcp_flow_defer(const struct tcp_tap_conn *conn);
 
 int tcp_flow_repair_on(struct ctx *c, const struct tcp_tap_conn *conn);
