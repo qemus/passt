@@ -29,8 +29,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 int tcp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
 	       const union inany_addr *addr, const char *ifname, in_port_t port);
 int tcp_init(struct ctx *c);
-void tcp_timer(struct ctx *c, const struct timespec *now);
-void tcp_defer_handler(struct ctx *c);
+void tcp_defer_handler(struct ctx *c, const struct timespec *now);
 
 void tcp_update_l2_buf(const unsigned char *eth_d);
 

@@ -101,27 +101,8 @@ struct passt_stats {
  */
 static void post_handler(struct ctx *c, const struct timespec *now)
 {
-#define CALL_PROTO_HANDLER(lc, uc)					\
-	do {								\
-		extern void						\
-		lc ## _defer_handler (struct ctx *c)			\
-		__attribute__ ((weak));					\
-									\
-		if (!c->no_ ## lc) {					\
-			if (lc ## _defer_handler)			\
-				lc ## _defer_handler(c);		\
-									\
-			if (timespec_diff_ms((now), &c->lc.timer_run)	\
-			    >= uc ## _TIMER_INTERVAL) {			\
-				lc ## _timer(c, now);			\
-				c->lc.timer_run = *now;			\
-			}						\
-		} 							\
-	} while (0)
-
-	/* NOLINTNEXTLINE(bugprone-branch-clone): intervals can be the same */
-	CALL_PROTO_HANDLER(tcp, TCP);
-#undef CALL_PROTO_HANDLER
+	if (!c->no_tcp)
+		tcp_defer_handler(c, now);
 
 	flow_defer_handler(c, now);
 	fwd_scan_ports_timer(c, now);

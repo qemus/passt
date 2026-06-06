@@ -476,14 +476,11 @@ static int tcp_splice_forward(struct ctx *c,
 {
 	uint8_t lowat_set_flag = RCVLOWAT_SET(fromsidei);
 	uint8_t lowat_act_flag = RCVLOWAT_ACT(fromsidei);
-	int never_read = 1;
-	int eof = 0;
 
 	while (1) {
 		ssize_t readlen, written;
 		int more = 0;
 
-retry:
 		do
 			readlen = splice(conn->s[fromsidei], NULL,
 					 conn->pipe[fromsidei][1], NULL,
@@ -500,10 +497,18 @@ retry:
 
 		flow_trace(conn, "%zi from read-side call", readlen);
 
-		if (!readlen) {
-			eof = 1;
-		} else if (readlen > 0) {
-			never_read = 0;
+		if (readlen <= 0) {
+			if (!readlen) /* EOF */
+				conn_event(conn, FIN_RCVD(fromsidei));
+
+			/* We're either blocked or at EOF on the read side, and
+			 * there's nothing in the pipe so there's nothing to do
+			 * write side either.
+			 */
+			if (!conn->pending[fromsidei])
+				break;
+		} else {
+			conn->pending[fromsidei] += readlen;
 
 			if (readlen >= (long)c->tcp.pipe_size * 90 / 100)
 				more = SPLICE_F_MORE;
@@ -529,67 +534,36 @@ retry:
 		flow_trace(conn, "%zi from write-side call (passed %zi)",
 			   written, c->tcp.pipe_size);
 
-		/* Most common case: skip updating count of pending bytes */
-		if (readlen > 0 && readlen == written) {
-			if (readlen >= (long)c->tcp.pipe_size * 10 / 100)
-				continue;
+		if (written < 0)
+			break;
 
-			if (!(conn->flags & lowat_set_flag) &&
-			    readlen > (long)c->tcp.pipe_size / 10) {
-				int lowat = c->tcp.pipe_size / 4;
+		conn->pending[fromsidei] -= written;
 
-				if (setsockopt(conn->s[fromsidei], SOL_SOCKET,
-					       SO_RCVLOWAT,
-					       &lowat, sizeof(lowat))) {
-					flow_trace(conn,
-						   "Setting SO_RCVLOWAT %i: %s",
-						   lowat, strerror_(errno));
-				} else {
-					conn_flag(conn, lowat_set_flag);
-					conn_flag(conn, lowat_act_flag);
-				}
-			}
-
-			continue;
-		}
-
-		conn->pending[fromsidei] += readlen > 0 ? readlen : 0;
-		conn->pending[fromsidei] -= written > 0 ? written : 0;
-
-		if (written < 0) {
-			if (!conn->pending[fromsidei])
-				break;
-
-			conn_event(conn, OUT_WAIT(!fromsidei));
+		if (!conn->pending[fromsidei] && readlen <= 0) {
+			/* Read side is EOF or EAGAIN, and we emptied the pipe.
+			 * No more we can do for now.
+			 */
 			break;
 		}
-
-		if (never_read && written == (long)(c->tcp.pipe_size))
-			goto retry;
-
-		if (!never_read && written > 0 &&
-		    written < conn->pending[fromsidei])
-			goto retry;
-
-		if (eof)
-			break;
 	}
 
-	if (!conn->pending[fromsidei] && eof) {
-		unsigned sidei;
+	/* We need write-side wakeups if and only if we have data in the pipe to
+	 * drain.
+	 */
+	if (conn->pending[fromsidei])
+		conn_event(conn, OUT_WAIT(!fromsidei));
+	else
+		conn_event(conn, ~OUT_WAIT(!fromsidei));
 
-		flow_foreach_sidei(sidei) {
-			if ((conn->events & FIN_RCVD(sidei)) &&
-			    !(conn->events & FIN_SENT(!sidei))) {
-				if (shutdown(conn->s[!sidei], SHUT_WR) < 0) {
-					flow_perror_ratelimit(
-						conn, now, "shutdown() on %s",
-						pif_name(conn->f.pif[!sidei]));
-					return -1;
-				}
-				conn_event(conn, FIN_SENT(!sidei));
-			}
+	if ((conn->events & FIN_RCVD(fromsidei)) &&
+	    !(conn->events & FIN_SENT(!fromsidei)) &&
+	    !conn->pending[fromsidei]) {
+		if (shutdown(conn->s[!fromsidei], SHUT_WR) < 0) {
+			flow_perror_ratelimit(conn, now, "shutdown() on %s",
+					      pif_name(conn->f.pif[!fromsidei]));
+			return -1;
 		}
+		conn_event(conn, FIN_SENT(!fromsidei));
 	}
 
 	return 0;
@@ -640,17 +614,12 @@ void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
 			goto reset;
 	}
 
-	if (events & EPOLLRDHUP)
-		/* For side 0 this is fake, but implied */
-		conn_event(conn, FIN_RCVD(evsidei));
-
 	if (events & EPOLLOUT) {
 		if (tcp_splice_forward(c, conn, !evsidei, now))
 			goto reset;
-		conn_event(conn, ~OUT_WAIT(evsidei));
 	}
 
-	if (events & EPOLLIN) {
+	if (events & (EPOLLIN | EPOLLRDHUP)) {
 		if (tcp_splice_forward(c, conn, evsidei, now))
 			goto reset;
 	}

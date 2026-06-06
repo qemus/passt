@@ -896,16 +896,6 @@ bool tcp_flow_defer(const struct tcp_tap_conn *conn)
 }
 
 /**
- * tcp_defer_handler() - Handler for TCP deferred tasks
- * @c:		Execution context
- */
-/* cppcheck-suppress [constParameterPointer, unmatchedSuppression] */
-void tcp_defer_handler(struct ctx *c)
-{
-	tcp_payload_flush(c);
-}
-
-/**
  * tcp_fill_header() - Fill the TCP header fields for a given TCP segment.
  *
  * @th:		Pointer to the TCP header structure
@@ -3005,12 +2995,20 @@ static void tcp_inactivity(struct ctx *c, const struct timespec *now)
 }
 
 /**
- * tcp_timer() - Periodic tasks: port detection, closed connections, pool refill
+ * tcp_defer_handler() - Handler for TCP deferred tasks
  * @c:		Execution context
  * @now:	Current timestamp
  */
-void tcp_timer(struct ctx *c, const struct timespec *now)
+/* cppcheck-suppress [constParameterPointer, unmatchedSuppression] */
+void tcp_defer_handler(struct ctx *c, const struct timespec *now)
 {
+	tcp_payload_flush(c);
+
+	if (timespec_diff_ms(now, &c->tcp.timer_run) < TCP_TIMER_INTERVAL)
+		return;
+
+	c->tcp.timer_run = *now;
+
 	tcp_sock_refill_init(c);
 	if (c->mode == MODE_PASTA)
 		tcp_splice_refill(c);
