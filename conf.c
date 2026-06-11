@@ -1254,7 +1254,9 @@ void conf(struct ctx *c, int argc, char **argv)
 	int name, ret;
 	uid_t uid;
 	gid_t gid;
-	
+
+	if (c->no_ipv6)
+		v4_only = true;
 
 	if (c->mode == MODE_PASTA)
 		c->no_dhcp_dns = c->no_dhcp_dns_search = 1;
@@ -1682,6 +1684,9 @@ void conf(struct ctx *c, int argc, char **argv)
 			v6_only = false;
 			break;
 		case '6':
+			if (c->no_ipv6)
+				die("IPv6 not available but --ipv6-only given");
+
 			v6_only = true;
 			v4_only = false;
 			break;

@@ -334,6 +334,14 @@ void sock_probe_features(struct ctx *c)
 		c->no_bindtodevice = 1;
 	}
 
+	/* Check if IPv6 sockets are usable */
+	close(s);
+	s = socket(AF_INET6, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+	if (s < 0) {
+		c->no_ipv6 = true;
+		return;
+	}
+
 	close(s);
 }
 

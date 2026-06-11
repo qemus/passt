@@ -211,6 +211,7 @@ struct ip6_ctx {
  * @low_wmem:		Low probed net.core.wmem_max
  * @low_rmem:		Low probed net.core.rmem_max
  * @no_bindtodevice:	Unprivileged SO_BINDTODEVICE not available
+ * @no_ipv6:		IPv6 sockets not available
  * @vdev:		vhost-user device
  * @device_state_fd:	Device state migration channel
  * @device_state_result: Device state migration result
@@ -296,6 +297,7 @@ struct ctx {
 	int low_wmem;
 	int low_rmem;
 	int no_bindtodevice;
+	bool no_ipv6;
 
 	struct vu_dev *vdev;
 
