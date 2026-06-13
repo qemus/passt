@@ -309,6 +309,8 @@ struct ctx {
 	bool migrate_exit;
 };
 
+extern struct ctx passt_ctx;
+
 void proto_update_l2_buf(const unsigned char *eth_d);
 
 #endif /* PASST_H */

@@ -62,6 +62,13 @@
 
 char pkt_buf[PKT_BUF_BYTES]	__attribute__ ((aligned(PAGE_SIZE)));
 
+struct ctx passt_ctx = {
+	.pidfile_fd		= -1,
+	.fd_tap			= -1,
+	.pasta_netns_fd		= -1,
+	.device_state_fd	= -1,
+};
+
 char *epoll_type_str[] = {
 	[EPOLL_TYPE_TCP]		= "connected TCP socket",
 	[EPOLL_TYPE_TCP_SPLICE]		= "connected spliced TCP socket",
@@ -323,8 +330,8 @@ static void passt_worker(void *opaque, int nfds, struct epoll_event *events)
 int main(int argc, char **argv)
 {
 	struct epoll_event events[NUM_EPOLL_EVENTS];
+	struct ctx *c = &passt_ctx;
 	int nfds, devnull_fd = -1;
-	struct ctx c = { 0 };
 	struct rlimit limit;
 	struct timespec now;
 	struct sigaction sa;
@@ -336,18 +343,15 @@ int main(int argc, char **argv)
 
 	isolate_initial(argc, argv);
 
-	c.pasta_netns_fd = c.fd_tap = c.pidfile_fd = -1;
-	c.device_state_fd = -1;
-
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = 0;
 	sa.sa_handler = exit_handler;
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGQUIT, &sa, NULL);
 
-	c.mode = conf_mode(argc, argv);
+	c->mode = conf_mode(argc, argv);
 
-	if (c.mode == MODE_PASTA) {
+	if (c->mode == MODE_PASTA) {
 		sa.sa_handler = pasta_child_handler;
 		if (sigaction(SIGCHLD, &sa, NULL))
 			die_perror("Couldn't install signal handlers");
@@ -358,67 +362,70 @@ int main(int argc, char **argv)
 
 	madvise(pkt_buf, sizeof(pkt_buf), MADV_HUGEPAGE);
 
-	c.epollfd = epoll_create1(EPOLL_CLOEXEC);
-	if (c.epollfd == -1)
+	c->epollfd = epoll_create1(EPOLL_CLOEXEC);
+	if (c->epollfd == -1)
 		die_perror("Failed to create epoll file descriptor");
-	flow_epollid_register(EPOLLFD_ID_DEFAULT, c.epollfd);
+	flow_epollid_register(EPOLLFD_ID_DEFAULT, c->epollfd);
 
 	if (getrlimit(RLIMIT_NOFILE, &limit))
 		die_perror("Failed to get maximum value of open files limit");
 
-	c.nofile = limit.rlim_cur = limit.rlim_max;
+	c->nofile = limit.rlim_cur = limit.rlim_max;
 	if (setrlimit(RLIMIT_NOFILE, &limit))
 		die_perror("Failed to set current limit for open files");
 
-	sock_probe_features(&c);
+	sock_probe_features(c);
 
-	conf(&c, argc, argv);
-	trace_init(c.trace);
+	conf(c, argc, argv);
+	trace_init(c->trace);
 
-	pasta_netns_quit_init(&c);
+	pasta_netns_quit_init(c);
 
-	tap_backend_init(&c);
+	tap_backend_init(c);
 
-	random_init(&c);
+	random_init(c);
 
 	if (clock_gettime(CLOCK_MONOTONIC, &now))
 		die_perror("Failed to get CLOCK_MONOTONIC time");
 
 	flow_init();
-	fwd_scan_ports_init(&c);
+	fwd_scan_ports_init(c);
 
-	if ((!c.no_udp && udp_init(&c)) || (!c.no_tcp && tcp_init(&c)))
+	if ((!c->no_udp && udp_init(c)) || (!c->no_tcp && tcp_init(c)))
 		passt_exit(EXIT_FAILURE);
 
-	if (fwd_listen_init(&c))
+	if (fwd_listen_init(c))
 		passt_exit(EXIT_FAILURE);
 
-	proto_update_l2_buf(c.guest_mac);
+	proto_update_l2_buf(c->guest_mac);
 
-	if (c.ifi4 && !c.no_dhcp)
+	if (c->ifi4 && !c->no_dhcp)
 		dhcp_init();
 
-	if (c.ifi6 && !c.no_dhcpv6)
-		dhcpv6_init(&c);
+	if (c->ifi6 && !c->no_dhcpv6)
+		dhcpv6_init(c);
 
-	pcap_init(&c);
+	pcap_init(c);
 
-	fwd_neigh_table_init(&c);
-	nl_neigh_notify_init(&c);
+	fwd_neigh_table_init(c);
+	nl_neigh_notify_init(c);
 
-	if (!c.foreground) {
+	if (!c->foreground) {
 		if ((devnull_fd = open("/dev/null", O_RDWR | O_CLOEXEC)) < 0)
 			die_perror("Failed to open /dev/null");
 	}
 
-	if (isolate_prefork(&c))
+	if (isolate_prefork(c))
 		die("Failed to sandbox process, exiting");
 
-	if (!c.foreground) {
-		__daemon(c.pidfile_fd, devnull_fd);
+	if (!c->foreground) {
+		__daemon(c->pidfile_fd, devnull_fd);
+		close(c->pidfile_fd);
+		c->pidfile_fd = -1;
 		log_stderr = false;
 	} else {
-		pidfile_write(c.pidfile_fd, getpid());
+		pidfile_write(c->pidfile_fd, getpid());
+		c->pidfile_fd = -1;
 	}
 
 	if (pasta_child_pid) {
@@ -426,19 +433,19 @@ int main(int argc, char **argv)
 		log_stderr = false;
 	}
 
-	isolate_postfork(&c);
+	isolate_postfork(c);
 
-	timer_init(&c, &now);
+	timer_init(c, &now);
 
 loop:
 	/* NOLINTBEGIN(bugprone-branch-clone): intervals can be the same */
 	/* cppcheck-suppress [duplicateValueTernary, unmatchedSuppression] */
-	nfds = epoll_wait(c.epollfd, events, NUM_EPOLL_EVENTS, TIMER_INTERVAL);
+	nfds = epoll_wait(c->epollfd, events, NUM_EPOLL_EVENTS, TIMER_INTERVAL);
 	/* NOLINTEND(bugprone-branch-clone) */
 	if (nfds == -1 && errno != EINTR)
 		die_perror("epoll_wait() failed in main loop");
 
-	passt_worker(&c, nfds, events);
+	passt_worker(c, nfds, events);
 
 	goto loop;
 }

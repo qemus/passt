@@ -1116,6 +1116,13 @@ void abort_with_msg(const char *fmt, ...)
  */
 void passt_exit(int status)
 {
+	if (passt_ctx.fd_tap_listen >= 0)
+		close(passt_ctx.fd_tap_listen);
+	if (passt_ctx.fd_repair_listen >= 0)
+		close(passt_ctx.fd_repair_listen);
+	if (passt_ctx.fd_control_listen >= 0)
+		close(passt_ctx.fd_control_listen);
+
 	/* Make sure we don't leave the pcap file truncated */
 	if (pcap_fd != -1 && fsync(pcap_fd))
 		warn_perror("Failed to flush pcap file, it might be truncated");
