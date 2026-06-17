@@ -64,7 +64,7 @@ void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
 
 /** pif_listen() - Open a listening socket on a specified pif
  * @c:		Execution context
- * @type:	Socket epoll type
+ * @proto:	Socket protocol (IPPROTO_TCP or IPPROTO_UDP)
  * @pif:	Interface for this socket
  * @addr:	Address to bind to, or NULL for dual-stack any
  * @ifname:	Interface for binding, NULL for any
@@ -76,14 +76,37 @@ void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
  *
  * Return: newly created socket, negative error code on failure
  */
-int pif_listen(const struct ctx *c, enum epoll_type type, uint8_t pif,
+int pif_listen(const struct ctx *c, uint8_t proto, uint8_t pif,
 	       const union inany_addr *addr, const char *ifname,
 	       in_port_t port, unsigned rule)
 {
+	enum epoll_type type;
 	union epoll_ref ref;
 	int ret;
 
 	assert(pif_is_socket(pif));
+
+	if (proto == IPPROTO_TCP)
+		type = EPOLL_TYPE_TCP_LISTEN;
+	else if (proto == IPPROTO_UDP)
+		type = EPOLL_TYPE_UDP_LISTEN;
+	else
+		return -EPROTONOSUPPORT;
+
+	if (!c->ifi4) {
+		if (!addr)
+			/* Restrict to v6 only */
+			addr = &inany_any6;
+		else if (inany_v4(addr))
+			return -EAFNOSUPPORT;
+	}
+	if (!c->ifi6) {
+		if (!addr)
+			/* Restrict to v4 only */
+			addr = &inany_any4;
+		else if (!inany_v4(addr))
+			return -EAFNOSUPPORT;
+	}
 
 	if (!addr) {
 		ref.fd = sock_l4_dualstack_any(c, type, port, ifname);
@@ -102,11 +125,17 @@ int pif_listen(const struct ctx *c, enum epoll_type type, uint8_t pif,
 	ref.listen.pif = pif;
 	ref.listen.rule = rule;
 
-	ret = epoll_add(c->epollfd, EPOLLIN, ref);
-	if (ret < 0) {
-		close(ref.fd);
-		return ret;
+	if (proto == IPPROTO_TCP && listen(ref.fd, 128) < 0) {
+		ret = -errno;
+		goto fail;
 	}
 
+	ret = epoll_add(c->epollfd, EPOLLIN, ref);
+	if (ret < 0)
+		goto fail;
+
 	return ref.fd;
+fail:
+	close(ref.fd);
+	return ret;
 }

@@ -389,13 +389,7 @@ static int fwd_sync_one(const struct ctx *c, uint8_t pif, unsigned idx,
 			continue;
 		}
 
-		if (rule->proto == IPPROTO_TCP)
-			fd = tcp_listen(c, pif, idx, addr, ifname, port);
-		else if (rule->proto == IPPROTO_UDP)
-			fd = udp_listen(c, pif, idx, addr, ifname, port);
-		else
-			assert(0);
-
+		fd = pif_listen(c, rule->proto, pif, addr, ifname, port, idx);
 		if (fd < 0) {
 			char astr[INANY_ADDRSTRLEN];
 

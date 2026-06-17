@@ -309,42 +309,22 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
  * tcp_buf_data_from_sock() - Handle new data from socket, queue to tap, in window
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @already_sent:	Number of bytes already sent to tap, but not acked
  *
  * Return: negative on connection reset, 0 otherwise
  *
  * #syscalls recvmsg
  */
-int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
+int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
+			   uint32_t already_sent)
 {
 	uint32_t wnd_scaled = conn->wnd_from_tap << conn->ws_from_tap;
 	int fill_bufs, send_bufs = 0, last_len, iov_rem = 0;
 	int len, dlen, i, s = conn->sock;
 	struct msghdr mh_sock = { 0 };
 	uint16_t mss = MSS_GET(conn);
-	uint32_t already_sent, seq;
 	struct iovec *iov;
-
-	/* How much have we read/sent since last received ack ? */
-	already_sent = conn->seq_to_tap - conn->seq_ack_from_tap;
-
-	if (SEQ_LT(already_sent, 0)) {
-		/* RFC 761, section 2.1. */
-		flow_trace(conn, "ACK sequence gap: ACK for %u, sent: %u",
-			   conn->seq_ack_from_tap, conn->seq_to_tap);
-		conn->seq_to_tap = conn->seq_ack_from_tap;
-		already_sent = 0;
-		if (tcp_set_peek_offset(conn, 0)) {
-			tcp_rst(c, conn);
-			return -1;
-		}
-	}
-
-	if (!wnd_scaled || already_sent >= wnd_scaled) {
-		conn_flag(c, conn, ACK_FROM_TAP_BLOCKS);
-		conn_flag(c, conn, STALLED);
-		conn_flag(c, conn, ACK_FROM_TAP_DUE);
-		return 0;
-	}
+	uint32_t seq;
 
 	/* Set up buffer descriptors we'll fill completely and partially. */
 	fill_bufs = DIV_ROUND_UP(wnd_scaled - already_sent, mss);

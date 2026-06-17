@@ -8,7 +8,8 @@
 
 void tcp_sock_iov_init(const struct ctx *c);
 void tcp_payload_flush(const struct ctx *c);
-int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn);
+int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
+			   uint32_t already_sent);
 int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags);
 
 #endif  /*TCP_BUF_H */

@@ -12,9 +12,9 @@
 #include "util.h"
 
 #define MAX_WS				8
-#define MAX_WINDOW			(1 << (16 + (MAX_WS)))
+#define MAX_WINDOW			(1U << (16 + (MAX_WS)))
 
-#define BUF_DISCARD_SIZE	(1 << 20)
+#define BUF_DISCARD_SIZE	(1U << 20)
 #define DISCARD_IOV_NUM		DIV_ROUND_UP(MAX_WINDOW, BUF_DISCARD_SIZE)
 
 #define MSS4				ROUND_DOWN(IP_MAX_MTU -		   \

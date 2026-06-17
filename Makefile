@@ -11,10 +11,6 @@
 
 VERSION ?= $(shell git describe --tags HEAD 2>/dev/null || echo "unknown\ version")
 
-# Does the target platform allow IPv4 connections to be handled via
-# the IPv6 socket API? (Linux does)
-DUAL_STACK_SOCKETS := 1
-
 TARGET ?= $(shell $(CC) -dumpmachine)
 $(if $(TARGET),,$(error Failed to get target architecture))
 # Get 'uname -m'-like architecture description for target
@@ -33,7 +29,6 @@ endif
 BASE_CPPFLAGS := -D_XOPEN_SOURCE=700 -D_GNU_SOURCE $(FORTIFY_FLAG)
 BASE_CPPFLAGS += -DPAGE_SIZE=$(shell getconf PAGE_SIZE)
 BASE_CPPFLAGS += -DVERSION=\"$(VERSION)\"
-BASE_CPPFLAGS += -DDUAL_STACK_SOCKETS=$(DUAL_STACK_SOCKETS)
 
 BASE_CFLAGS := -std=c11 -pie -fPIE -O2
 BASE_CFLAGS += -pedantic -Wall -Wextra -Wno-format-zero-length -Wformat-security
@@ -208,8 +203,7 @@ CPPCHECK_FLAGS = --std=c11 --error-exitcode=1 --enable=all --force	\
 	else								\
 		echo "";						\
 	fi)								\
-	--suppress=missingIncludeSystem					\
-	 -D CPPCHECK_6936
+	--suppress=missingIncludeSystem
 
 cppcheck: passt.cppcheck passt-repair.cppcheck pesto.cppcheck
 

@@ -1837,10 +1837,34 @@ static int tcp_sock_consume(const struct tcp_tap_conn *conn, uint32_t ack_seq)
  */
 static int tcp_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 {
-	if (c->mode == MODE_VU)
-		return tcp_vu_data_from_sock(c, conn);
+	uint32_t wnd_scaled = conn->wnd_from_tap << conn->ws_from_tap;
+	uint32_t already_sent;
 
-	return tcp_buf_data_from_sock(c, conn);
+	if (SEQ_LT(conn->seq_to_tap, conn->seq_ack_from_tap)) {
+		/* RFC 761, section 2.1. */
+		flow_trace(conn, "ACK sequence gap: ACK for %u, sent: %u",
+			   conn->seq_ack_from_tap, conn->seq_to_tap);
+		conn->seq_to_tap = conn->seq_ack_from_tap;
+		if (tcp_set_peek_offset(conn, 0)) {
+			tcp_rst(c, conn);
+			return -1;
+		}
+	}
+
+	/* How much have we read/sent since last received ack ? */
+	already_sent = conn->seq_to_tap - conn->seq_ack_from_tap;
+
+	if (!wnd_scaled || already_sent >= wnd_scaled) {
+		conn_flag(c, conn, ACK_FROM_TAP_BLOCKS);
+		conn_flag(c, conn, STALLED);
+		conn_flag(c, conn, ACK_FROM_TAP_DUE);
+		return 0;
+	}
+
+	if (c->mode == MODE_VU)
+		return tcp_vu_data_from_sock(c, conn, already_sent);
+
+	return tcp_buf_data_from_sock(c, conn, already_sent);
 }
 
 /**
@@ -1972,37 +1996,34 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 		if (!len)
 			continue;
 
-		seq_offset = seq_from_tap - seq;
 		/* Use data from this buffer only in these two cases:
 		 *
 		 *      , seq_from_tap           , seq_from_tap
 		 * |--------| <-- len            |--------| <-- len
-		 * '----' <-- offset             ' <-- offset
 		 * ^ seq                         ^ seq
-		 *    (offset >= 0, seq + len > seq_from_tap)
+		 *    (seq_from_tap >= seq, seq + len > seq_from_tap)
 		 *
 		 * discard in these two cases:
-		 *          , seq_from_tap                , seq_from_tap
+		 *          , seq_from_tap                   , seq_from_tap
 		 * |--------| <-- len            |--------| <-- len
-		 * '--------' <-- offset            '-----| <- offset
-		 * ^ seq                            ^ seq
-		 *    (offset >= 0, seq + len <= seq_from_tap)
+		 * ^ seq                         ^ seq
+		 *    (seq_from_tap >= seq, seq + len <= seq_from_tap)
 		 *
 		 * keep, look for another buffer, then go back, in this case:
 		 *      , seq_from_tap
 		 *          |--------| <-- len
-		 *      '===' <-- offset
 		 *          ^ seq
-		 *    (offset < 0)
+		 *    (seq_from_tap < seq)
 		 */
-		if (SEQ_GE(seq_offset, 0) && SEQ_LE(seq + len, seq_from_tap))
+		if (SEQ_GE(seq_from_tap, seq) && SEQ_LE(seq + len, seq_from_tap))
 			continue;
 
-		if (SEQ_LT(seq_offset, 0)) {
+		if (SEQ_LT(seq_from_tap, seq)) {
 			if (keep == -1)
 				keep = i;
 			continue;
 		}
+		seq_offset = seq_from_tap - seq;
 
 		iov_drop_header(&data, seq_offset);
 		size = len - seq_offset;
@@ -2737,44 +2758,6 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 			tcp_connect_finish(c, conn);
 		/* Data? Check later */
 	}
-}
-
-/**
- * tcp_listen() - Create listening socket
- * @c:		Execution context
- * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
- * @rule:	Index of relevant forwarding rule
- * @addr:	Pointer to address for binding, NULL for any
- * @ifname:	Name of interface to bind to, NULL for any
- * @port:	Port, host order
- *
- * Return: socket fd on success, negative error code on failure
- */
-int tcp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
-	       const union inany_addr *addr, const char *ifname, in_port_t port)
-{
-	int s;
-
-	assert(!c->no_tcp);
-
-	if (!c->ifi4) {
-		if (!addr)
-			/* Restrict to v6 only */
-			addr = &inany_any6;
-		else if (inany_v4(addr))
-			return -EAFNOSUPPORT;
-	}
-	if (!c->ifi6) {
-		if (!addr)
-			/* Restrict to v4 only */
-			addr = &inany_any4;
-		else if (!inany_v4(addr))
-			return -EAFNOSUPPORT;
-	}
-
-	s = pif_listen(c, EPOLL_TYPE_TCP_LISTEN, pif, addr, ifname, port, rule);
-
-	return s;
 }
 
 /**
@@ -4048,9 +4031,8 @@ int tcp_prepare_iov(struct msghdr *msg, struct iovec *iov,
 		msg->msg_iov = iov + DISCARD_IOV_NUM;
 		msg->msg_iovlen = payload_iov_cnt;
 	} else {
-		int discard_cnt, discard_iov_rem;
+		unsigned discard_cnt, discard_iov_rem, i;
 		struct iovec *iov_start;
-		int i;
 
 		discard_cnt = DIV_ROUND_UP(already_sent, BUF_DISCARD_SIZE);
 		if (discard_cnt > DISCARD_IOV_NUM) {

@@ -1125,44 +1125,6 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 }
 
 /**
- * udp_listen() - Initialise listening socket for a given port
- * @c:		Execution context
- * @pif:	Interface to open the socket for (PIF_HOST or PIF_SPLICE)
- * @rule:	Index of relevant forwarding rule
- * @addr:	Pointer to address for binding, NULL if not configured
- * @ifname:	Name of interface to bind to, NULL if not configured
- * @port:	Port, host order
- *
- * Return: socket fd on success, negative error code on failure
- */
-int udp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
-	       const union inany_addr *addr, const char *ifname, in_port_t port)
-{
-	int s;
-
-	assert(!c->no_udp);
-
-	if (!c->ifi4) {
-		if (!addr)
-			/* Restrict to v6 only */
-			addr = &inany_any6;
-		else if (inany_v4(addr))
-			return -EAFNOSUPPORT;
-	}
-	if (!c->ifi6) {
-		if (!addr)
-			/* Restrict to v4 only */
-			addr = &inany_any4;
-		else if (!inany_v4(addr))
-			return -EAFNOSUPPORT;
-	}
-
-	s = pif_listen(c, EPOLL_TYPE_UDP_LISTEN, pif, addr, ifname, port, rule);
-
-	return s;
-}
-
-/**
  * udp_splice_iov_init() - Set up buffers and descriptors for recvmmsg/sendmmsg
  */
 static void udp_splice_iov_init(void)

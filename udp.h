@@ -19,8 +19,6 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 		    sa_family_t af, const void *saddr, const void *daddr,
 		    uint8_t ttl, const struct pool *p, int idx,
 		    const struct timespec *now);
-int udp_listen(const struct ctx *c, uint8_t pif, unsigned rule,
-	       const union inany_addr *addr, const char *ifname, in_port_t port);
 int udp_init(struct ctx *c);
 void udp_update_l2_buf(const unsigned char *eth_d);
 

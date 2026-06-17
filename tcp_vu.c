@@ -423,43 +423,24 @@ static void tcp_vu_prepare(const struct ctx *c, struct tcp_tap_conn *conn,
  *			     in window
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @already_sent:	Number of bytes already sent to tap, but not acked
  *
  * Return: negative on connection reset, 0 otherwise
  */
-int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
+int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
+			  uint32_t already_sent)
 {
 	uint32_t wnd_scaled = conn->wnd_from_tap << conn->ws_from_tap;
 	struct vu_dev *vdev = c->vdev;
 	struct vu_virtq *vq = &vdev->vq[VHOST_USER_RX_QUEUE];
-	uint32_t already_sent, check;
 	ssize_t len, previous_dlen;
 	int i, elem_cnt, frame_cnt;
 	size_t hdrlen, fillsize;
 	int v6 = CONN_V6(conn);
+	uint32_t check;
 
 	if (!vu_queue_enabled(vq) || !vu_queue_started(vq)) {
 		debug("Got packet, but RX virtqueue not usable yet");
-		return 0;
-	}
-
-	already_sent = conn->seq_to_tap - conn->seq_ack_from_tap;
-
-	if (SEQ_LT(already_sent, 0)) {
-		/* RFC 761, section 2.1. */
-		flow_trace(conn, "ACK sequence gap: ACK for %u, sent: %u",
-			   conn->seq_ack_from_tap, conn->seq_to_tap);
-		conn->seq_to_tap = conn->seq_ack_from_tap;
-		already_sent = 0;
-		if (tcp_set_peek_offset(conn, 0)) {
-			tcp_rst(c, conn);
-			return -1;
-		}
-	}
-
-	if (!wnd_scaled || already_sent >= wnd_scaled) {
-		conn_flag(c, conn, ACK_FROM_TAP_BLOCKS);
-		conn_flag(c, conn, STALLED);
-		conn_flag(c, conn, ACK_FROM_TAP_DUE);
 		return 0;
 	}
 

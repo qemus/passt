@@ -66,7 +66,7 @@ static inline bool pif_is_socket(uint8_t pif)
 
 void pif_sockaddr(const struct ctx *c, union sockaddr_inany *sa,
 		  uint8_t pif, const union inany_addr *addr, in_port_t port);
-int pif_listen(const struct ctx *c, enum epoll_type type, uint8_t pif,
+int pif_listen(const struct ctx *c, uint8_t proto, uint8_t pif,
 	       const union inany_addr *addr, const char *ifname,
 	       in_port_t port, unsigned rule);
 

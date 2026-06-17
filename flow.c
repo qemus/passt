@@ -207,25 +207,24 @@ static int flowside_sock_splice(void *arg)
  * @c:		Execution context
  * @type:	Socket epoll type
  * @pif:	Interface for this socket
- * @tgt:	Target flowside
- * @data:	epoll reference portion for protocol handlers
+ * @side:	Flowside to create a socket for
  *
- * Return: socket fd of protocol @proto bound to our address and port from @tgt
+ * Return: socket fd of protocol @proto bound to our address and port from @side
  *         (if specified).
  */
 int flowside_sock_l4(const struct ctx *c, enum epoll_type type, uint8_t pif,
-		     const struct flowside *tgt)
+		     const struct flowside *side)
 {
 	const char *ifname = NULL;
 	union sockaddr_inany sa;
 
 	assert(pif_is_socket(pif));
 
-	pif_sockaddr(c, &sa, pif, &tgt->oaddr, tgt->oport);
+	pif_sockaddr(c, &sa, pif, &side->oaddr, side->oport);
 
 	switch (pif) {
 	case PIF_HOST:
-		if (inany_is_loopback(&tgt->oaddr))
+		if (inany_is_loopback(&side->oaddr))
 			ifname = NULL;
 		else if (sa.sa_family == AF_INET)
 			ifname = c->ip4.ifname_out;
