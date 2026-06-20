@@ -22,9 +22,9 @@
  * @v4mapped.zero:	All zero-bits for an IPv4 address
  * @v4mapped.one:	All one-bits for an IPv4 address
  * @v4mapped.a4:	If @a6 is an IPv4 mapped address, the IPv4 address
- * @u64:		As an array of u64s (solely for hashing)
+ * @u32:		As an array of u32s (solely for hashing)
  *
- * @v4mapped and @u64 shouldn't be accessed except via helpers.
+ * @v4mapped and @u32 shouldn't be accessed except via helpers.
  */
 union inany_addr {
 	struct in6_addr a6;

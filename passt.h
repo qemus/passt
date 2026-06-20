@@ -82,6 +82,8 @@ enum passt_modes {
  * @ifname_out:		Optional interface name to bind outbound sockets to
  * @no_copy_routes:	Don't copy all routes when configuring target namespace
  * @no_copy_addrs:	Don't copy all addresses when configuring namespace
+ * @addr_fixed:		Address was given explicitly (-a): don't update
+ *			addr_seen from traffic observed on tap
  */
 struct ip4_ctx {
 	/* PIF_TAP addresses */
@@ -103,6 +105,7 @@ struct ip4_ctx {
 
 	bool no_copy_routes;
 	bool no_copy_addrs;
+	bool addr_fixed;
 };
 
 /**
@@ -123,6 +126,8 @@ struct ip4_ctx {
  * @ifname_out:		Optional interface name to bind outbound sockets to
  * @no_copy_routes:	Don't copy all routes when configuring target namespace
  * @no_copy_addrs:	Don't copy all addresses when configuring namespace
+ * @addr_fixed:		Address was given explicitly (-a): don't update
+ *			addr_seen from traffic observed on tap
  */
 struct ip6_ctx {
 	/* PIF_TAP addresses */
@@ -144,6 +149,7 @@ struct ip6_ctx {
 
 	bool no_copy_routes;
 	bool no_copy_addrs;
+	bool addr_fixed;
 };
 
 #include <netinet/if_ether.h>

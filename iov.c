@@ -450,3 +450,38 @@ ssize_t iov_tail_clone(struct iovec *dst_iov, size_t dst_iov_cnt,
 
 	return j;
 }
+
+/**
+ * iov_tail_trim() - Limit a tail to @len bytes via a scratch iovec array
+ * @tail:	 Pointer to the iov_tail to trim; rebuilt on success to
+ *		 reference @scratch
+ * @len:	 Number of bytes to keep
+ * @scratch:	 Scratch iovec array backing the trimmed tail; must stay
+ *		 valid as long as the trimmed tail is in use
+ * @scratch_cnt: Number of elements in @scratch
+ *
+ * Return: true on success, false if @tail is shorter than @len or does
+ *	   not fit in @scratch (@tail is unchanged on failure)
+ */
+bool iov_tail_trim(struct iov_tail *tail, size_t len,
+		   struct iovec *scratch, size_t scratch_cnt)
+{
+	ssize_t cnt = iov_tail_clone(scratch, scratch_cnt, tail);
+	size_t left = len;
+	unsigned int i;
+
+	if (cnt < 0)
+		return false;
+
+	for (i = 0; i < (size_t)cnt && left; i++) {
+		if (scratch[i].iov_len > left)
+			scratch[i].iov_len = left;
+		left -= scratch[i].iov_len;
+	}
+
+	if (left)
+		return false;
+
+	*tail = IOV_TAIL(scratch, i, 0);
+	return true;
+}

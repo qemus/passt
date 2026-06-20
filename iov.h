@@ -97,6 +97,8 @@ size_t iov_push_header_(struct iov_tail *tail, const void *v, size_t len);
 void *iov_remove_header_(struct iov_tail *tail, void *v, size_t len, size_t align);
 ssize_t iov_tail_clone(struct iovec *dst_iov, size_t dst_iov_cnt,
 		       struct iov_tail *tail);
+bool iov_tail_trim(struct iov_tail *tail, size_t len,
+		   struct iovec *scratch, size_t scratch_cnt);
 
 /**
  * IOV_PEEK_HEADER() - Get typed pointer to a header from an IOV tail

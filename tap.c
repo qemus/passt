@@ -716,7 +716,8 @@ static int tap4_handler(struct ctx *c, const struct pool *in,
 	i = 0;
 resume:
 	for (seq_count = 0, seq = NULL; i < in->count; i++) {
-		size_t l3len, hlen, l4len;
+		struct iovec trim_iov[UIO_MAXIOV];
+		size_t l3len, hlen, l4len, check;
 		struct ethhdr eh_storage;
 		struct iphdr iph_storage;
 		struct udphdr uh_storage;
@@ -770,12 +771,23 @@ resume:
 			continue;
 		}
 
-		if (iph->saddr && c->ip4.addr_seen.s_addr != iph->saddr)
+		if (!c->ip4.addr_fixed &&
+		    iph->saddr && c->ip4.addr_seen.s_addr != iph->saddr)
 			c->ip4.addr_seen.s_addr = iph->saddr;
 
 		if (!iov_drop_header(&data, hlen))
 			continue;
-		if (iov_tail_size(&data) != l4len)
+
+		check = iov_tail_size(&data);
+		if (check < l4len)
+			continue;
+
+		/* Drivers modelled on real hardware (Plan 9's virtio, for
+		 * one) pad short frames to the 60 byte Ethernet minimum:
+		 * trim trailing padding instead of dropping the packet.
+		 */
+		if (check > l4len &&
+		    !iov_tail_trim(&data, l4len, trim_iov, ARRAY_SIZE(trim_iov)))
 			continue;
 
 		if (iph->protocol == IPPROTO_ICMP) {
@@ -1003,13 +1015,15 @@ resume:
 		if (IN6_IS_ADDR_LINKLOCAL(saddr)) {
 			c->ip6.addr_ll_seen = *saddr;
 
-			if (IN6_IS_ADDR_UNSPECIFIED(&c->ip6.addr_seen)) {
+			if (!c->ip6.addr_fixed &&
+			    IN6_IS_ADDR_UNSPECIFIED(&c->ip6.addr_seen)) {
 				c->ip6.addr_seen = *saddr;
 			}
 
 			if (IN6_IS_ADDR_UNSPECIFIED(&c->ip6.addr))
 				c->ip6.addr = *saddr;
-		} else if (!IN6_IS_ADDR_UNSPECIFIED(saddr)){
+		} else if (!c->ip6.addr_fixed &&
+			   !IN6_IS_ADDR_UNSPECIFIED(saddr)) {
 			c->ip6.addr_seen = *saddr;
 		}
 
