@@ -28,7 +28,7 @@ jobs:
           fi
     - 
       name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       if: env.exists == 'true'
       with:
         persist-credentials: false
