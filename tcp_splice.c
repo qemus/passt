@@ -136,10 +136,12 @@ static uint32_t tcp_splice_conn_epoll_events(uint16_t events, unsigned sidei)
 /**
  * tcp_splice_epoll_ctl() - Add/modify/delete epoll state from connection events
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, negative error code on failure (not on deletion)
  */
-static int tcp_splice_epoll_ctl(struct tcp_splice_conn *conn)
+static int tcp_splice_epoll_ctl(struct tcp_splice_conn *conn,
+				const struct timespec *now)
 {
 	uint32_t events[2];
 
@@ -149,7 +151,7 @@ static int tcp_splice_epoll_ctl(struct tcp_splice_conn *conn)
 	if (flow_epoll_set(&conn->f, EPOLL_CTL_MOD, events[0], conn->s[0], 0) ||
 	    flow_epoll_set(&conn->f, EPOLL_CTL_MOD, events[1], conn->s[1], 1)) {
 		int ret = -errno;
-		flow_perror(conn, "ERROR on epoll_ctl()");
+		flow_perror_ratelimit(conn, now, "ERROR on epoll_ctl()");
 		return ret;
 	}
 
@@ -201,8 +203,10 @@ static void conn_flag_do(struct tcp_splice_conn *conn,
  * conn_event_do() - Set and log connection events, update epoll state
  * @conn:	Connection pointer
  * @event:	Connection event
+ * @now:	Current timestamp
  */
-static void conn_event_do(struct tcp_splice_conn *conn, unsigned long event)
+static void conn_event_do(struct tcp_splice_conn *conn, unsigned long event,
+			  const struct timespec *now)
 {
 	if (event & (event - 1)) {
 		int flag_index = fls(~event);
@@ -224,14 +228,14 @@ static void conn_event_do(struct tcp_splice_conn *conn, unsigned long event)
 			flow_dbg(conn, "%s", tcp_splice_event_str[flag_index]);
 	}
 
-	if (tcp_splice_epoll_ctl(conn))
+	if (tcp_splice_epoll_ctl(conn, now))
 		conn_flag(conn, CLOSING);
 }
 
-#define conn_event(conn, event)					\
+#define conn_event(conn, event, now)					\
 	do {								\
 		flow_trace(conn, "event at %s:%i",__func__, __LINE__);	\
-		conn_event_do(conn, event);				\
+		conn_event_do(conn, event, now);			\
 	} while (0)
 
 /**
@@ -292,11 +296,13 @@ bool tcp_splice_flow_defer(struct tcp_splice_conn *conn)
  * tcp_splice_connect_finish() - Completion of connect() or call on success
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, -EIO on failure
  */
 static int tcp_splice_connect_finish(const struct ctx *c,
-				     struct tcp_splice_conn *conn)
+				     struct tcp_splice_conn *conn,
+				     const struct timespec *now)
 {
 	unsigned sidei;
 	int i = 0;
@@ -314,8 +320,10 @@ static int tcp_splice_connect_finish(const struct ctx *c,
 
 		if (conn->pipe[sidei][0] < 0) {
 			if (pipe2(conn->pipe[sidei], O_NONBLOCK | O_CLOEXEC)) {
-				flow_perror(conn, "cannot create %d->%d pipe",
-					    sidei, !sidei);
+				flow_perror_ratelimit(
+					conn, now,
+					"cannot create %d->%d pipe",
+					sidei, !sidei);
 				tcp_splice_rst(conn);
 				return -EIO;
 			}
@@ -330,7 +338,7 @@ static int tcp_splice_connect_finish(const struct ctx *c,
 	}
 
 	if (!(conn->events & SPLICE_ESTABLISHED))
-		conn_event(conn, SPLICE_ESTABLISHED);
+		conn_event(conn, SPLICE_ESTABLISHED, now);
 
 	return 0;
 }
@@ -339,10 +347,12 @@ static int tcp_splice_connect_finish(const struct ctx *c,
  * tcp_splice_connect() - Create and connect socket for new spliced connection
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  *
  * Return: 0 for connect() succeeded or in progress, negative value on error
  */
-static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
+static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn,
+			      const struct timespec *now)
 {
 	const struct flowside *tgt = &conn->f.side[TGTSIDE];
 	sa_family_t af = inany_v4(&tgt->eaddr) ? AF_INET : AF_INET6;
@@ -381,11 +391,11 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->s[0], 0) ||
 	    flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, conn->s[1], 1)) {
 		int ret = -errno;
-		flow_perror(conn, "Cannot register to epollfd");
+		flow_perror_ratelimit(conn, now, "Cannot register to epollfd");
 		return ret;
 	}
 
-	conn_event(conn, SPLICE_CONNECT);
+	conn_event(conn, SPLICE_CONNECT, now);
 
 	if (connect(conn->s[1], &sa.sa, socklen_inany(&sa))) {
 		if (errno != EINPROGRESS) {
@@ -394,8 +404,8 @@ static int tcp_splice_connect(const struct ctx *c, struct tcp_splice_conn *conn)
 			return -errno;
 		}
 	} else {
-		conn_event(conn, SPLICE_ESTABLISHED);
-		return tcp_splice_connect_finish(c, conn);
+		conn_event(conn, SPLICE_ESTABLISHED, now);
+		return tcp_splice_connect_finish(c, conn, now);
 	}
 
 	return 0;
@@ -435,10 +445,12 @@ static int tcp_conn_sock_ns(const struct ctx *c, sa_family_t af)
  * @flow:	flow to initialise
  * @s0:		Accepted (side 0) socket
  * @sa:		Peer address of connection
+ * @now:	Current timestamp
  *
  * #syscalls:pasta setsockopt
  */
-void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0)
+void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0,
+			       const struct timespec *now)
 {
 	struct tcp_splice_conn *conn = FLOW_SET_TYPE(flow, FLOW_TCP_SPLICE,
 						     tcp_splice);
@@ -453,7 +465,7 @@ void tcp_splice_conn_from_sock(const struct ctx *c, union flow *flow, int s0)
 	if (setsockopt(s0, SOL_TCP, TCP_QUICKACK, &((int){ 1 }), sizeof(int)))
 		flow_trace(conn, "failed to set TCP_QUICKACK on %i", s0);
 
-	if (tcp_splice_connect(c, conn))
+	if (tcp_splice_connect(c, conn, now))
 		tcp_splice_rst(conn);
 
 	FLOW_ACTIVATE(conn);
@@ -499,7 +511,7 @@ static int tcp_splice_forward(struct ctx *c,
 
 		if (readlen <= 0) {
 			if (!readlen) /* EOF */
-				conn_event(conn, FIN_RCVD(fromsidei));
+				conn_event(conn, FIN_RCVD(fromsidei), now);
 
 			/* We're either blocked or at EOF on the read side, and
 			 * there's nothing in the pipe so there's nothing to do
@@ -551,9 +563,9 @@ static int tcp_splice_forward(struct ctx *c,
 	 * drain.
 	 */
 	if (conn->pending[fromsidei])
-		conn_event(conn, OUT_WAIT(!fromsidei));
+		conn_event(conn, OUT_WAIT(!fromsidei), now);
 	else
-		conn_event(conn, ~OUT_WAIT(!fromsidei));
+		conn_event(conn, ~OUT_WAIT(!fromsidei), now);
 
 	if ((conn->events & FIN_RCVD(fromsidei)) &&
 	    !(conn->events & FIN_SENT(!fromsidei)) &&
@@ -563,7 +575,7 @@ static int tcp_splice_forward(struct ctx *c,
 					      pif_name(conn->f.pif[!fromsidei]));
 			return -1;
 		}
-		conn_event(conn, FIN_SENT(!fromsidei));
+		conn_event(conn, FIN_SENT(!fromsidei), now);
 	}
 
 	return 0;
@@ -593,7 +605,8 @@ void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
 
 		rc = getsockopt(ref.fd, SOL_SOCKET, SO_ERROR, &err, &sl);
 		if (rc)
-			flow_perror(conn, "Error retrieving SO_ERROR");
+			flow_perror_ratelimit(conn, now,
+					      "Error retrieving SO_ERROR");
 		else
 			flow_dbg_ratelimit(conn, now,
 					   "Error event on %s socket: %s",
@@ -610,7 +623,7 @@ void tcp_splice_sock_handler(struct ctx *c, union epoll_ref ref,
 				events);
 			goto reset;
 		}
-		if (tcp_splice_connect_finish(c, conn))
+		if (tcp_splice_connect_finish(c, conn, now))
 			goto reset;
 	}
 

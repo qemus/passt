@@ -116,12 +116,14 @@ static int tcp_vu_send_dup(const struct ctx *c, struct vu_virtq *vq,
  * @c:		Execution context
  * @conn:	Connection pointer
  * @flags:	TCP flags: if not set, send segment only if ACK is due
+ * @now:	Current timestamp
  *
  * Return: -ECONNRESET on fatal connection error,
  *         -EAGAIN if vhost-user buffers are unavailable,
  *         0 otherwise
  */
-int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
+int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags,
+		     const struct timespec *now)
 {
 	struct vu_dev *vdev = c->vdev;
 	struct vu_virtq *vq = &vdev->vq[VHOST_USER_RX_QUEUE];
@@ -158,7 +160,7 @@ int tcp_vu_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 		ip6h = (struct ipv6hdr)L2_BUF_IP6_INIT(IPPROTO_TCP);
 
 	seq = conn->seq_to_tap;
-	ret = tcp_prepare_flags(c, conn, flags, &th, &opts, &optlen);
+	ret = tcp_prepare_flags(c, conn, flags, &th, &opts, &optlen, now);
 	if (ret <= 0) {
 		vu_queue_rewind(vq, elem_cnt);
 		return ret;
@@ -424,11 +426,12 @@ static void tcp_vu_prepare(const struct ctx *c, struct tcp_tap_conn *conn,
  * @c:		Execution context
  * @conn:	Connection pointer
  * @already_sent:	Number of bytes already sent to tap, but not acked
+ * @now:	Current timestamp
  *
  * Return: negative on connection reset, 0 otherwise
  */
 int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
-			  uint32_t already_sent)
+			  uint32_t already_sent, const struct timespec *now)
 {
 	uint32_t wnd_scaled = conn->wnd_from_tap << conn->ws_from_tap;
 	struct vu_dev *vdev = c->vdev;
@@ -455,12 +458,12 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 			       &elem_cnt, &frame_cnt);
 	if (len < 0) {
 		if (len != -EAGAIN && len != -EWOULDBLOCK) {
-			tcp_rst(c, conn);
+			tcp_rst(c, conn, now);
 			return len;
 		}
 
 		if (already_sent) /* No new data and EAGAIN: set EPOLLET */
-			conn_flag(c, conn, STALLED);
+			conn_flag(c, conn, STALLED, now);
 
 		return 0;
 	}
@@ -468,7 +471,7 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 	if (!len) {
 		vu_queue_rewind(vq, elem_cnt);
 		if (already_sent) {
-			conn_flag(c, conn, STALLED);
+			conn_flag(c, conn, STALLED, now);
 		} else if ((conn->events & (SOCK_FIN_RCVD | TAP_FIN_SENT)) ==
 			   SOCK_FIN_RCVD) {
 			int ret;
@@ -476,24 +479,24 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 			/* See tcp_buf_data_from_sock() */
 			conn->seq_ack_to_tap = conn->seq_from_tap;
 
-			ret = tcp_vu_send_flag(c, conn, FIN | ACK);
+			ret = tcp_vu_send_flag(c, conn, FIN | ACK, now);
 			if (ret) {
-				tcp_rst(c, conn);
+				tcp_rst(c, conn, now);
 				return ret;
 			}
 
-			conn_event(c, conn, TAP_FIN_SENT);
-			conn_flag(c, conn, ACK_FROM_TAP_DUE);
+			conn_event(c, conn, TAP_FIN_SENT, now);
+			conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 		}
 
 		return 0;
 	}
 
-	conn_flag(c, conn, ~ACK_FROM_TAP_BLOCKS);
-	conn_flag(c, conn, ~STALLED);
+	conn_flag(c, conn, ~ACK_FROM_TAP_BLOCKS, now);
+	conn_flag(c, conn, ~STALLED, now);
 
 	/* Likely, some new data was acked too. */
-	tcp_update_seqack_wnd(c, conn, false, NULL);
+	tcp_update_seqack_wnd(c, conn, false, NULL, now);
 
 	/* initialize headers */
 	/* iov_vu is an array of buffers and the buffer size can be
@@ -537,7 +540,7 @@ int tcp_vu_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 	}
 	vu_queue_notify(vdev, vq);
 
-	conn_flag(c, conn, ACK_FROM_TAP_DUE);
+	conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 
 	return 0;
 }

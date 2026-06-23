@@ -48,12 +48,14 @@ struct migrate_seen_addrs_v2 {
  * @c:		Execution context
  * @stage:	Migration stage, unused
  * @fd:		File descriptor for state transfer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, positive error code on failure
  */
 /* cppcheck-suppress [constParameterCallback, unmatchedSuppression] */
 static int seen_addrs_source_v2(struct ctx *c,
-				const struct migrate_stage *stage, int fd)
+				const struct migrate_stage *stage, int fd,
+				const struct timespec *now)
 {
 	struct migrate_seen_addrs_v2 addrs = {
 		.addr6 = c->ip6.addr_seen,
@@ -62,6 +64,7 @@ static int seen_addrs_source_v2(struct ctx *c,
 	};
 
 	(void)stage;
+	(void)now;
 
 	memcpy(addrs.mac, c->guest_mac, sizeof(addrs.mac));
 
@@ -76,15 +79,18 @@ static int seen_addrs_source_v2(struct ctx *c,
  * @c:		Execution context
  * @stage:	Migration stage, unused
  * @fd:		File descriptor for state transfer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, positive error code on failure
  */
 static int seen_addrs_target_v2(struct ctx *c,
-				const struct migrate_stage *stage, int fd)
+				const struct migrate_stage *stage, int fd,
+				const struct timespec *now)
 {
 	struct migrate_seen_addrs_v2 addrs;
 
 	(void)stage;
+	(void)now;
 
 	if (read_all_buf(fd, &addrs, sizeof(addrs)))
 		return errno;
@@ -133,10 +139,11 @@ static const struct migrate_version versions[] = {
  * migrate_source() - Migration as source, send state to hypervisor
  * @c:		Execution context
  * @fd:		File descriptor for state transfer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, positive error code on failure
  */
-static int migrate_source(struct ctx *c, int fd)
+static int migrate_source(struct ctx *c, int fd, const struct timespec *now)
 {
 	const struct migrate_version *v = CURRENT_VERSION;
 	const struct migrate_header header = {
@@ -159,7 +166,7 @@ static int migrate_source(struct ctx *c, int fd)
 
 		debug("Source side migration stage: %s", s->name);
 
-		if ((ret = s->source(c, s, fd))) {
+		if ((ret = s->source(c, s, fd, now))) {
 			err("Source migration stage: %s: %s, abort", s->name,
 			    strerror_(ret));
 			return ret;
@@ -209,10 +216,11 @@ static const struct migrate_version *migrate_target_read_header(int fd)
  * migrate_target() - Migration as target, receive state from hypervisor
  * @c:		Execution context
  * @fd:		File descriptor for state transfer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, positive error code on failure
  */
-static int migrate_target(struct ctx *c, int fd)
+static int migrate_target(struct ctx *c, int fd, const struct timespec *now)
 {
 	const struct migrate_version *v;
 	const struct migrate_stage *s;
@@ -227,7 +235,7 @@ static int migrate_target(struct ctx *c, int fd)
 
 		debug("Target side migration stage: %s", s->name);
 
-		if ((ret = s->target(c, s, fd))) {
+		if ((ret = s->target(c, s, fd, now))) {
 			err("Target migration stage: %s: %s, abort", s->name,
 			    strerror_(ret));
 			return ret;
@@ -282,8 +290,9 @@ void migrate_request(struct ctx *c, int fd, bool target)
 /**
  * migrate_handler() - Send/receive passt internal state to/from hypervisor
  * @c:		Execution context
+ * @now:	Current timestamp
  */
-void migrate_handler(struct ctx *c)
+void migrate_handler(struct ctx *c, const struct timespec *now)
 {
 	int rc;
 
@@ -294,9 +303,9 @@ void migrate_handler(struct ctx *c)
 	      c->device_state_fd, c->migrate_target);
 
 	if (c->migrate_target)
-		rc = migrate_target(c, c->device_state_fd);
+		rc = migrate_target(c, c->device_state_fd, now);
 	else
-		rc = migrate_source(c, c->device_state_fd);
+		rc = migrate_source(c, c->device_state_fd, now);
 
 	migrate_close(c);
 

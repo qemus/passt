@@ -30,8 +30,10 @@ struct migrate_header {
  */
 struct migrate_stage {
 	const char *name;
-	int (*source)(struct ctx *c, const struct migrate_stage *stage, int fd);
-	int (*target)(struct ctx *c, const struct migrate_stage *stage, int fd);
+	int (*source)(struct ctx *c, const struct migrate_stage *stage, int fd,
+		      const struct timespec *now);
+	int (*target)(struct ctx *c, const struct migrate_stage *stage, int fd,
+		      const struct timespec *now);
 
 	/* Add here separate rollback callbacks if needed */
 };
@@ -49,6 +51,6 @@ struct migrate_version {
 void migrate_init(struct ctx *c);
 void migrate_close(struct ctx *c);
 void migrate_request(struct ctx *c, int fd, bool target);
-void migrate_handler(struct ctx *c);
+void migrate_handler(struct ctx *c, const struct timespec *now);
 
 #endif /* MIGRATE_H */

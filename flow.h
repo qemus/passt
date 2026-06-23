@@ -274,48 +274,53 @@ void flow_defer_handler(const struct ctx *c, const struct timespec *now);
 int flow_migrate_source_early(struct ctx *c, const struct migrate_stage *stage,
 			      int fd);
 int flow_migrate_source_pre(struct ctx *c, const struct migrate_stage *stage,
-			    int fd);
+			    int fd, const struct timespec *now);
 int flow_migrate_source(struct ctx *c, const struct migrate_stage *stage,
-			int fd);
+			int fd, const struct timespec *now);
 int flow_migrate_target(struct ctx *c, const struct migrate_stage *stage,
-			int fd);
+			int fd, const struct timespec *now);
 
-void flow_log_(const struct flow_common *f, bool newline, int pri,
-	       const char *fmt, ...)
-	__attribute__((format(printf, 4, 5)));
+void flow_log__(const struct flow_common *f, int pri, bool perror, bool details,
+		enum flow_state state, const char *fmt, ...)
+	__attribute__((format(printf, 6, 7)));
 
-#define flow_log(f_, pri, ...)	flow_log_(&(f_)->f, true, (pri), __VA_ARGS__)
-#define flow_dbg(f, ...)	flow_log((f), LOG_DEBUG, __VA_ARGS__)
-#define flow_err(f, ...)	flow_log((f), LOG_ERR, __VA_ARGS__)
+#define flow_log_(f_, pri_, perror_, ...)				\
+	flow_log__((f_), (pri_), (perror_), (pri_) > LOG_DEBUG,		\
+		   (f_)->state, __VA_ARGS__)
 
-#define flow_trace(f, ...)						\
+#define flow_log(flow_, pri_, perror_, ...)				\
+	flow_log_(&(flow_)->f, (pri_), (perror_), __VA_ARGS__)
+
+#define flow_dbg(flow_, ...)						\
+	flow_log((flow_), LOG_DEBUG, false, __VA_ARGS__)
+#define flow_warn(flow_, ...)						\
+	flow_log((flow_), LOG_WARNING, false, __VA_ARGS__)
+#define flow_err(flow_, ...)						\
+	flow_log((flow_), LOG_ERR, false, __VA_ARGS__)
+#define flow_trace(flow_, ...)						\
 	do {								\
 		if (log_trace)						\
-			flow_dbg((f), __VA_ARGS__);			\
+			flow_dbg((flow_), __VA_ARGS__);			\
 	} while (0)
 
-#define flow_log_perror_(f, pri, ...)					\
-	do {								\
-		int errno_ = errno;					\
-		flow_log_((f), false, (pri), __VA_ARGS__);		\
-		logmsg(true, true, (pri), ": %s", strerror_(errno_));	\
-	} while (0)
+#define flow_dbg_perror(flow_, ...) \
+	flow_log((flow_), LOG_DEBUG, true, __VA_ARGS__)
+#define flow_warn_perror(flow_, ...) \
+	flow_log((flow_), LOG_WARNING, true, __VA_ARGS__)
+#define flow_perror(flow_, ...) \
+	flow_log((flow_), LOG_ERR, true, __VA_ARGS__)
 
-#define flow_dbg_perror(f_, ...) flow_log_perror_(&(f_)->f, LOG_DEBUG, __VA_ARGS__)
-#define flow_perror(f_, ...)	flow_log_perror_(&(f_)->f, LOG_ERR, __VA_ARGS__)
-
-void flow_log_details_(const struct flow_common *f, int pri,
-		       enum flow_state state);
-#define flow_log_details(f_, pri) \
-	flow_log_details_(&((f_)->f), (pri), (f_)->f.state)
-#define flow_dbg_details(f_)	flow_log_details((f_), LOG_DEBUG)
-#define flow_err_details(f_)	flow_log_details((f_), LOG_ERR)
-
-#define flow_dbg_ratelimit(f, now, ...)					\
-	logmsg_ratelimit(flow_dbg, debug, now, f, __VA_ARGS__)
-#define flow_err_ratelimit(f, now, ...)					\
-	logmsg_ratelimit(flow_err, err, now, f, __VA_ARGS__)
-#define flow_perror_ratelimit(f, now, ...)				\
-	logmsg_ratelimit(flow_perror, err, now, f, __VA_ARGS__)
+#define flow_dbg_ratelimit(flow_, now_, ...)				\
+	logmsg_ratelimit(flow_dbg, debug, (now_), (flow_), __VA_ARGS__)
+#define flow_dbg_perror_ratelimit(flow_, now_, ...)			\
+	logmsg_ratelimit(flow_dbg_perror, debug, (now_), (flow_), __VA_ARGS__)
+#define flow_warn_ratelimit(flow_, now_, ...)				\
+	logmsg_ratelimit(flow_warn, warn, (now_), (flow_), __VA_ARGS__)
+#define flow_warn_perror_ratelimit(flow_, now_, ...)			\
+	logmsg_ratelimit(flow_warn_perror, warn, (now_), (flow_), __VA_ARGS__)
+#define flow_err_ratelimit(flow_, now_, ...)				\
+	logmsg_ratelimit(flow_err, err, (now_), (flow_), __VA_ARGS__)
+#define flow_perror_ratelimit(flow_, now_, ...)				\
+	logmsg_ratelimit(flow_perror, err, (now_), (flow_), __VA_ARGS__)
 
 #endif /* FLOW_H */

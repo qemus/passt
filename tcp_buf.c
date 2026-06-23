@@ -106,9 +106,11 @@ void tcp_sock_iov_init(const struct ctx *c)
  * @conns:	Array of connection pointers corresponding to queued frames
  * @frames:	Two-dimensional array containing queued frames with sub-iovs
  * @num_frames:	Number of entries in the two arrays to be compared
+ * @now:	Current timestamp
  */
 static void tcp_revert_seq(const struct ctx *c, struct tcp_tap_conn **conns,
-			   struct iovec (*frames)[TCP_NUM_IOVS], int num_frames)
+			   struct iovec (*frames)[TCP_NUM_IOVS], int num_frames,
+			   const struct timespec *now)
 {
 	int i;
 
@@ -123,16 +125,17 @@ static void tcp_revert_seq(const struct ctx *c, struct tcp_tap_conn **conns,
 
 		conn->seq_to_tap = seq;
 		peek_offset = conn->seq_to_tap - conn->seq_ack_from_tap;
-		if (tcp_set_peek_offset(conn, peek_offset))
-			tcp_rst(c, conn);
+		if (tcp_set_peek_offset(conn, peek_offset, now))
+			tcp_rst(c, conn, now);
 	}
 }
 
 /**
  * tcp_payload_flush() - Send out buffers for segments with data or flags
  * @c:		Execution context
+ * @now:	Current timestamp
  */
-void tcp_payload_flush(const struct ctx *c)
+void tcp_payload_flush(const struct ctx *c, const struct timespec *now)
 {
 	size_t m;
 
@@ -140,7 +143,7 @@ void tcp_payload_flush(const struct ctx *c)
 			    tcp_payload_used);
 	if (m != tcp_payload_used) {
 		tcp_revert_seq(c, &tcp_frame_conns[m], &tcp_l2_iov[m],
-			       tcp_payload_used - m);
+			       tcp_payload_used - m, now);
 	}
 	tcp_payload_used = 0;
 }
@@ -198,13 +201,15 @@ static void tcp_l2_buf_fill_headers(const struct ctx *c,
 
 /**
  * tcp_buf_send_flag() - Send segment with flags to tap (no payload)
- * @c:         Execution context
- * @conn:      Connection pointer
- * @flags:     TCP flags: if not set, send segment only if ACK is due
+ * @c:		Execution context
+ * @conn:	Connection pointer
+ * @flags:	TCP flags: if not set, send segment only if ACK is due
+ * @now:	Current timestamp
  *
  * Return: negative error code on connection reset, 0 otherwise
  */
-int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
+int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags,
+		      const struct timespec *now)
 {
 	struct tcp_payload_t *payload;
 	struct iovec *iov;
@@ -223,7 +228,8 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	payload = iov[TCP_IOV_PAYLOAD].iov_base;
 	seq = conn->seq_to_tap;
 	ret = tcp_prepare_flags(c, conn, flags, &payload->th,
-				(struct tcp_syn_opts *)&payload->data, &optlen);
+				(struct tcp_syn_opts *)&payload->data,
+				&optlen, now);
 	if (ret <= 0)
 		return ret;
 
@@ -253,7 +259,7 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
 	}
 
 	if (tcp_payload_used > TCP_FRAMES_MEM - 2)
-		tcp_payload_flush(c);
+		tcp_payload_flush(c, now);
 
 	return 0;
 }
@@ -266,9 +272,11 @@ int tcp_buf_send_flag(const struct ctx *c, struct tcp_tap_conn *conn, int flags)
  * @no_csum:	Don't compute IPv4 checksum, use the one from previous buffer
  * @seq:	Sequence number to be sent
  * @push:	Set PSH flag, last segment in a batch
+ * @now:	Current timestamp
  */
 static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
-			    ssize_t dlen, int no_csum, uint32_t seq, bool push)
+			    ssize_t dlen, int no_csum, uint32_t seq, bool push,
+			    const struct timespec *now)
 {
 	struct tcp_payload_t *payload;
 	uint32_t check = IP4_CSUM;
@@ -302,7 +310,7 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 	tcp_l2_buf_pad(iov);
 
 	if (++tcp_payload_used > TCP_FRAMES_MEM - 1)
-		tcp_payload_flush(c);
+		tcp_payload_flush(c, now);
 }
 
 /**
@@ -310,13 +318,14 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
  * @c:		Execution context
  * @conn:	Connection pointer
  * @already_sent:	Number of bytes already sent to tap, but not acked
+ * @now:	Current timestamp
  *
  * Return: negative on connection reset, 0 otherwise
  *
  * #syscalls recvmsg
  */
 int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
-			   uint32_t already_sent)
+			   uint32_t already_sent, const struct timespec *now)
 {
 	uint32_t wnd_scaled = conn->wnd_from_tap << conn->ws_from_tap;
 	int fill_bufs, send_bufs = 0, last_len, iov_rem = 0;
@@ -336,12 +345,12 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 	}
 
 	if (tcp_prepare_iov(&mh_sock, iov_sock, already_sent, fill_bufs)) {
-		tcp_rst(c, conn);
+		tcp_rst(c, conn, now);
 		return -1;
 	}
 
 	if (tcp_payload_used + fill_bufs > TCP_FRAMES_MEM) {
-		tcp_payload_flush(c);
+		tcp_payload_flush(c, now);
 
 		/* Silence Coverity CWE-125 false positive */
 		tcp_payload_used = 0;
@@ -361,19 +370,19 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 
 	if (len < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			tcp_rst(c, conn);
+			tcp_rst(c, conn, now);
 			return -errno;
 		}
 
 		if (already_sent) /* No new data and EAGAIN: set EPOLLET */
-			conn_flag(c, conn, STALLED);
+			conn_flag(c, conn, STALLED, now);
 
 		return 0;
 	}
 
 	if (!len) {
 		if (already_sent) {
-			conn_flag(c, conn, STALLED);
+			conn_flag(c, conn, STALLED, now);
 		} else if ((conn->events & (SOCK_FIN_RCVD | TAP_FIN_SENT)) ==
 			   SOCK_FIN_RCVD) {
 			int ret;
@@ -388,14 +397,14 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 			 */
 			conn->seq_ack_to_tap = conn->seq_from_tap;
 
-			ret = tcp_buf_send_flag(c, conn, FIN | ACK);
+			ret = tcp_buf_send_flag(c, conn, FIN | ACK, now);
 			if (ret) {
-				tcp_rst(c, conn);
+				tcp_rst(c, conn, now);
 				return ret;
 			}
 
-			conn_event(c, conn, TAP_FIN_SENT);
-			conn_flag(c, conn, ACK_FROM_TAP_DUE);
+			conn_event(c, conn, TAP_FIN_SENT, now);
+			conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 		}
 
 		return 0;
@@ -405,18 +414,18 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 		len -= already_sent;
 
 	if (len <= 0) {
-		conn_flag(c, conn, STALLED);
+		conn_flag(c, conn, STALLED, now);
 		return 0;
 	}
 
-	conn_flag(c, conn, ~ACK_FROM_TAP_BLOCKS);
-	conn_flag(c, conn, ~STALLED);
+	conn_flag(c, conn, ~ACK_FROM_TAP_BLOCKS, now);
+	conn_flag(c, conn, ~STALLED, now);
 
 	send_bufs = DIV_ROUND_UP(len, mss);
 	last_len = len - (send_bufs - 1) * mss;
 
 	/* Likely, some new data was acked too. */
-	tcp_update_seqack_wnd(c, conn, false, NULL);
+	tcp_update_seqack_wnd(c, conn, false, NULL, now);
 
 	/* Finally, queue to tap */
 	dlen = mss;
@@ -430,11 +439,11 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 			push = true;
 		}
 
-		tcp_data_to_tap(c, conn, dlen, no_csum, seq, push);
+		tcp_data_to_tap(c, conn, dlen, no_csum, seq, push, now);
 		seq += dlen;
 	}
 
-	conn_flag(c, conn, ACK_FROM_TAP_DUE);
+	conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 
 	return 0;
 }

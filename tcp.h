@@ -18,11 +18,12 @@
 
 struct ctx;
 
-void tcp_timer_handler(const struct ctx *c, union epoll_ref ref);
+void tcp_timer_handler(const struct ctx *c, union epoll_ref ref,
+		       const struct timespec *now);
 void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 			const struct timespec *now);
 void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
-		      uint32_t events);
+		      uint32_t events, const struct timespec *now);
 int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		    const void *saddr, const void *daddr, uint32_t flow_lbl,
 		    const struct pool *p, int idx, const struct timespec *now);

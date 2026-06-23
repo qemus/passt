@@ -464,17 +464,21 @@ static struct tcp_tap_conn *conn_at_sidx(flow_sidx_t sidx)
  * tcp_set_peek_offset() - Set SO_PEEK_OFF offset on connection if supported
  * @conn:	Pointer to the TCP connection structure
  * @offset:     Offset in bytes
+ * @now:	Current timestamp
  *
  * Return: -1 when it fails, 0 otherwise.
  */
-int tcp_set_peek_offset(const struct tcp_tap_conn *conn, int offset)
+int tcp_set_peek_offset(const struct tcp_tap_conn *conn, int offset,
+			const struct timespec *now)
 {
 	if (!peek_offset_cap)
 		return 0;
 
 	if (setsockopt(conn->sock, SOL_SOCKET, SO_PEEK_OFF,
 		       &offset, sizeof(offset))) {
-		flow_perror(conn, "Failed to set SO_PEEK_OFF to %i", offset);
+		flow_perror_ratelimit(conn, now,
+				      "Failed to set SO_PEEK_OFF to %i",
+				      offset);
 		return -1;
 	}
 	return 0;
@@ -545,9 +549,12 @@ static int tcp_epoll_ctl(struct tcp_tap_conn *conn)
  * tcp_timer_ctl() - Set timerfd based on flags/events, create timerfd if needed
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
+ *
  * #syscalls timerfd_create timerfd_settime|timerfd_settime32
  */
-static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
+static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn,
+			  const struct timespec *now)
 {
 	struct itimerspec it = { { 0 }, { 0 } };
 
@@ -560,12 +567,13 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 
 		fd = timerfd_create(CLOCK_MONOTONIC, 0);
 		if (fd == -1) {
-			flow_dbg_perror(conn, "failed to get timer");
+			flow_perror_ratelimit(conn, now, "failed to get timer");
 			return;
 		}
 		if (fd > FD_REF_MAX) {
-			flow_dbg(conn, "timer fd overflow (%d > %d)",
-				 fd, FD_REF_MAX);
+			flow_err_ratelimit(conn, now,
+					   "timer fd overflow (%d > %d)",
+					   fd, FD_REF_MAX);
 			close(fd);
 			return;
 		}
@@ -575,7 +583,7 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
 		ref.fd = fd;
 		if (epoll_add(flow_epollfd(&conn->f), EPOLLIN | EPOLLET,
 			      ref) < 0) {
-			flow_dbg(conn, "failed to add timer");
+			flow_perror_ratelimit(conn, now, "failed to add timer");
 			close(fd);
 			return;
 		}
@@ -622,9 +630,10 @@ static void tcp_timer_ctl(const struct ctx *c, struct tcp_tap_conn *conn)
  * @c:		Execution context
  * @conn:	Connection pointer
  * @flag:	Flag to set, or ~flag to unset
+ * @now:	Current timestamp
  */
 void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
-		  unsigned long flag)
+		  unsigned long flag, const struct timespec *now)
 {
 	if (flag & (flag - 1)) {
 		int flag_index = fls(~flag);
@@ -646,7 +655,7 @@ void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
 			 * flags and factor this into the logic below.
 			 */
 			if (flag == ACK_FROM_TAP_DUE)
-				tcp_timer_ctl(c, conn);
+				tcp_timer_ctl(c, conn, now);
 
 			return;
 		}
@@ -662,7 +671,7 @@ void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
 	if (flag == ACK_FROM_TAP_DUE || flag == ACK_TO_TAP_DUE		  ||
 	    (flag == ~ACK_FROM_TAP_DUE && (conn->flags & ACK_TO_TAP_DUE)) ||
 	    (flag == ~ACK_TO_TAP_DUE   && (conn->flags & ACK_FROM_TAP_DUE)))
-		tcp_timer_ctl(c, conn);
+		tcp_timer_ctl(c, conn, now);
 }
 
 /**
@@ -670,9 +679,10 @@ void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
  * @c:		Execution context
  * @conn:	Connection pointer
  * @event:	Connection event
+ * @now:	Current timestamp
  */
 void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
-		   unsigned long event)
+		   unsigned long event, const struct timespec *now)
 {
 	int prev, new, num = fls(event);
 
@@ -710,7 +720,7 @@ void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
 			 num == -1 	       ? "CLOSED" : tcp_event_str[num]);
 
 	if ((event == TAP_FIN_RCVD) && !(conn->events & SOCK_FIN_RCVD)) {
-		conn_flag(c, conn, ACTIVE_CLOSE);
+		conn_flag(c, conn, ACTIVE_CLOSE, now);
 	} else {
 		if (event == CLOSED)
 			flow_hash_remove(c, TAP_SIDX(conn));
@@ -1101,13 +1111,15 @@ static uint32_t tcp_wnd_from_sndbuf(int s, struct tcp_tap_conn *conn,
  * @conn:	Connection pointer
  * @force_seq:	Force ACK sequence to latest segment, instead of checking socket
  * @tinfo:	tcp_info from kernel, can be NULL if not pre-fetched
+ * @now:	Current timestamp
  *
  * Return: 1 if sequence or window were updated, 0 otherwise
  *
  * #syscalls ioctl
  */
 int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
-			  bool force_seq, struct tcp_info_linux *tinfo)
+			  bool force_seq, struct tcp_info_linux *tinfo,
+			  const struct timespec *now)
 {
 	uint32_t prev_wnd_to_tap = conn->wnd_to_tap << conn->ws_to_tap;
 	uint32_t prev_ack_to_tap = conn->seq_ack_to_tap;
@@ -1221,7 +1233,7 @@ int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
 	 */
 	/* cppcheck-suppress [knownConditionTrueFalse, unmatchedSuppression] */
 	if (!conn->wnd_to_tap)
-		conn_flag(c, conn, ACK_TO_TAP_DUE);
+		conn_flag(c, conn, ACK_TO_TAP_DUE, now);
 
 out:
 	/* Opportunistically store RTT approximation on valid TCP_INFO data */
@@ -1237,17 +1249,19 @@ out:
  * @c:		Execution context
  * @conn:	Connection pointer
  * @seq:	Current ACK sequence, host order
+ * @now:	Current timestamp
  */
 static void tcp_update_seqack_from_tap(const struct ctx *c,
-				       struct tcp_tap_conn *conn, uint32_t seq)
+				       struct tcp_tap_conn *conn, uint32_t seq,
+				       const struct timespec *now)
 {
 	if (seq == conn->seq_to_tap)
-		conn_flag(c, conn, ~ACK_FROM_TAP_DUE);
+		conn_flag(c, conn, ~ACK_FROM_TAP_DUE, now);
 
 	if (SEQ_GT(seq, conn->seq_ack_from_tap)) {
 		/* Forward progress, but more data to acknowledge: reschedule */
 		if (SEQ_LT(seq, conn->seq_to_tap))
-			conn_flag(c, conn, ACK_FROM_TAP_DUE);
+			conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 
 		conn->retries = 0;
 		conn->seq_ack_from_tap = seq;
@@ -1258,16 +1272,18 @@ static void tcp_update_seqack_from_tap(const struct ctx *c,
  * tcp_rewind_seq() - Rewind sequence to tap and socket offset to current ACK
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  *
  * Return: 0 on success, -1 on failure, with connection reset
  */
-static int tcp_rewind_seq(const struct ctx *c, struct tcp_tap_conn *conn)
+static int tcp_rewind_seq(const struct ctx *c, struct tcp_tap_conn *conn,
+			  const struct timespec *now)
 {
 	conn->seq_to_tap = conn->seq_ack_from_tap;
 	conn->events &= ~TAP_FIN_SENT;
 
-	if (tcp_set_peek_offset(conn, 0)) {
-		tcp_rst(c, conn);
+	if (tcp_set_peek_offset(conn, 0, now)) {
+		tcp_rst(c, conn, now);
 		return -1;
 	}
 
@@ -1282,6 +1298,7 @@ static int tcp_rewind_seq(const struct ctx *c, struct tcp_tap_conn *conn)
  * @th:		TCP header to update
  * @opts:	TCP option buffer (output parameter)
  * @optlen:	size of the TCP option buffer (output parameter)
+ * @now:	Current timestamp
  *
  * Return: < 0 error code on connection reset,
  *	     0 if there is no flag to send
@@ -1289,7 +1306,7 @@ static int tcp_rewind_seq(const struct ctx *c, struct tcp_tap_conn *conn)
  */
 int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
 		      int flags, struct tcphdr *th, struct tcp_syn_opts *opts,
-		      size_t *optlen)
+		      size_t *optlen, const struct timespec *now)
 {
 	struct tcp_info_linux tinfo = { 0 };
 	socklen_t sl = sizeof(tinfo);
@@ -1297,19 +1314,19 @@ int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
 
 	if (SEQ_GE(conn->seq_ack_to_tap, conn->seq_from_tap) &&
 	    !flags && conn->wnd_to_tap) {
-		conn_flag(c, conn, ~ACK_TO_TAP_DUE);
+		conn_flag(c, conn, ~ACK_TO_TAP_DUE, now);
 		return 0;
 	}
 
 	if (getsockopt(s, SOL_TCP, TCP_INFO, &tinfo, &sl)) {
-		conn_event(c, conn, CLOSED);
+		conn_event(c, conn, CLOSED, now);
 		return -ECONNRESET;
 	}
 
 	if (!(conn->flags & LOCAL))
 		tcp_rtt_dst_check(conn, &tinfo);
 
-	if (!tcp_update_seqack_wnd(c, conn, !!flags, &tinfo) && !flags)
+	if (!tcp_update_seqack_wnd(c, conn, !!flags, &tinfo, now) && !flags)
 		return 0;
 
 	*optlen = 0;
@@ -1351,13 +1368,13 @@ int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
 	if (th->ack) {
 		if (SEQ_GE(conn->seq_ack_to_tap, conn->seq_from_tap) &&
 		    conn->wnd_to_tap)
-			conn_flag(c, conn, ~ACK_TO_TAP_DUE);
+			conn_flag(c, conn, ~ACK_TO_TAP_DUE, now);
 		else
-			conn_flag(c, conn, ACK_TO_TAP_DUE);
+			conn_flag(c, conn, ACK_TO_TAP_DUE, now);
 	}
 
 	if (th->fin)
-		conn_flag(c, conn, ACK_FROM_TAP_DUE);
+		conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 
 	/* RFC 793, 3.1: "[...] and the first data octet is ISN+1." */
 	if (th->fin || th->syn)
@@ -1371,18 +1388,19 @@ int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
  * @c:         Execution context
  * @conn:      Connection pointer
  * @flags:     TCP flags: if not set, send segment only if ACK is due
+ * @now:	Current timestamp
  *
  * Return: negative error code on fatal connection failure, 0 otherwise
  */
 static int tcp_send_flag(const struct ctx *c, struct tcp_tap_conn *conn,
-			 int flags)
+			 int flags, const struct timespec *now)
 {
 	int ret;
 
 	if (c->mode == MODE_VU)
-		ret = tcp_vu_send_flag(c, conn, flags);
+		ret = tcp_vu_send_flag(c, conn, flags, now);
 	else
-		ret = tcp_buf_send_flag(c, conn, flags);
+		ret = tcp_buf_send_flag(c, conn, flags, now);
 
 	return ret == -EAGAIN ? 0 : ret;
 }
@@ -1404,8 +1422,8 @@ void tcp_linger0_(const struct flow_common *f, int s)
 	 */
 	if (setsockopt(s, SOL_SOCKET, SO_LINGER,
 		       &linger0, sizeof(linger0)) < 0) {
-		flow_log_perror_(f, LOG_DEBUG,
-				 "SO_LINGER failed, may not send RST to peer");
+		flow_log_(f, LOG_DEBUG, true,
+			  "SO_LINGER failed, may not send RST to peer");
 	}
 }
 
@@ -1413,28 +1431,32 @@ void tcp_linger0_(const struct flow_common *f, int s)
  * tcp_sock_rst() - Close TCP connection forcing RST on socket side
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  */
-static void tcp_sock_rst(const struct ctx *c, struct tcp_tap_conn *conn)
+static void tcp_sock_rst(const struct ctx *c, struct tcp_tap_conn *conn,
+			 const struct timespec *now)
 {
 	/* Force RST on socket to inform the peer */
 	tcp_linger0(conn, conn->sock);
-	conn_event(c, conn, CLOSED);
+	conn_event(c, conn, CLOSED, now);
 }
 
 /**
  * tcp_rst_do() - Reset a tap connection: send RST segment on both sides, close
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  */
-void tcp_rst_do(const struct ctx *c, struct tcp_tap_conn *conn)
+void tcp_rst_do(const struct ctx *c, struct tcp_tap_conn *conn,
+		const struct timespec *now)
 {
 	if (conn->events == CLOSED)
 		return;
 
 	/* Send RST on tap */
-	tcp_send_flag(c, conn, RST);
+	tcp_send_flag(c, conn, RST, now);
 
-	tcp_sock_rst(c, conn);
+	tcp_sock_rst(c, conn, now);
 }
 
 /**
@@ -1459,11 +1481,13 @@ static void tcp_get_tap_ws(struct tcp_tap_conn *conn,
  * @c:		Execution context
  * @conn:	Connection pointer
  * @wnd:	Window value, host order, unscaled
+ * @now:	Current timestamp
  *
  * Return: false on zero window (not stored to wnd_from_tap), true otherwise
  */
 static bool tcp_tap_window_update(const struct ctx *c,
-				  struct tcp_tap_conn *conn, unsigned wnd)
+				  struct tcp_tap_conn *conn, unsigned wnd,
+				  const struct timespec *now)
 {
 	wnd = MIN(MAX_WINDOW, wnd << conn->ws_from_tap);
 
@@ -1474,7 +1498,7 @@ static bool tcp_tap_window_update(const struct ctx *c,
 	 * that no data beyond the updated window will be acknowledged.
 	 */
 	if (!wnd && SEQ_LT(conn->seq_ack_from_tap, conn->seq_to_tap)) {
-		tcp_rewind_seq(c, conn);
+		tcp_rewind_seq(c, conn, now);
 		return false;
 	}
 
@@ -1600,9 +1624,11 @@ static uint16_t tcp_conn_tap_mss(const struct tcp_tap_conn *conn,
  * @c:		Execution context
  * @conn:	Connection entry for socket to bind
  * @s:		Outbound TCP socket
+ * @now:	Current timestamp
  */
 static void tcp_bind_outbound(const struct ctx *c,
-			      const struct tcp_tap_conn *conn, int s)
+			      const struct tcp_tap_conn *conn, int s,
+			      const struct timespec *now)
 {
 	const struct flowside *tgt = &conn->f.side[TGTSIDE];
 	union sockaddr_inany bind_sa;
@@ -1613,10 +1639,11 @@ static void tcp_bind_outbound(const struct ctx *c,
 		if (bind(s, &bind_sa.sa, socklen_inany(&bind_sa))) {
 			char sstr[INANY_ADDRSTRLEN];
 
-			flow_dbg_perror(conn,
-					"Can't bind TCP outbound socket to %s:%hu",
-					inany_ntop(&tgt->oaddr, sstr, sizeof(sstr)),
-					tgt->oport);
+			flow_warn_perror_ratelimit(
+				conn, now,
+				"Can't bind TCP outbound socket to %s:%hu",
+				inany_ntop(&tgt->oaddr, sstr, sizeof(sstr)),
+				tgt->oport);
 		}
 	}
 
@@ -1625,9 +1652,10 @@ static void tcp_bind_outbound(const struct ctx *c,
 			if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE,
 				       c->ip4.ifname_out,
 				       strlen(c->ip4.ifname_out))) {
-				flow_dbg_perror(conn,
-						"Can't bind IPv4 TCP socket to interface %s",
-						c->ip4.ifname_out);
+				flow_warn_perror_ratelimit(
+					conn, now,
+					"Can't bind IPv4 TCP socket to interface %s",
+					c->ip4.ifname_out);
 			}
 		}
 	} else if (bind_sa.sa_family == AF_INET6) {
@@ -1635,9 +1663,10 @@ static void tcp_bind_outbound(const struct ctx *c,
 			if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE,
 				       c->ip6.ifname_out,
 				       strlen(c->ip6.ifname_out))) {
-				flow_dbg_perror(conn,
-						"Can't bind IPv6 TCP socket to interface %s",
-						c->ip6.ifname_out);
+				flow_warn_perror_ratelimit(
+					conn, now,
+					"Can't bind IPv6 TCP socket to interface %s",
+					c->ip6.ifname_out);
 			}
 		}
 	}
@@ -1681,9 +1710,11 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 		goto cancel;
 
 	if (flow->f.pif[TGTSIDE] != PIF_HOST) {
-		flow_err(flow, "No support for forwarding TCP from %s to %s",
-			 pif_name(flow->f.pif[INISIDE]),
-			 pif_name(flow->f.pif[TGTSIDE]));
+		flow_err_ratelimit(
+			flow, now,
+			"No support for forwarding TCP from %s to %s",
+			pif_name(flow->f.pif[INISIDE]),
+			pif_name(flow->f.pif[TGTSIDE]));
 		goto cancel;
 	}
 
@@ -1716,7 +1747,7 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	 */
 	if (bind(s, &sa.sa, socklen_inany(&sa))) {
 		if (errno != EADDRNOTAVAIL && errno != EACCES)
-			conn_flag(c, conn, LOCAL);
+			conn_flag(c, conn, LOCAL, now);
 	} else {
 		/* Not a local, bound destination, inconclusive test */
 		close(s);
@@ -1728,10 +1759,10 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	conn->timer = -1;
 	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, s, TGTSIDE) < 0) {
-		flow_perror(flow, "Can't register with epoll");
+		flow_perror_ratelimit(flow, now, "Can't register with epoll");
 		goto cancel;
 	}
-	conn_event(c, conn, TAP_SYN_RCVD);
+	conn_event(c, conn, TAP_SYN_RCVD, now);
 
 	conn->wnd_to_tap = WINDOW_DEFAULT;
 
@@ -1756,11 +1787,11 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	conn->seq_to_tap = tcp_init_seq(hash, now);
 	conn->seq_ack_from_tap = conn->seq_to_tap;
 
-	tcp_bind_outbound(c, conn, s);
+	tcp_bind_outbound(c, conn, s, now);
 
 	if (connect(s, &sa.sa, socklen_inany(&sa))) {
 		if (errno != EINPROGRESS) {
-			tcp_rst(c, conn);
+			tcp_rst(c, conn, now);
 			goto cancel;
 		}
 
@@ -1768,10 +1799,10 @@ static void tcp_conn_from_tap(const struct ctx *c, sa_family_t af,
 	} else {
 		tcp_get_sndbuf(conn);
 
-		if (tcp_send_flag(c, conn, SYN | ACK))
+		if (tcp_send_flag(c, conn, SYN | ACK, now))
 			goto cancel;
 
-		conn_event(c, conn, TAP_SYN_ACK_SENT);
+		conn_event(c, conn, TAP_SYN_ACK_SENT, now);
 	}
 
 	tcp_epoll_ctl(conn);
@@ -1830,12 +1861,14 @@ static int tcp_sock_consume(const struct tcp_tap_conn *conn, uint32_t ack_seq)
  * tcp_data_from_sock() - Handle new data from socket, queue to tap, in window
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  *
  * Return: negative on connection reset, 0 otherwise
  *
  * #syscalls recvmsg
  */
-static int tcp_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
+static int tcp_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
+			      const struct timespec *now)
 {
 	uint32_t wnd_scaled = conn->wnd_from_tap << conn->ws_from_tap;
 	uint32_t already_sent;
@@ -1845,8 +1878,8 @@ static int tcp_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 		flow_trace(conn, "ACK sequence gap: ACK for %u, sent: %u",
 			   conn->seq_ack_from_tap, conn->seq_to_tap);
 		conn->seq_to_tap = conn->seq_ack_from_tap;
-		if (tcp_set_peek_offset(conn, 0)) {
-			tcp_rst(c, conn);
+		if (tcp_set_peek_offset(conn, 0, now)) {
+			tcp_rst(c, conn, now);
 			return -1;
 		}
 	}
@@ -1855,16 +1888,16 @@ static int tcp_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn)
 	already_sent = conn->seq_to_tap - conn->seq_ack_from_tap;
 
 	if (!wnd_scaled || already_sent >= wnd_scaled) {
-		conn_flag(c, conn, ACK_FROM_TAP_BLOCKS);
-		conn_flag(c, conn, STALLED);
-		conn_flag(c, conn, ACK_FROM_TAP_DUE);
+		conn_flag(c, conn, ACK_FROM_TAP_BLOCKS, now);
+		conn_flag(c, conn, STALLED, now);
+		conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 		return 0;
 	}
 
 	if (c->mode == MODE_VU)
-		return tcp_vu_data_from_sock(c, conn, already_sent);
+		return tcp_vu_data_from_sock(c, conn, already_sent, now);
 
-	return tcp_buf_data_from_sock(c, conn, already_sent);
+	return tcp_buf_data_from_sock(c, conn, already_sent, now);
 }
 
 /**
@@ -1890,13 +1923,15 @@ static ssize_t tcp_packet_data_len(const struct tcphdr *th, size_t l4len)
  * @conn:	Connection pointer
  * @p:		Pool of TCP packets, with TCP headers
  * @idx:	Index of first data packet in pool
+ * @now:	Current timestamp
  *
  * #syscalls sendmsg
  *
  * Return: count of consumed packets
  */
 static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
-			     const struct pool *p, int idx)
+			     const struct pool *p, int idx,
+			     const struct timespec *now)
 {
 	int i, iov_i, ack = 0, fin = 0, retr = 0, keep = -1, partial_send = 0;
 	uint16_t max_ack_seq_wnd = conn->wnd_from_tap;
@@ -1933,7 +1968,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 			return -1;
 
 		if (th->rst) {
-			tcp_sock_rst(c, conn);
+			tcp_sock_rst(c, conn, now);
 			return 1;
 		}
 
@@ -1946,10 +1981,10 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 				   "keep-alive sequence: %u, previous: %u",
 				   seq, conn->seq_from_tap);
 
-			if (tcp_send_flag(c, conn, ACK))
+			if (tcp_send_flag(c, conn, ACK, now))
 				return -1;
 
-			tcp_timer_ctl(c, conn);
+			tcp_timer_ctl(c, conn, now);
 
 			if (setsockopt(conn->sock, SOL_SOCKET, SO_KEEPALIVE,
 				       &((int){ 1 }), sizeof(int)))
@@ -1957,7 +1992,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 
 			if (p->count == 1) {
 				tcp_tap_window_update(c, conn,
-						      ntohs(th->window));
+						      ntohs(th->window), now);
 				return 1;
 			}
 
@@ -1983,7 +2018,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 				 * well.
 				 */
 				if (!ntohs(th->window))
-					tcp_rewind_seq(c, conn);
+					tcp_rewind_seq(c, conn, now);
 
 				max_ack_seq_wnd = ntohs(th->window);
 				max_ack_seq = ack_seq;
@@ -2043,19 +2078,19 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 
 	/* On socket flush failure, pretend there was no ACK, try again later */
 	if (ack && !tcp_sock_consume(conn, max_ack_seq))
-		tcp_update_seqack_from_tap(c, conn, max_ack_seq);
+		tcp_update_seqack_from_tap(c, conn, max_ack_seq, now);
 
-	tcp_tap_window_update(c, conn, max_ack_seq_wnd);
+	tcp_tap_window_update(c, conn, max_ack_seq_wnd, now);
 
 	if (retr) {
 		flow_trace(conn,
 			   "fast re-transmit, ACK: %u, previous sequence: %u",
 			   conn->seq_ack_from_tap, conn->seq_to_tap);
 
-		if (tcp_rewind_seq(c, conn))
+		if (tcp_rewind_seq(c, conn, now))
 			return -1;
 
-		tcp_data_from_sock(c, conn);
+		tcp_data_from_sock(c, conn, now);
 	}
 
 	if (!iov_i)
@@ -2071,7 +2106,7 @@ eintr:
 			 *   Then swiftly looked away and left.
 			 */
 			conn->seq_from_tap = seq_from_tap;
-			if (tcp_send_flag(c, conn, ACK))
+			if (tcp_send_flag(c, conn, ACK, now))
 				return -1;
 		}
 
@@ -2079,7 +2114,7 @@ eintr:
 			goto eintr;
 
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			if (tcp_send_flag(c, conn, ACK | DUP_ACK))
+			if (tcp_send_flag(c, conn, ACK | DUP_ACK, now))
 				return -1;
 
 			uint32_t events = tcp_conn_epoll_events(conn->events,
@@ -2115,7 +2150,7 @@ out:
 		 */
 		if (conn->seq_dup_ack_approx != (conn->seq_from_tap & 0xff)) {
 			conn->seq_dup_ack_approx = conn->seq_from_tap & 0xff;
-			if (tcp_send_flag(c, conn, ACK | DUP_ACK))
+			if (tcp_send_flag(c, conn, ACK | DUP_ACK, now))
 				return -1;
 		}
 		return p->count - idx;
@@ -2123,14 +2158,14 @@ out:
 
 	if (ack && conn->events & TAP_FIN_SENT &&
 	    conn->seq_ack_from_tap == conn->seq_to_tap)
-		conn_event(c, conn, TAP_FIN_ACKED);
+		conn_event(c, conn, TAP_FIN_ACKED, now);
 
 	if (fin && !partial_send) {
 		conn->seq_from_tap++;
 
-		conn_event(c, conn, TAP_FIN_RCVD);
+		conn_event(c, conn, TAP_FIN_RCVD, now);
 	} else {
-		if (tcp_send_flag(c, conn, ACK_IF_NEEDED))
+		if (tcp_send_flag(c, conn, ACK_IF_NEEDED, now))
 			return -1;
 	}
 
@@ -2144,13 +2179,15 @@ out:
  * @th:		TCP header of SYN, ACK segment: caller MUST ensure it's there
  * @opts:	Pointer to start of options
  * @optlen:	Bytes in options: caller MUST ensure available length
+ * @now:	Current timestamp
  */
 static void tcp_conn_from_sock_finish(const struct ctx *c,
 				      struct tcp_tap_conn *conn,
 				      const struct tcphdr *th,
-				      const char *opts, size_t optlen)
+				      const char *opts, size_t optlen,
+				      const struct timespec *now)
 {
-	tcp_tap_window_update(c, conn, ntohs(th->window));
+	tcp_tap_window_update(c, conn, ntohs(th->window), now);
 	tcp_get_tap_ws(conn, opts, optlen);
 
 	/* First value is not scaled */
@@ -2163,21 +2200,21 @@ static void tcp_conn_from_sock_finish(const struct ctx *c,
 	conn->seq_from_tap = conn->seq_init_from_tap;
 	conn->seq_ack_to_tap = conn->seq_from_tap;
 
-	conn_event(c, conn, ESTABLISHED);
-	if (tcp_set_peek_offset(conn, 0)) {
-		tcp_rst(c, conn);
+	conn_event(c, conn, ESTABLISHED, now);
+	if (tcp_set_peek_offset(conn, 0, now)) {
+		tcp_rst(c, conn, now);
 		return;
 	}
 
-	if (tcp_send_flag(c, conn, ACK)) {
-		tcp_rst(c, conn);
+	if (tcp_send_flag(c, conn, ACK, now)) {
+		tcp_rst(c, conn, now);
 		return;
 	}
 
 	/* The client might have sent data already, which we didn't
 	 * dequeue waiting for SYN,ACK from tap -- check now.
 	 */
-	tcp_data_from_sock(c, conn);
+	tcp_data_from_sock(c, conn, now);
 }
 
 /**
@@ -2318,7 +2355,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	flow_trace(conn, "packet length %zu from tap", l4len);
 
 	if (th->rst) {
-		tcp_sock_rst(c, conn);
+		tcp_sock_rst(c, conn, now);
 		return 1;
 	}
 
@@ -2326,12 +2363,13 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	conn->tap_inactive = false;
 
 	if (th->ack && !(conn->events & ESTABLISHED))
-		tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq));
+		tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq), now);
 
 	/* Establishing connection from socket */
 	if (conn->events & SOCK_ACCEPTED) {
 		if (th->syn && th->ack && !th->fin) {
-			tcp_conn_from_sock_finish(c, conn, th, opts, optlen);
+			tcp_conn_from_sock_finish(c, conn, th, opts, optlen,
+						  now);
 			return 1;
 		}
 
@@ -2346,22 +2384,23 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		if (!(conn->events & TAP_SYN_ACK_SENT))
 			goto reset;
 
-		conn_event(c, conn, ESTABLISHED);
-		if (tcp_set_peek_offset(conn, 0))
+		conn_event(c, conn, ESTABLISHED, now);
+		if (tcp_set_peek_offset(conn, 0, now))
 			goto reset;
 
 		if (th->fin) {
 			conn->seq_from_tap++;
 
 			if (shutdown(conn->sock, SHUT_WR) < 0) {
-				flow_dbg_perror(conn, "shutdown() failed");
+				flow_warn_perror_ratelimit(conn, now,
+							   "shutdown() failed");
 				goto reset;
 			}
 
-			if (tcp_send_flag(c, conn, ACK))
+			if (tcp_send_flag(c, conn, ACK, now))
 				goto reset;
 
-			conn_event(c, conn, SOCK_FIN_SENT);
+			conn_event(c, conn, SOCK_FIN_SENT, now);
 
 			return 1;
 		}
@@ -2369,8 +2408,8 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		if (!th->ack)
 			goto reset;
 
-		if (tcp_tap_window_update(c, conn, ntohs(th->window)))
-			tcp_data_from_sock(c, conn);
+		if (tcp_tap_window_update(c, conn, ntohs(th->window), now))
+			tcp_data_from_sock(c, conn, now);
 
 		if (p->count - idx == 1)
 			return 1;
@@ -2394,38 +2433,40 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		 * later
 		 */
 		if (th->ack && !tcp_sock_consume(conn, ntohl(th->ack_seq)))
-			tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq));
+			tcp_update_seqack_from_tap(c, conn, ntohl(th->ack_seq),
+						   now);
 
 		if (retr) {
 			flow_trace(conn,
 				   "fast re-transmit, ACK: %u, previous sequence: %u",
 				   ntohl(th->ack_seq), conn->seq_to_tap);
 
-			if (tcp_rewind_seq(c, conn))
+			if (tcp_rewind_seq(c, conn, now))
 				return -1;
 		}
 
-		if (tcp_tap_window_update(c, conn, ntohs(th->window)) || retr)
-			tcp_data_from_sock(c, conn);
+		if (tcp_tap_window_update(c, conn, ntohs(th->window), now) ||
+		    retr)
+			tcp_data_from_sock(c, conn, now);
 
 		if (conn->seq_ack_from_tap == conn->seq_to_tap) {
 			if (th->ack && conn->events & TAP_FIN_SENT)
-				conn_event(c, conn, TAP_FIN_ACKED);
+				conn_event(c, conn, TAP_FIN_ACKED, now);
 
 			if (conn->events & SOCK_FIN_RCVD &&
 			    conn->events & TAP_FIN_ACKED)
-				conn_event(c, conn, CLOSED);
+				conn_event(c, conn, CLOSED, now);
 		}
 
 		return 1;
 	}
 
 	/* Established connections accepting data from tap */
-	count = tcp_data_from_tap(c, conn, p, idx);
+	count = tcp_data_from_tap(c, conn, p, idx, now);
 	if (count == -1)
 		goto reset;
 
-	conn_flag(c, conn, ~STALLED);
+	conn_flag(c, conn, ~STALLED, now);
 
 	if (conn->seq_ack_to_tap != conn->seq_from_tap)
 		ack_due = 1;
@@ -2435,12 +2476,13 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		struct tcp_info tinfo;
 
 		if (shutdown(conn->sock, SHUT_WR) < 0) {
-			flow_dbg_perror(conn, "shutdown() failed");
+			flow_warn_perror_ratelimit(conn, now,
+						   "shutdown() failed");
 			goto reset;
 		}
 
-		conn_event(c, conn, SOCK_FIN_SENT);
-		if (tcp_send_flag(c, conn, ACK))
+		conn_event(c, conn, SOCK_FIN_SENT, now);
+		if (tcp_send_flag(c, conn, ACK, now))
 			goto reset;
 
 		ack_due = 0;
@@ -2461,7 +2503,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	}
 
 	if (ack_due)
-		conn_flag(c, conn, ACK_TO_TAP_DUE);
+		conn_flag(c, conn, ACK_TO_TAP_DUE, now);
 
 	return count;
 
@@ -2470,7 +2512,7 @@ reset:
 	 * remaining packets in the batch, since they'd be invalidated when our
 	 * RST is received, even if otherwise good.
 	 */
-	tcp_rst(c, conn);
+	tcp_rst(c, conn, now);
 	return p->count - idx;
 }
 
@@ -2478,25 +2520,27 @@ reset:
  * tcp_connect_finish() - Handle completion of connect() from EPOLLOUT event
  * @c:		Execution context
  * @conn:	Connection pointer
+ * @now:	Current timestamp
  */
-static void tcp_connect_finish(const struct ctx *c, struct tcp_tap_conn *conn)
+static void tcp_connect_finish(const struct ctx *c, struct tcp_tap_conn *conn,
+			       const struct timespec *now)
 {
 	socklen_t sl;
 	int so;
 
 	sl = sizeof(so);
 	if (getsockopt(conn->sock, SOL_SOCKET, SO_ERROR, &so, &sl) || so) {
-		tcp_rst(c, conn);
+		tcp_rst(c, conn, now);
 		return;
 	}
 
-	if (tcp_send_flag(c, conn, SYN | ACK)) {
-		tcp_rst(c, conn);
+	if (tcp_send_flag(c, conn, SYN | ACK, now)) {
+		tcp_rst(c, conn, now);
 		return;
 	}
 
-	conn_event(c, conn, TAP_SYN_ACK_SENT);
-	conn_flag(c, conn, ACK_FROM_TAP_DUE);
+	conn_event(c, conn, TAP_SYN_ACK_SENT, now);
+	conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 }
 
 /**
@@ -2519,13 +2563,13 @@ static void tcp_tap_conn_from_sock(const struct ctx *c, union flow *flow,
 
 	flow_epollid_set(&conn->f, EPOLLFD_ID_DEFAULT);
 	if (flow_epoll_set(&conn->f, EPOLL_CTL_ADD, 0, s, INISIDE) < 0) {
-		flow_perror(flow, "Can't register with epoll");
-		conn_flag(c, conn, CLOSING);
+		flow_perror_ratelimit(flow, now, "Can't register with epoll");
+		conn_flag(c, conn, CLOSING, now);
 		FLOW_ACTIVATE(conn);
 		return;
 	}
 
-	conn_event(c, conn, SOCK_ACCEPTED);
+	conn_event(c, conn, SOCK_ACCEPTED, now);
 
 	hash = flow_hash_insert(c, TAP_SIDX(conn));
 	conn->seq_to_tap = tcp_init_seq(hash, now);
@@ -2534,13 +2578,13 @@ static void tcp_tap_conn_from_sock(const struct ctx *c, union flow *flow,
 
 	conn->wnd_from_tap = WINDOW_DEFAULT;
 
-	if (tcp_send_flag(c, conn, SYN)) {
-		conn_flag(c, conn, CLOSING);
+	if (tcp_send_flag(c, conn, SYN, now)) {
+		conn_flag(c, conn, CLOSING, now);
 		FLOW_ACTIVATE(conn);
 		return;
 	}
 
-	conn_flag(c, conn, ACK_FROM_TAP_DUE);
+	conn_flag(c, conn, ACK_FROM_TAP_DUE, now);
 
 	tcp_get_sndbuf(conn);
 
@@ -2598,7 +2642,7 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 	switch (flow->f.pif[TGTSIDE]) {
 	case PIF_SPLICE:
 	case PIF_HOST:
-		tcp_splice_conn_from_sock(c, flow, s);
+		tcp_splice_conn_from_sock(c, flow, s, now);
 		break;
 
 	case PIF_TAP:
@@ -2606,9 +2650,11 @@ void tcp_listen_handler(const struct ctx *c, union epoll_ref ref,
 		break;
 
 	default:
-		flow_err(flow, "No support for forwarding TCP from %s to %s",
-			 pif_name(flow->f.pif[INISIDE]),
-			 pif_name(flow->f.pif[TGTSIDE]));
+		flow_err_ratelimit(
+			flow, now,
+			"No support for forwarding TCP from %s to %s",
+			pif_name(flow->f.pif[INISIDE]),
+			pif_name(flow->f.pif[TGTSIDE]));
 		goto rst;
 	}
 
@@ -2625,12 +2671,14 @@ cancel:
  * tcp_timer_handler() - timerfd events: close, send ACK, retransmit, or reset
  * @c:		Execution context
  * @ref:	epoll reference of timer (not connection)
+ * @now:	Current timestamp
  *
  * #syscalls timerfd_gettime|timerfd_gettime64
  * #syscalls arm:timerfd_gettime64 i686:timerfd_gettime64
  * #syscalls arm:timerfd_settime64 i686:timerfd_settime64
  */
-void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
+void tcp_timer_handler(const struct ctx *c, union epoll_ref ref,
+		       const struct timespec *now)
 {
 	struct itimerspec check_armed = { { 0 }, { 0 } };
 	struct tcp_tap_conn *conn = &FLOW(ref.flow)->tcp;
@@ -2643,17 +2691,17 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 	 * and we just set the timer to a new point in the future: discard it.
 	 */
 	if (timerfd_gettime(conn->timer, &check_armed))
-		flow_perror(conn, "failed to read timer");
+		flow_perror_ratelimit(conn, now, "failed to read timer");
 
 	if (check_armed.it_value.tv_sec || check_armed.it_value.tv_nsec)
 		return;
 
 	if (conn->flags & ACK_TO_TAP_DUE) {
-		if (tcp_send_flag(c, conn, ACK_IF_NEEDED)) {
-			tcp_rst(c, conn);
+		if (tcp_send_flag(c, conn, ACK_IF_NEEDED, now)) {
+			tcp_rst(c, conn, now);
 			return;
 		}
-		tcp_timer_ctl(c, conn);
+		tcp_timer_ctl(c, conn, now);
 	} else if (conn->flags & ACK_FROM_TAP_DUE) {
 		if (!(conn->events & ESTABLISHED)) {
 			unsigned int max;
@@ -2662,20 +2710,20 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 			max = MIN(TCP_MAX_RETRIES, max);
 			if (conn->retries >= max) {
 				flow_dbg(conn, "handshake timeout");
-				tcp_rst(c, conn);
+				tcp_rst(c, conn, now);
 			} else {
 				flow_trace(conn, "SYN timeout, retry");
-				if (tcp_send_flag(c, conn, SYN)) {
-					tcp_rst(c, conn);
+				if (tcp_send_flag(c, conn, SYN, now)) {
+					tcp_rst(c, conn, now);
 					return;
 				}
 				conn->retries++;
-				conn_flag(c, conn, SYN_RETRIED);
-				tcp_timer_ctl(c, conn);
+				conn_flag(c, conn, SYN_RETRIED, now);
+				tcp_timer_ctl(c, conn, now);
 			}
 		} else if (conn->retries == TCP_MAX_RETRIES) {
 			flow_dbg(conn, "retransmissions count exceeded");
-			tcp_rst(c, conn);
+			tcp_rst(c, conn, now);
 		} else {
 			flow_dbg(conn, "ACK timeout, retry");
 
@@ -2683,11 +2731,11 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
 				conn->wnd_from_tap = 1; /* Zero-window probe */
 
 			conn->retries++;
-			if (tcp_rewind_seq(c, conn))
+			if (tcp_rewind_seq(c, conn, now))
 				return;
 
-			tcp_data_from_sock(c, conn);
-			tcp_timer_ctl(c, conn);
+			tcp_data_from_sock(c, conn, now);
+			tcp_timer_ctl(c, conn, now);
 		}
 	}
 }
@@ -2697,9 +2745,10 @@ void tcp_timer_handler(const struct ctx *c, union epoll_ref ref)
  * @c:		Execution context
  * @ref:	epoll reference
  * @events:	epoll events bitmap
+ * @now:	Current timestamp
  */
 void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
-		      uint32_t events)
+		      uint32_t events, const struct timespec *now)
 {
 	struct tcp_tap_conn *conn = conn_at_sidx(ref.flowside);
 
@@ -2710,32 +2759,32 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 		return;
 
 	if (events & EPOLLERR) {
-		tcp_rst(c, conn);
+		tcp_rst(c, conn, now);
 		return;
 	}
 
 	conn->inactive = false;
 
 	if ((conn->events & TAP_FIN_ACKED) && (events & EPOLLHUP)) {
-		conn_event(c, conn, CLOSED);
+		conn_event(c, conn, CLOSED, now);
 		return;
 	}
 
 	if (conn->events & ESTABLISHED) {
 		if (CONN_HAS(conn, SOCK_FIN_SENT | TAP_FIN_ACKED))
-			conn_event(c, conn, CLOSED);
+			conn_event(c, conn, CLOSED, now);
 
 		if (events & (EPOLLRDHUP | EPOLLHUP))
-			conn_event(c, conn, SOCK_FIN_RCVD);
+			conn_event(c, conn, SOCK_FIN_RCVD, now);
 
 		if (events & EPOLLIN)
-			tcp_data_from_sock(c, conn);
+			tcp_data_from_sock(c, conn, now);
 
 		if (events & EPOLLOUT) {
 			tcp_epoll_ctl(conn);
-			if (tcp_update_seqack_wnd(c, conn, false, NULL) &&
-			    tcp_send_flag(c, conn, ACK)) {
-				tcp_rst(c, conn);
+			if (tcp_update_seqack_wnd(c, conn, false, NULL, now) &&
+			    tcp_send_flag(c, conn, ACK, now)) {
+				tcp_rst(c, conn, now);
 				return;
 			}
 		}
@@ -2745,7 +2794,7 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 
 	/* EPOLLHUP during handshake: reset */
 	if (events & EPOLLHUP) {
-		tcp_rst(c, conn);
+		tcp_rst(c, conn, now);
 		return;
 	}
 
@@ -2755,7 +2804,7 @@ void tcp_sock_handler(const struct ctx *c, union epoll_ref ref,
 
 	if (conn->events == TAP_SYN_RCVD) {
 		if (events & EPOLLOUT)
-			tcp_connect_finish(c, conn);
+			tcp_connect_finish(c, conn, now);
 		/* Data? Check later */
 	}
 }
@@ -2939,8 +2988,8 @@ static void tcp_keepalive(struct ctx *c, const struct timespec *now)
 		if (conn->tap_inactive) {
 			flow_dbg(conn, "No tap activity for least %us, send keepalive",
 				 KEEPALIVE_INTERVAL);
-			if (tcp_send_flag(c, conn, KEEPALIVE))
-				tcp_rst(c, conn);
+			if (tcp_send_flag(c, conn, KEEPALIVE, now))
+				tcp_rst(c, conn, now);
 		}
 
 		/* Ready to check fot next interval */
@@ -2969,7 +3018,7 @@ static void tcp_inactivity(struct ctx *c, const struct timespec *now)
 			/* No activity in this interval, reset */
 			flow_dbg(conn, "Inactive for at least %us, resetting",
 				 INACTIVITY_INTERVAL);
-			tcp_rst(c, conn);
+			tcp_rst(c, conn, now);
 		}
 
 		/* Ready to check fot next interval */
@@ -2985,7 +3034,7 @@ static void tcp_inactivity(struct ctx *c, const struct timespec *now)
 /* cppcheck-suppress [constParameterPointer, unmatchedSuppression] */
 void tcp_defer_handler(struct ctx *c, const struct timespec *now)
 {
-	tcp_payload_flush(c);
+	tcp_payload_flush(c, now);
 
 	if (timespec_diff_ms(now, &c->tcp.timer_run) < TCP_TIMER_INTERVAL)
 		return;
@@ -3532,11 +3581,13 @@ int tcp_flow_migrate_source(int fd, struct tcp_tap_conn *conn)
  * @c:		Execution context
  * @fd:		Descriptor for state migration
  * @conn:	Pointer to the TCP connection structure
+ * @now:	Current timesstamp
  *
  * Return: 0 on success, negative (not -EIO) on failure, -EIO on sending failure
  */
 int tcp_flow_migrate_source_ext(const struct ctx *c,
-				int fd, const struct tcp_tap_conn *conn)
+				int fd, const struct tcp_tap_conn *conn,
+				const struct timespec *now)
 {
 	uint32_t peek_offset = conn->seq_to_tap - conn->seq_ack_from_tap;
 	struct tcp_tap_transfer_ext *t = &migrate_ext[FLOW_IDX(conn)];
@@ -3546,7 +3597,7 @@ int tcp_flow_migrate_source_ext(const struct ctx *c,
 	/* Disable SO_PEEK_OFF, it will make accessing the queues in repair mode
 	 * weird.
 	 */
-	if (tcp_set_peek_offset(conn, -1)) {
+	if (tcp_set_peek_offset(conn, -1, now)) {
 		rc = -errno;
 		goto fail;
 	}
@@ -3811,10 +3862,12 @@ out:
  * @c:		Execution context
  * @conn:	Connection entry to complete with extra data
  * @fd:		Descriptor for state migration
+ * @now:	Current timestamp
  *
  * Return: 0 on success, negative on fatal failure, but 0 on single flow failure
  */
-int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd)
+int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn,
+				int fd, const struct timespec *now)
 {
 	uint32_t peek_offset = conn->seq_to_tap - conn->seq_ack_from_tap;
 	struct tcp_tap_transfer_ext t;
@@ -3968,13 +4021,13 @@ int tcp_flow_migrate_target_ext(struct ctx *c, struct tcp_tap_conn *conn, int fd
 		}
 	}
 
-	if (tcp_set_peek_offset(conn, peek_offset))
+	if (tcp_set_peek_offset(conn, peek_offset, now))
 		goto fail;
 
-	if (tcp_send_flag(c, conn, ACK))
+	if (tcp_send_flag(c, conn, ACK, now))
 		goto fail;
 
-	tcp_data_from_sock(c, conn);
+	tcp_data_from_sock(c, conn, now);
 
 	if ((rc = tcp_epoll_ctl(conn))) {
 		flow_dbg(conn,
@@ -3992,7 +4045,7 @@ fail:
 	}
 
 	conn->flags = 0; /* Not waiting for ACK, don't schedule timer */
-	tcp_rst(c, conn);
+	tcp_rst(c, conn, now);
 
 	return 0;
 }

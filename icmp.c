@@ -66,8 +66,10 @@ static struct icmp_ping_flow *ping_at_sidx(flow_sidx_t sidx)
  * icmp_sock_handler() - Handle new data from ICMP or ICMPv6 socket
  * @c:		Execution context
  * @ref:	epoll reference
+ * @now:	Current timestamp
  */
-void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
+void icmp_sock_handler(const struct ctx *c, union epoll_ref ref,
+		       const struct timespec *now)
 {
 	struct icmp_ping_flow *pingf = ping_at_sidx(ref.flowside);
 	const struct flowside *ini = &pingf->f.side[INISIDE];
@@ -84,7 +86,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
 
 	n = recvfrom(ref.fd, buf, sizeof(buf), 0, &sr.sa, &sl);
 	if (n < 0) {
-		flow_perror(pingf, "recvfrom() error");
+		flow_perror_ratelimit(pingf, now, "recvfrom() error");
 		return;
 	}
 
@@ -142,7 +144,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref)
 	return;
 
 unexpected:
-	flow_err(pingf, "Unexpected packet on ping socket");
+	flow_err_ratelimit(pingf, now, "Unexpected packet on ping socket");
 }
 
 /**
@@ -165,12 +167,15 @@ static void icmp_ping_close(const struct ctx *c,
  * @id:		ICMP id for the new socket
  * @saddr:	Source address
  * @daddr:	Destination address
+ * @now:	Current timestamp
  *
  * Return: newly opened ping flow, or NULL on failure
  */
 static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 					    sa_family_t af, uint16_t id,
-					    const void *saddr, const void *daddr)
+					    const void *saddr,
+					    const void *daddr,
+					    const struct timespec *now)
 {
 	uint8_t proto = af == AF_INET ? IPPROTO_ICMP : IPPROTO_ICMPV6;
 	uint8_t flowtype = af == AF_INET ? FLOW_PING4 : FLOW_PING6;
@@ -186,10 +191,11 @@ static struct icmp_ping_flow *icmp_ping_new(const struct ctx *c,
 		goto cancel;
 
 	if (flow->f.pif[TGTSIDE] != PIF_HOST) {
-		flow_err(flow, "No support for forwarding %s from %s to %s",
-			 proto == IPPROTO_ICMP ? "ICMP" : "ICMPv6",
-			 pif_name(flow->f.pif[INISIDE]),
-			 pif_name(flow->f.pif[TGTSIDE]));
+		flow_err_ratelimit(
+			flow, now, "No support for forwarding %s from %s to %s",
+			proto == IPPROTO_ICMP ? "ICMP" : "ICMPv6",
+			pif_name(flow->f.pif[INISIDE]),
+			pif_name(flow->f.pif[TGTSIDE]));
 		goto cancel;
 	}
 
@@ -299,7 +305,7 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 	if (flow)
 		pingf = &flow->ping;
-	else if (!(pingf = icmp_ping_new(c, af, id, saddr, daddr)))
+	else if (!(pingf = icmp_ping_new(c, af, id, saddr, daddr, now)))
 		return 1;
 
 	tgt = &pingf->f.side[TGTSIDE];
@@ -317,7 +323,8 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	msh.msg_flags = 0;
 
 	if (sendmsg(pingf->sock, &msh, MSG_NOSIGNAL) < 0) {
-		flow_dbg_perror(pingf, "failed to relay request to socket");
+		flow_warn_perror_ratelimit(pingf, now,
+					   "failed to relay request to socket");
 	} else {
 		flow_dbg(pingf,
 			 "echo request to socket, ID: %"PRIu16", seq: %"PRIu16,

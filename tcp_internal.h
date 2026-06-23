@@ -158,27 +158,28 @@ struct tcp_syn_opts {
 extern char tcp_buf_discard [BUF_DISCARD_SIZE];
 
 void conn_flag_do(const struct ctx *c, struct tcp_tap_conn *conn,
-		  unsigned long flag);
-#define conn_flag(c, conn, flag)					\
+		  unsigned long flag, const struct timespec *now);
+#define conn_flag(c, conn, flag, now)					\
 	do {								\
 		flow_trace(conn, "flag at %s:%i", __func__, __LINE__);	\
-		conn_flag_do(c, conn, flag);				\
+		conn_flag_do(c, conn, flag, now);			\
 	} while (0)
 
 
 void conn_event_do(const struct ctx *c, struct tcp_tap_conn *conn,
-		   unsigned long event);
-#define conn_event(c, conn, event)					\
+		   unsigned long event, const struct timespec *now);
+#define conn_event(c, conn, event, now)					\
 	do {								\
 		flow_trace(conn, "event at %s:%i", __func__, __LINE__);	\
-		conn_event_do(c, conn, event);				\
+		conn_event_do(c, conn, event, now);			\
 	} while (0)
 
-void tcp_rst_do(const struct ctx *c, struct tcp_tap_conn *conn);
-#define tcp_rst(c, conn)						\
+void tcp_rst_do(const struct ctx *c, struct tcp_tap_conn *conn,
+		const struct timespec *now);
+#define tcp_rst(c, conn, now)						\
 	do {								\
 		flow_dbg((conn), "TCP reset at %s:%i", __func__, __LINE__); \
-		tcp_rst_do(c, conn);					\
+		tcp_rst_do(c, conn, now);				\
 	} while (0)
 
 struct tcp_info_linux;
@@ -194,11 +195,13 @@ size_t tcp_fill_headers(const struct ctx *c, struct tcp_tap_conn *conn,
 			size_t dlen, uint32_t csum_flags, uint32_t seq);
 
 int tcp_update_seqack_wnd(const struct ctx *c, struct tcp_tap_conn *conn,
-			  bool force_seq, struct tcp_info_linux *tinfo);
+			  bool force_seq, struct tcp_info_linux *tinfo,
+			  const struct timespec *now);
 int tcp_prepare_flags(const struct ctx *c, struct tcp_tap_conn *conn,
 		      int flags, struct tcphdr *th, struct tcp_syn_opts *opts,
-		      size_t *optlen);
-int tcp_set_peek_offset(const struct tcp_tap_conn *conn, int offset);
+		      size_t *optlen, const struct timespec *now);
+int tcp_set_peek_offset(const struct tcp_tap_conn *conn, int offset,
+			const struct timespec *now);
 
 int tcp_prepare_iov(struct msghdr *msg, struct iovec *iov,
 		      uint32_t already_sent, int payload_iov_cnt);
