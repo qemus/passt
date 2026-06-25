@@ -333,7 +333,7 @@ namespaces, and automatically forwards them from the other side. Port forwarding
 is fully configurable with command line options.
 
 ## Stars 🌟
-[![Stars](https://starchart.cc/qemus/passt.svg?variant=adaptive)](https://starchart.cc/qemus/passt)
+[![Stargazers](https://raw.githubusercontent.com/star-stats/stars/refs/heads/data/charts/qemus-passt.svg)](https://github.com/dobtc/qemus/passt)
 
 [build_url]: https://github.com/qemus/passt/
 [release_url]: https://github.com/qemus/passt/releases/
