@@ -38,6 +38,7 @@
 #include "epoll_ctl.h"
 #include "pasta.h"
 #include "serialise.h"
+#include "conf.h"
 #ifdef HAS_GETRANDOM
 #include <sys/random.h>
 #endif
@@ -939,15 +940,8 @@ void close_open_files(int argc, char **argv)
 	do {
 		name = getopt_long(argc, argv, "-:F:", optfd, NULL);
 
-		if (name == 'F') {
-			errno = 0;
-			fd = strtol(optarg, NULL, 0);
-
-			if (errno ||
-			    (fd != STDIN_FILENO && fd <= STDERR_FILENO) ||
-			    fd > INT_MAX)
-				die("Invalid --fd: %s", optarg);
-		}
+		if (name == 'F')
+			fd = conf_tap_fd(optarg);
 	} while (name != -1);
 
 	if (fd == -1) {

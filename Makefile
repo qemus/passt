@@ -36,12 +36,13 @@ BASE_CFLAGS += -pedantic -Wall -Wextra -Wno-format-zero-length -Wformat-security
 PASST_SRCS = arch.c arp.c bitmap.c checksum.c conf.c dhcp.c dhcpv6.c \
 	epoll_ctl.c flow.c fwd.c fwd_rule.c icmp.c igmp.c inany.c iov.c ip.c \
 	isolation.c lineread.c log.c mld.c ndp.c netlink.c migrate.c packet.c \
-	passt.c pasta.c pcap.c pif.c repair.c serialise.c tap.c tcp.c \
+	parse.c passt.c pasta.c pcap.c pif.c repair.c serialise.c tap.c tcp.c \
 	tcp_buf.c tcp_splice.c tcp_vu.c udp.c udp_flow.c udp_vu.c util.c \
 	vhost_user.c virtio.c vu_common.c
 QRAP_SRCS = qrap.c
 PASST_REPAIR_SRCS = passt-repair.c
-PESTO_SRCS = pesto.c bitmap.c fwd_rule.c inany.c ip.c lineread.c serialise.c
+PESTO_SRCS = pesto.c bitmap.c fwd_rule.c inany.c ip.c lineread.c parse.c \
+	serialise.c
 SRCS = $(PASST_SRCS) $(QRAP_SRCS) $(PASST_REPAIR_SRCS) $(PESTO_SRCS)
 
 MANPAGES = passt.1 pasta.1 pesto.1 qrap.1 passt-repair.1
@@ -49,12 +50,14 @@ MANPAGES = passt.1 pasta.1 pesto.1 qrap.1 passt-repair.1
 PASST_HEADERS = arch.h arp.h bitmap.h checksum.h conf.h dhcp.h dhcpv6.h \
 	epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h icmp_flow.h \
 	inany.h iov.h ip.h isolation.h lineread.h log.h migrate.h ndp.h \
-	netlink.h packet.h passt.h pasta.h pcap.h pif.h repair.h serialise.h \
-	siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h tcp_splice.h \
-	tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h vhost_user.h \
-	virtio.h vu_common.h
+	netlink.h packet.h parse.h passt.h pasta.h pcap.h pif.h repair.h \
+	serialise.h siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h \
+	tcp_splice.h tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h \
+	vhost_user.h virtio.h vu_common.h
 QRAP_HEADERS = arp.h ip.h passt.h util.h
 PASST_REPAIR_HEADERS = linux_dep.h
+PESTO_HEADERS = bitmap.h common.h fwd_rule.h inany.h ip.h log.h parse.h \
+	pesto.h serialise.h
 
 C := \#include <sys/random.h>\nint main(){int a=getrandom(0, 0, 0);}
 ifeq ($(shell printf "$(C)" | $(CC) -S -xc - -o - >/dev/null 2>&1; echo $$?),0)
@@ -203,7 +206,8 @@ CPPCHECK_FLAGS = --std=c11 --error-exitcode=1 --enable=all --force	\
 	else								\
 		echo "";						\
 	fi)								\
-	--suppress=missingIncludeSystem
+	--suppress=missingIncludeSystem					\
+	--suppress=unusedStructMember
 
 cppcheck: passt.cppcheck passt-repair.cppcheck pesto.cppcheck
 
@@ -212,17 +216,15 @@ cppcheck: passt.cppcheck passt-repair.cppcheck pesto.cppcheck
 	$(CPPCHECK) $(CPPCHECK_FLAGS) $(BASE_CPPFLAGS) $^
 
 passt.cppcheck: BASE_CPPFLAGS += -UPESTO
-passt.cppcheck: CPPCHECK_FLAGS += --suppress=unusedStructMember
 passt.cppcheck: $(PASST_SRCS) $(PASST_HEADERS) seccomp.h
 
-passt-repair.cppcheck: CPPCHECK_FLAGS += --suppress=unusedStructMember
 passt-repair.cppcheck: $(PASST_REPAIR_SRCS) $(PASST_REPAIR_HEADERS) seccomp_repair.h
 
 pesto.cppcheck: BASE_CPPFLAGS += -DPESTO
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:bitmap.c
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:inany.h
-pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:inany.c
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:ip.h
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:serialise.c
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=staticFunction:fwd_rule.c
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=staticFunction:parse.c
 pesto.cppcheck: $(PESTO_SRCS) $(PESTO_HEADERS) seccomp_pesto.h

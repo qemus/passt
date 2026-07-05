@@ -52,6 +52,7 @@
 #include "conf.h"
 #include "pesto.h"
 #include "serialise.h"
+#include "parse.h"
 
 #define NETNS_RUN_DIR	"/run/netns"
 
@@ -320,17 +321,16 @@ static void conf_pasta_ns(int *netns_only, char *userns, char *netns,
 		die("Both --netns and PID or command given");
 
 	if (optind + 1 == argc) {
-		char *endptr;
-		long pidval;
+		const char *p = argv[optind];
+		unsigned long pidval;
 
-		pidval = strtol(argv[optind], &endptr, 10);
-		if (!*endptr) {
+		if (parse_unsigned(&p, 10, &pidval) && parse_eoi(p)) {
 			/* Looks like a pid */
-			if (pidval < 0 || pidval > INT_MAX)
+			if (pidval > INT_MAX)
 				die("Invalid PID %s", argv[optind]);
 
 			if (snprintf_check(netns, PATH_MAX,
-					   "/proc/%ld/ns/net", pidval))
+					   "/proc/%lu/ns/net", pidval))
 				die_perror("Can't build netns path");
 
 			if (!*userns) {
@@ -349,26 +349,25 @@ static void conf_pasta_ns(int *netns_only, char *userns, char *netns,
 /** conf_ip4_prefix() - Parse an IPv4 prefix length or netmask
  * @arg:	Netmask in dotted decimal or prefix length
  *
- * Return: validated prefix length on success, -1 on failure
+ * Return: validated prefix length; dies on bad argument
  */
-static int conf_ip4_prefix(const char *arg)
+static uint8_t conf_ip4_prefix(const char *arg)
 {
+	const char *p = arg;
 	struct in_addr mask;
 	unsigned long len;
 
-	if (inet_pton(AF_INET, arg, &mask)) {
+	if (parse_ipv4(&p, &mask) && parse_eoi(p)) {
 		in_addr_t hmask = ntohl(mask.s_addr);
 		len = __builtin_popcount(hmask);
-		if ((hmask << len) != 0)
-			return -1;
-	} else {
-		errno = 0;
-		len = strtoul(arg, NULL, 0);
-		if (len > 32 || errno)
-			return -1;
+		if ((hmask << len) == 0)
+			return len;
+	} else if (parse_unsigned(&p, 0, &len) && parse_eoi(p) &&
+		   len <= 32) {
+		return len;
 	}
 
-	return len;
+	die("Invalid prefix length: %s", arg);
 }
 
 /**
@@ -661,11 +660,10 @@ static void usage(const char *name, FILE *f, int status)
 		"    SPEC can be:\n"
 		"      'none': don't forward any ports\n"
 		"      [ADDR[%%IFACE]/]PORTS: forward specific ports\n"
-		"        PORTS is either 'all' (forward all unbound, non-ephemeral\n"
-		"        ports), or a comma-separated list of ports, optionally\n"
-		"        ranged with '-' and optional target ports after ':'.\n"
-		"        Ranges can be reduced by excluding ports or ranges\n"
-		"        prefixed by '~'.\n"
+		"        PORTS is a comma-separated list of ports or port\n"
+		"         ranges.  'all' indicates all unbound non-ephemeral\n"
+		"         ports.  Ranges can be reduced by excluding ports or\n"
+		"         ranges prefixed by '~'.\n"
 		"%s"
 		"        Examples:\n"
 		"        -t all		Forward all ports\n"
@@ -1028,7 +1026,9 @@ static void conf_ugid(char *runas, uid_t *uid, gid_t *gid)
 static void conf_nat(const char *arg, struct in_addr *addr4,
 		     struct in6_addr *addr6, int *no_map_gw)
 {
-	if (strcmp(arg, "none") == 0) {
+	const char *p = arg;
+
+	if (parse_literal(&p, "none") && parse_eoi(p)) {
 		*addr4 = in4addr_any;
 		*addr6 = in6addr_any;
 		if (no_map_gw)
@@ -1049,7 +1049,7 @@ static void conf_nat(const char *arg, struct in_addr *addr4,
 	    !IN4_IS_ADDR_MULTICAST(addr4))
 		return;
 
-	die("Invalid address to remap to host: %s", optarg);
+	die("Invalid address to remap to host: %s", arg);
 }
 
 /**
@@ -1151,6 +1151,87 @@ static void conf_sock_listen(const struct ctx *c)
 }
 
 /**
+ * conf_tap_fd() - Read tap fd as supplied by -F command line option
+ * @arg:	Argument to -F command line option
+ */
+int conf_tap_fd(const char *arg)
+{
+	const char *p = arg;
+	unsigned long val;
+
+	if (!parse_unsigned(&p, 0, &val) || !parse_eoi(p)	||
+	    val > INT_MAX					||
+	    (val != STDIN_FILENO && val <= STDERR_FILENO))
+		die("Invalid --fd: %s", arg);
+
+	return val;
+}
+
+/**
+ * conf_addr() - Configure guest address with -a option
+ * @c:		Execution context
+ * @arg:	-a command line argument
+ * @opt_n:	Value from -n option, if any
+ */
+static bool conf_addr(struct ctx *c, char *arg, uint8_t opt_n)
+{
+	unsigned long prefix_len;
+	const struct in_addr *a4;
+	union inany_addr addr;
+	sa_family_t parse_af;
+	const char *p = arg;
+	bool is_prefix;
+
+	if (!parse_inany_(&p, &addr, &parse_af))
+		goto bad;
+	a4 = inany_v4(&addr);
+
+	if ((is_prefix = parse_literal(&p, "/"))) {
+		/* Prefix length included in -a option */
+		if (!parse_unsigned(&p, 10, &prefix_len))
+			goto bad;
+		if (opt_n)
+			die("Redundant prefix length specification");
+		if (parse_af == AF_INET) {
+			if (prefix_len > 32)
+				goto bad_prefix;
+			prefix_len += 96;
+		} else if (prefix_len > 128) {
+			goto bad_prefix;
+		}
+	} else {
+		/* Get prefix length from elsewhere */
+		if (opt_n && a4)
+			prefix_len = opt_n;
+		else
+			prefix_len = inany_default_prefix_len(&addr);
+	}
+
+	if (!parse_eoi(p)		||
+	    !inany_is_unicast(&addr)	||
+	    inany_is_loopback(&addr))
+		goto bad;
+
+	if (a4) {
+		c->ip4.addr = *a4;
+		c->ip4.prefix_len = prefix_len - 96;
+		c->ip4.addr_fixed = true;
+		c->ip4.no_copy_addrs = true;
+	} else {
+		c->ip6.addr = addr.a6;
+		c->ip6.addr_fixed = true;
+		c->ip6.no_copy_addrs = true;
+	}
+
+	return is_prefix;
+
+bad_prefix:
+	die("Invalid prefix length: %s", arg);
+bad:
+	die("Invalid guest address: %s", arg);
+}
+
+/**
  * conf() - Process command-line arguments and set configuration
  * @c:		Execution context
  * @argc:	Argument count
@@ -1244,13 +1325,12 @@ void conf(struct ctx *c, int argc, char **argv)
 	unsigned dns4_idx = 0, dns6_idx = 0;
 	unsigned long max_mtu = IP_MAX_MTU;
 	struct fqdn *dnss = c->dns_search;
-	bool addr_has_prefix_len = false;
-	uint8_t prefix_len_from_opt = 0;
 	unsigned int ifi4 = 0, ifi6 = 0;
+	bool opt_a_is_prefix = false;
 	const char *logfile = NULL;
 	char *runas = NULL;
 	size_t logsize = 0;
-	long fd_tap_opt;
+	uint8_t opt_n = 0;
 	int name, ret;
 	uid_t uid;
 	gid_t gid;
@@ -1268,6 +1348,8 @@ void conf(struct ctx *c, int argc, char **argv)
 
 	optind = 0;
 	do {
+		const char *p;
+
 		name = getopt_long(argc, argv, optstring, options, NULL);
 
 		switch (name) {
@@ -1348,14 +1430,17 @@ void conf(struct ctx *c, int argc, char **argv)
 		case 12:
 			runas = optarg;
 			break;
-		case 13:
-			errno = 0;
-			logsize = strtol(optarg, NULL, 0);
+		case 13: {
+			unsigned long val;
 
-			if (logsize < LOGFILE_SIZE_MIN || errno)
+			p = optarg;
+			if (!parse_unsigned(&p, 0, &val) || !parse_eoi(p) ||
+			    val < LOGFILE_SIZE_MIN)
 				die("Invalid --log-size: %s", optarg);
 
+			logsize = val;
 			break;
+		}
 		case 14:
 			FPRINTF(stdout,
 				c->mode == MODE_PASTA ? "pasta " : "passt ");
@@ -1503,15 +1588,7 @@ void conf(struct ctx *c, int argc, char **argv)
 			c->fd_control_listen = c->fd_control = -1;
 			break;
 		case 'F':
-			errno = 0;
-			fd_tap_opt = strtol(optarg, NULL, 0);
-
-			if (errno ||
-			    (fd_tap_opt != STDIN_FILENO && fd_tap_opt <= STDERR_FILENO) ||
-			    fd_tap_opt > INT_MAX)
-				die("Invalid --fd: %s", optarg);
-
-			c->fd_tap = fd_tap_opt;
+			c->fd_tap = conf_tap_fd(optarg);
 			c->one_off = true;
 			*c->sock_path = 0;
 			break;
@@ -1540,12 +1617,9 @@ void conf(struct ctx *c, int argc, char **argv)
 			break;
 		case 'm': {
 			unsigned long mtu;
-			char *e;
 
-			errno = 0;
-			mtu = strtoul(optarg, &e, 0);
-
-			if (errno || *e)
+			p = optarg;
+			if (!parse_unsigned(&p, 0, &mtu) || !parse_eoi(p))
 				die("Invalid MTU: %s", optarg);
 
 			if (mtu > max_mtu) {
@@ -1556,58 +1630,16 @@ void conf(struct ctx *c, int argc, char **argv)
 			c->mtu = mtu;
 			break;
 		}
-		case 'a': {
-			union inany_addr addr;
-			uint8_t prefix_len;
-
-			addr_has_prefix_len = inany_prefix_pton(optarg, &addr,
-								&prefix_len);
-
-			if (addr_has_prefix_len && prefix_len_from_opt)
+		case 'a':
+			opt_a_is_prefix = conf_addr(c, optarg, opt_n);
+			break;
+		case 'n':
+			if (opt_a_is_prefix)
 				die("Redundant prefix length specification");
 
-			if (!addr_has_prefix_len && !inany_pton(optarg, &addr))
-				die("Invalid address: %s", optarg);
-
-			if (prefix_len_from_opt && inany_v4(&addr))
-				prefix_len = prefix_len_from_opt;
-			else if (!addr_has_prefix_len)
-				prefix_len = inany_default_prefix_len(&addr);
-
-			if (inany_is_unspecified(&addr) ||
-			    inany_is_multicast(&addr) ||
-			    inany_is_loopback(&addr) ||
-			    IN6_IS_ADDR_V4COMPAT(&addr.a6))
-				die("Invalid address: %s", optarg);
-
-			if (inany_v4(&addr)) {
-				c->ip4.addr = *inany_v4(&addr);
-				c->ip4.prefix_len = prefix_len - 96;
-				c->ip4.addr_fixed = true;
-				if (c->mode == MODE_PASTA)
-					c->ip4.no_copy_addrs = true;
-			} else {
-				c->ip6.addr = addr.a6;
-				c->ip6.addr_fixed = true;
-				if (c->mode == MODE_PASTA)
-					c->ip6.no_copy_addrs = true;
-			}
+			c->ip4.prefix_len = conf_ip4_prefix(optarg);
+			opt_n = c->ip4.prefix_len + 96;
 			break;
-		}
-		case 'n': {
-			int plen;
-
-			if (addr_has_prefix_len)
-				die("Redundant prefix length specification");
-
-			plen = conf_ip4_prefix(optarg);
-			if (plen < 0)
-				die("Invalid prefix length: %s", optarg);
-
-			prefix_len_from_opt = plen + 96;
-			c->ip4.prefix_len = plen;
-			break;
-		}
 		case 'M':
 			parse_mac(c->our_tap_mac, optarg);
 			break;

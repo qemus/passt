@@ -18,8 +18,6 @@
 #include "inany.h"
 #include "bitmap.h"
 
-/* Number of ports for both TCP and UDP */
-#define	NUM_PORTS	(1U << 16)
 #define PORT_BITMAP_SIZE	DIV_ROUND_UP(NUM_PORTS, 8)
 
 /* Forwarding capability bits */

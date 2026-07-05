@@ -432,29 +432,22 @@ Send \fIname\fR as Client FQDN: DHCP option 81 and DHCPv6 option 39.
 
 .TP
 .BR \-t ", " \-\-tcp-ports " " \fIspec
-Configure TCP port forwarding to guest or namespace. \fIspec\fR can be one of:
+Configure TCP port forwarding to guest or namespace. \fIspec\fR can be either:
 .RS
 
 .TP
 .BR none
 Don't forward any ports
 
+or
 .TP
 [\fIaddress\fR[\fB%\fR\fIinterface\fR]\fB/\fR]\fIports\fR ...
-Specific ports to forward.  Optionally, a specific listening address
-and interface name (since Linux 5.7) can be specified.  \fIports\fR
-may be either:
-.RS
-.TP
-\fBall\fR
-Forward all unbound, non-ephemeral ports, as permitted by current
-capabilities.  For low (< 1024) ports, see \fBNOTES\fR. No failures
-are reported for unavailable ports, unless no ports could be forwarded
-at all.
+
+Ports to forward.  Optionally, a specific listening address and
+interface name (since Linux 5.7) can be specified.
 .RE
 
-.RS
-or a comma-separated list of entries which may be any of:
+\fIports\fR is a comma-separated list of entries which may be any of:
 .TP
 \fIfirst\fR[\fB-\fR\fIlast\fR][\fB:\fR\fItofirst\fR[\fB-\fR\fItolast\fR]]
 Include range. Forward port numbers between \fIfirst\fR and \fIlast\fR
@@ -469,6 +462,13 @@ Exclude range.  Don't forward port numbers between \fIfirst\fR and
 \fIlast\fR.  This takes precedences over include ranges.
 
 .TP
+.BR all
+Forward all unbound, non-ephemeral ports, not covered by exclude
+ranges above, as permitted by current capabilities.  For low (< 1024)
+ports, see \fBNOTES\fR. No failures are reported for unavailable
+ports, unless no ports could be forwarded at all.
+
+.TP
 .BR auto
 \fBpasta\fR only.  Only forward ports in the specified set if the
 target ports are bound in the namespace. The list of ports is
@@ -476,11 +476,10 @@ periodically derived (every second) from listening sockets reported by
 \fI/proc/net/tcp\fR and \fI/proc/net/tcp6\fR, see \fBproc\fR(5).
 .RE
 
-Specifying excluded ranges only implies that all other non-ephemeral
-ports are forwarded. Specifying no ranges at all implies forwarding
-all non-ephemeral ports permitted by current capabilities.  In this
-case, no failures are reported for unavailable ports, unless no ports
-could be forwarded at all.
+Specifying excluded ranges only implies that all other non-ephemeral ports
+are forwarded. Specifying no ranges is equivalent to '\fBall\fR'.  In this
+case, no failures are reported for unavailable ports, unless no ports could
+be forwarded at all.
 
 Examples:
 .RS

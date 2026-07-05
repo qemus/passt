@@ -303,8 +303,5 @@ static inline int inany_from_sockaddr(union inany_addr *dst, in_port_t *port,
 
 bool inany_matches(const union inany_addr *a, const union inany_addr *b);
 const char *inany_ntop(const union inany_addr *src, char *dst, socklen_t size);
-int inany_pton(const char *src, union inany_addr *dst);
-int inany_prefix_pton(const char *src, union inany_addr *dst,
-		      uint8_t *prefix_len);
 
 #endif /* INANY_H */

@@ -24,6 +24,7 @@
 #include "fwd_rule.h"
 #include "lineread.h"
 #include "log.h"
+#include "parse.h"
 #include "serialise.h"
 
 /* Ephemeral port range: values from RFC 6335 */
@@ -40,10 +41,11 @@ static in_port_t fwd_ephemeral_max = NUM_PORTS - 1;
  */
 void fwd_probe_ephemeral(void)
 {
-	char *line, *tab, *end;
+	unsigned long min, max;
 	struct lineread lr;
-	long min, max;
+	const char *p;
 	ssize_t len;
+	char *line;
 	int fd;
 
 	fd = open(PORT_RANGE_SYSCTL, O_RDONLY | O_CLOEXEC);
@@ -56,35 +58,20 @@ void fwd_probe_ephemeral(void)
 	len = lineread_get(&lr, &line);
 	close(fd);
 
-	if (len < 0)
-		goto parse_err;
-
-	tab = strchr(line, '\t');
-	if (!tab)
-		goto parse_err;
-	*tab = '\0';
-
-	errno = 0;
-	min = strtol(line, &end, 10);
-	if (*end || errno)
-		goto parse_err;
-
-	errno = 0;
-	max = strtol(tab + 1, &end, 10);
-	if (*end || errno)
-		goto parse_err;
-
-	if (min < 0 || min >= (long)NUM_PORTS ||
-	    max < 0 || max >= (long)NUM_PORTS)
-		goto parse_err;
+	p = line;
+	if (len < 0				||
+	    !parse_unsigned(&p, 10, &min)	||
+	    !parse_literal(&p, "\t")		||
+	    !parse_unsigned(&p, 10, &max)	||
+	    !parse_eoi(p)			||
+	    min >= NUM_PORTS			||
+	    max >= NUM_PORTS) {
+		warn("Unable to parse %s", PORT_RANGE_SYSCTL);
+		return;
+	}
 
 	fwd_ephemeral_min = min;
 	fwd_ephemeral_max = max;
-
-	return;
-
-parse_err:
-	warn("Unable to parse %s", PORT_RANGE_SYSCTL);
 }
 
 /**
@@ -381,75 +368,6 @@ int fwd_rule_add(struct fwd_table *fwd, const struct fwd_rule *new)
 }
 
 /**
- * port_range() - Represents a non-empty range of ports
- * @first:	First port number in the range
- * @last:	Last port number in the range (inclusive)
- *
- * Invariant:	@last >= @first
- */
-struct port_range {
-	in_port_t first, last;
-};
-
-/**
- * parse_port_range() - Parse a range of port numbers '<first>[-<last>]'
- * @s:		String to parse
- * @endptr:	Update to the character after the parsed range (similar to
- *		strtol() etc.)
- * @range:	Update with the parsed values on success
- *
- * Return: -EINVAL on parsing error, -ERANGE on out of range port
- *	   numbers, 0 on success
- */
-static int parse_port_range(const char *s, const char **endptr,
-			    struct port_range *range)
-{
-	unsigned long first, last;
-	char *ep;
-
-	last = first = strtoul(s, &ep, 10);
-	if (ep == s) /* Parsed nothing */
-		return -EINVAL;
-	if (*ep == '-') { /* we have a last value too */
-		const char *lasts = ep + 1;
-		last = strtoul(lasts, &ep, 10);
-		if (ep == lasts) /* Parsed nothing */
-			return -EINVAL;
-	}
-
-	if ((last < first) || (last >= NUM_PORTS))
-		return -ERANGE;
-
-	range->first = first;
-	range->last = last;
-	*endptr = ep;
-
-	return 0;
-}
-
-/**
- * parse_keyword() - Parse a literal keyword
- * @s:		String to parse
- * @endptr:	Update to the character after the keyword
- * @kw:		Keyword to accept
- *
- * Return: 0, if @s starts with @kw, -EINVAL if it does not
- */
-static int parse_keyword(const char *s, const char **endptr, const char *kw)
-{
-	size_t len = strlen(kw);
-
-	if (strlen(s) < len)
-		return -EINVAL;
-
-	if (memcmp(s, kw, len))
-		return -EINVAL;
-
-	*endptr = s + len;
-	return 0;
-}
-
-/**
  * fwd_rule_range_except() - Set up forwarding for a range of ports minus a
  *                           bitmap of exclusions
  * @fwd:	Forwarding table to be updated
@@ -521,17 +439,102 @@ fail:
 	    fwd_rule_fmt(&rule, rulestr, sizeof(rulestr)));
 }
 
-/*
- * for_each_chunk - Step through delimited chunks of a string
- * @p_:		Pointer to start of each chunk (updated)
- * @ep_:	Pointer to end of each chunk (updated)
- * @s_:		String to step through
- * @sep_:	String of all allowed delimiters
+/**
+ * enum fwd_port_chunk_kind - Kind of port specifier piece
+ * @CHUNK_ALL		"all"
+ * @CHUNK_AUTO		"auto"
+ * @CHUNK_EXCLUDE	"~1111[-2222]"
+ * @CHUNK_INCLUDE	"1111[-2222][:3333[-4444]]"
  */
-#define for_each_chunk(p_, ep_, s_, sep_)			\
-	for ((p_) = (s_);					\
-	     (ep_) = (p_) + strcspn((p_), (sep_)), *(p_);	\
-	     (p_) = *(ep_) ? (ep_) + 1 : (ep_))
+enum fwd_port_chunk_kind {
+	CHUNK_ALL,
+	CHUNK_AUTO,
+	CHUNK_EXCLUDE,
+	CHUNK_INCLUDE,
+};
+
+/**
+ * parse_port_chunk() - Parse one chunk of a port specifier
+ * @cursor:	Parsing point (see parse.c)
+ * @kindp:	Updated with kind of chunk we parsed
+ * @lrange:	Updated with listening port range (for INCLUDE & EXCLUDE)
+ * @trange:	Updated with target port range (for INCLUDE)
+ */
+static bool parse_port_chunk(const char **cursor,
+			     enum fwd_port_chunk_kind *kindp,
+			     struct port_range *lrange,
+			     struct port_range *trange)
+{
+	struct port_range lr = { 0 }, tr = { 0 };
+	enum fwd_port_chunk_kind kind;
+	const char *p = *cursor;
+
+	if (parse_literal(&p, "all")) {
+		kind = CHUNK_ALL;
+	} else if (parse_literal(&p, "auto")) {
+		kind = CHUNK_AUTO;
+	} else if (parse_literal(&p, "~")) {
+		kind = CHUNK_EXCLUDE;
+		if (!parse_port_range(&p, &lr))
+			return false;
+	} else if (parse_port_range(&p, &lr)) {
+		kind = CHUNK_INCLUDE;
+
+		if (parse_literal(&p, ":")) {
+			if (!parse_port_range(&p, &tr))
+				return false;
+		} else {
+			tr = lr;
+		}
+	} else {
+		return false;
+	}
+
+	*kindp = kind;
+	*lrange = lr;
+	if (trange)
+		*trange = tr;
+	*cursor = p;
+	return true;
+}
+
+/**
+ * parse_addrifname() - Parse ADDRESS[%IFNAME]/
+ * @cursor:	Parsing cursor (see parse.c)
+ * @addr:	Updated with parsed inany address (NULL for *)
+ * @abuf:	Buffer to store address
+ * @ifname:	Updated with parsed interface name ("" if none)
+ */
+static bool parse_addrifname(const char **cursor,
+			     const union inany_addr **addr,
+			     union inany_addr *abuf,
+			     char *ifname)
+{
+	union inany_addr atmp = inany_any6;
+	char iftmp[IFNAMSIZ] = {0};
+	const char *p;
+
+	if (p = *cursor,
+	    parse_inany(&p, &atmp)		&&
+	    parse_ifspec(&p, iftmp)		&&
+	    parse_literal(&p, "/")) {
+		/* Specific listening address */
+		*addr = abuf;
+	} else if (p = *cursor,
+		   parse_literal(&p, "*"),
+		   parse_ifspec(&p, iftmp)	&&
+		   parse_literal(&p, "/")) {
+		/* Missing or "*" address */
+		*addr = NULL;
+	} else {
+		return false;
+	}
+
+	*abuf = atmp;
+	memcpy(ifname, iftmp, IFNAMSIZ);
+	*cursor = p;
+	return true;
+}
 
 /**
  * fwd_rule_parse_ports() - Parse port range(s) specifier
@@ -548,93 +551,77 @@ static void fwd_rule_parse_ports(struct fwd_table *fwd, bool del, uint8_t proto,
 				 const char *spec)
 {
 	uint8_t exclude[PORT_BITMAP_SIZE] = { 0 };
+	enum fwd_port_chunk_kind kind;
+	struct port_range lrange;
 	bool exclude_only = true;
-	const char *p, *ep;
 	uint8_t flags = 0;
+	const char *p;
 	unsigned i;
 
-	if (!strcmp(spec, "all")) {
-		/* Treat "all" as equivalent to "": all non-ephemeral ports */
-		spec = "";
-	}
+	/* Consider excluded ranges and "auto" in the first pass */
+	p = spec;
+	do {
+		if (!parse_port_chunk(&p, &kind, &lrange, NULL))
+			goto bad;
 
-	/* Parse excluded ranges and "auto" in the first pass */
-	for_each_chunk(p, ep, spec, ",") {
-		struct port_range xrange;
-
-		if (isdigit(*p)) {
-			/* Include range, parse later */
-			exclude_only = false;
-			continue;
-		}
-
-		if (parse_keyword(p, &p, "auto") == 0) {
-			if (p != ep) /* Garbage after the keyword */
-				goto bad;
-
+		switch (kind) {
+		case CHUNK_AUTO:
 			if (!(fwd->caps & FWD_CAP_SCAN)) {
 				die(
 "'auto' port forwarding is only allowed for pasta");
 			}
-
 			flags |= FWD_SCAN;
-			continue;
+			break;
+
+		case CHUNK_EXCLUDE:
+			for (i = lrange.first; i <= lrange.last; i++)
+				bitmap_set(exclude, i);
+			break;
+		default:
+			; /* Handled later */
 		}
+	} while (parse_literal(&p, ","));
 
-		/* Should be an exclude range */
-		if (*p != '~')
+	/* Consider included ranges in next pass */
+	p = spec;
+	do {
+		struct port_range trange;
+
+		if (!parse_port_chunk(&p, &kind, &lrange, &trange))
 			goto bad;
-		p++;
 
-		if (parse_port_range(p, &p, &xrange))
+		switch (kind) {
+		case CHUNK_AUTO:	/* already handled */
+		case CHUNK_EXCLUDE:	/* already handled */
+		case CHUNK_ALL:		/* handled later */
+			continue;
+
+		case CHUNK_INCLUDE:
+			exclude_only = false;
+			if (trange.last - trange.first !=
+			    lrange.last - lrange.first)
+				goto bad;
+
+			fwd_rule_range_except(fwd, del, proto, addr, ifname,
+					      lrange.first, lrange.last,
+					      exclude, trange.first, flags);
+			break;
+		default:
 			goto bad;
-		if (p != ep) /* Garbage after the range */
-			goto bad;
+		}
+	} while (parse_literal(&p, ","));
 
-		for (i = xrange.first; i <= xrange.last; i++)
-			bitmap_set(exclude, i);
-	}
+	if (!parse_eoi(p))
+		goto bad; /* trailing garbage */
 
+	/* Finally handle "all" and exclude only cases */
 	if (exclude_only) {
-		/* Exclude ephemeral ports */
 		fwd_port_map_ephemeral(exclude);
 
 		fwd_rule_range_except(fwd, del, proto, addr, ifname,
 				      1, NUM_PORTS - 1, exclude,
 				      1, flags | FWD_WEAK);
-		return;
 	}
-
-	/* Now process base ranges, skipping exclusions */
-	for_each_chunk(p, ep, spec, ",") {
-		struct port_range orig_range, mapped_range;
-
-		if (!isdigit(*p))
-			/* Already parsed */
-			continue;
-
-		if (parse_port_range(p, &p, &orig_range))
-			goto bad;
-
-		if (*p == ':') { /* There's a range to map to as well */
-			if (parse_port_range(p + 1, &p, &mapped_range))
-				goto bad;
-			if ((mapped_range.last - mapped_range.first) !=
-			    (orig_range.last - orig_range.first))
-				goto bad;
-		} else {
-			mapped_range = orig_range;
-		}
-
-		if (p != ep) /* Garbage after the ranges */
-			goto bad;
-
-		fwd_rule_range_except(fwd, del, proto, addr, ifname,
-				      orig_range.first, orig_range.last,
-				      exclude,
-				      mapped_range.first, flags);
-	}
-
 	return;
 bad:
 	die("Invalid port specifier '%s'", spec);
@@ -650,10 +637,11 @@ bad:
 void fwd_rule_parse(char optname, bool del, const char *optarg,
 		    struct fwd_table *fwd)
 {
-	char buf[BUFSIZ], *spec, *ifname = NULL;
-	union inany_addr addr_buf = inany_any6;
-	const union inany_addr *addr = &addr_buf;
+	const union inany_addr *addr;
+	union inany_addr addr_buf;
+	char ifname[IFNAMSIZ];
 	uint8_t proto;
+	const char *p;
 
 	if (optname == 't' || optname == 'T')
 		proto = IPPROTO_TCP;
@@ -662,7 +650,8 @@ void fwd_rule_parse(char optname, bool del, const char *optarg,
 	else
 		assert(0);
 
-	if (!strcmp(optarg, "none")) {
+	if (p = optarg,
+	    parse_literal(&p, "none") && parse_eoi(p)) {
 		unsigned i;
 
 		for (i = 0; i < fwd->count; i++) {
@@ -674,54 +663,21 @@ void fwd_rule_parse(char optname, bool del, const char *optarg,
 		return;
 	}
 
-	strncpy(buf, optarg, sizeof(buf) - 1);
-
-	if ((spec = strchr(buf, '/'))) {
-		*spec = 0;
-		spec++;
-
-		if (optname != 't' && optname != 'u')
+	if (p = optarg,
+	    parse_addrifname(&p, &addr, &addr_buf, ifname)) {
+		if (optname == 'T' || optname == 'U')
 			die("Listening address not allowed for -%c %s",
 			    optname, optarg);
-
-		if ((ifname = strchr(buf, '%'))) {
-			*ifname = 0;
-			ifname++;
-
-			/* spec is already advanced one past the '/',
-			 * so the length of the given ifname is:
-			 * (spec - ifname - 1)
-			 */
-			if (spec - ifname - 1 >= IFNAMSIZ) {
-				die("Interface name '%s' is too long (max %u)",
-				    ifname, IFNAMSIZ - 1);
-			}
-		}
-
-		if (ifname == buf + 1) {	/* Interface without address */
-			addr = NULL;
-		} else {
-			char *p = buf;
-
-			/* Allow square brackets for IPv4 too for convenience */
-			if (*p == '[' && p[strlen(p) - 1] == ']') {
-				p[strlen(p) - 1] = '\0';
-				p++;
-			}
-
-			if (strcmp(p, "*") == 0)
-				addr = NULL;
-			else if (!inany_pton(p, &addr_buf))
-				die("Bad forwarding address '%s'", p);
-		}
+		if (!strcmp(ifname, ".") || !strcmp(ifname, ".."))
+			die("Invalid interface name: %s", ifname);
 	} else {
-		spec = buf;
-
+		/* No address or ifname */
 		addr = NULL;
+		ifname[0] = '\0';
 	}
 
 	if (optname == 'T' || optname == 'U') {
-		assert(!addr && !ifname);
+		assert(!addr && !*ifname);
 
 		if (!(fwd->caps & FWD_CAP_IFNAME)) {
 			warn(
@@ -730,18 +686,18 @@ void fwd_rule_parse(char optname, bool del, const char *optarg,
 
 			if (fwd->caps & FWD_CAP_IPV4) {
 				fwd_rule_parse_ports(fwd, del, proto,
-						     &inany_loopback4, NULL,
-						     spec);
+						     &inany_loopback4, NULL, p);
 			}
 			if (fwd->caps & FWD_CAP_IPV6) {
 				fwd_rule_parse_ports(fwd, del, proto,
-						     &inany_loopback6, NULL,
-						     spec);
+						     &inany_loopback6, NULL, p);
 			}
 			return;
 		}
 
-		ifname = "lo";
+		static_assert(sizeof("lo") <= sizeof(ifname),
+			      "ifname buffer too small");
+		strcpy(ifname, "lo");
 	}
 
 	/* No need for dual stack if we only have one IP version */
@@ -750,13 +706,13 @@ void fwd_rule_parse(char optname, bool del, const char *optarg,
 	else if (!addr && !(fwd->caps & FWD_CAP_IPV6))
 		addr = &inany_any4;
 
-	if (ifname && !(fwd->caps & FWD_CAP_IFNAME)) {
+	if (*ifname && !(fwd->caps & FWD_CAP_IFNAME)) {
 		die(
 "Device binding for '-%c %s' unsupported (requires kernel 5.7+)",
 		    optname, optarg);
 	}
 
-	fwd_rule_parse_ports(fwd, del, proto, addr, ifname, spec);
+	fwd_rule_parse_ports(fwd, del, proto, addr, *ifname ? ifname : NULL, p);
 }
 
 /**

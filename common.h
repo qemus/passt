@@ -113,4 +113,7 @@ static inline const char *strerror_(int errnum)
 #define ntohll(x)		(be64toh((x)))
 #define htonll(x)		(htobe64((x)))
 
+/* Number of ports for both TCP and UDP */
+#define	NUM_PORTS	(1U << 16)
+
 #endif /* COMMON_H */
