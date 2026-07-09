@@ -11,8 +11,8 @@
 #include <unistd.h>
 
 void isolate_initial(int argc, char **argv);
-void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
-		  enum passt_modes mode);
+void isolate_user(const struct ctx *c, uid_t uid, gid_t gid, bool use_userns,
+		  const char *userns);
 int isolate_prefork(const struct ctx *c);
 void isolate_postfork(const struct ctx *c);
 

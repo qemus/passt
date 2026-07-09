@@ -33,6 +33,7 @@
 /**
  * struct fwd_rule - Forwarding rule governing a range of ports
  * @addr:	Address to forward from
+ * @taddr:	Target side destination address
  * @ifname:	Interface to forward from
  * @first:	First port number to forward
  * @last:	Last port number to forward
@@ -45,6 +46,7 @@
  */
 struct fwd_rule {
 	union inany_addr addr;
+	union inany_addr taddr;
 	char ifname[IFNAMSIZ];
 	in_port_t first;
 	in_port_t last;
@@ -91,10 +93,11 @@ void fwd_probe_ephemeral(void);
 
 #define FWD_RULE_STRLEN					    \
 	(IPPROTO_STRLEN - 1				    \
-	 + INANY_ADDRSTRLEN - 1				    \
+	 + INANY_ADDRSTRLEN - 1 /* listen addr */	    \
+	 + INANY_ADDRSTRLEN - 1	/* target addr */	    \
 	 + IFNAMSIZ - 1					    \
 	 + 4 * (UINT16_STRLEN - 1)			    \
-	 + sizeof(" []%:-  =>  - (best effort) (auto-scan)"))
+	 + sizeof(" []%:-  =>  :- (best effort) (auto-scan)"))
 
 const union inany_addr *fwd_rule_addr(const struct fwd_rule *rule);
 const char *fwd_rule_fmt(const struct fwd_rule *rule, char *dst, size_t size);

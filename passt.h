@@ -214,6 +214,7 @@ struct ip6_ctx {
  * @splice_only:	Only enable loopback forwarding
  * @host_lo_to_ns_lo:	Map host loopback addresses to ns loopback addresses
  * @freebind:		Allow binding of non-local addresses for forwarding
+ * @chroot_fallback:	Use chroot() in case pivot_root() fails
  * @low_wmem:		Low probed net.core.wmem_max
  * @low_rmem:		Low probed net.core.rmem_max
  * @no_bindtodevice:	Unprivileged SO_BINDTODEVICE not available
@@ -299,6 +300,7 @@ struct ctx {
 	int splice_only;
 	int host_lo_to_ns_lo;
 	int freebind;
+	bool chroot_fallback;
 
 	int low_wmem;
 	int low_rmem;

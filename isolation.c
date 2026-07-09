@@ -167,6 +167,31 @@ static void clamp_caps(void)
 }
 
 /**
+ * move_root() - Use chroot() instead of pivot_root() for sandboxing
+ *
+ * Return: negative error code on failure, zero on success
+ */
+static int move_root(void)
+{
+	if (mount(TMPDIR, "/", "", MS_MOVE, "")) {
+		err_perror("Failed to move root into empty tmpfs");
+		return -errno;
+	}
+
+	if (chroot(".")) {
+		err_perror("Failed to chroot() into empty tmpfs");
+		return -errno;
+	}
+
+	if (chdir("/")) {
+		err_perror("Failed to change directory into new root");
+		return -errno;
+	}
+
+	return 0;
+}
+
+/**
  * isolate_initial() - Early, mostly config independent self isolation
  * @argc:	Argument count
  * @argv:	Command line options: only --fd (if present) is relevant here
@@ -195,14 +220,18 @@ void isolate_initial(int argc, char **argv)
 	 *  - CAP_SYS_ADMIN, so that we can setns() to the netns.
 	 *  - Keep CAP_NET_ADMIN, so that we can configure interfaces
 	 *
+	 * We have to keep CAP_SYS_CHROOT in case of --chroot-fallback option
+	 * being enabled, so we can fall back from pivot_root() to chroot() in
+	 * isolate_prefork().
+	 *
 	 * It's debatable whether it's useful to drop caps when we
 	 * retain SETUID and SYS_ADMIN, but we might as well.  We drop
 	 * further capabilities in isolate_user() and
 	 * isolate_prefork().
 	 */
 	keep = BIT(CAP_NET_BIND_SERVICE) | BIT(CAP_SETUID) | BIT(CAP_SETGID) |
-	       BIT(CAP_SYS_ADMIN) | BIT(CAP_NET_ADMIN) | BIT(CAP_DAC_OVERRIDE);
-
+	       BIT(CAP_SYS_ADMIN) | BIT(CAP_NET_ADMIN) | BIT(CAP_DAC_OVERRIDE) |
+	       BIT(CAP_SYS_CHROOT);
 	/* Since Linux 5.12, if we want to update /proc/self/uid_map to create
 	 * a mapping from UID 0, which only happens with pasta spawning a child
 	 * from a non-init user namespace (pasta can't run as root), we need to
@@ -220,11 +249,11 @@ void isolate_initial(int argc, char **argv)
 
 /**
  * isolate_user() - Switch to final UID/GID and move into userns
+ * @c:		Execution context
  * @uid:	User ID to run as (in original userns)
  * @gid:	Group ID to run as (in original userns)
  * @use_userns:	Whether to join or create a userns
  * @userns:	userns path to enter, may be empty
- * @mode:	Mode (passt or pasta)
  *
  * Should:
  *  - set our final UID and GID
@@ -232,8 +261,8 @@ void isolate_initial(int argc, char **argv)
  * Mustn't:
  *  - remove filesystem access (we need that for further setup)
  */
-void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
-		  enum passt_modes mode)
+void isolate_user(const struct ctx *c, uid_t uid, gid_t gid, bool use_userns,
+		  const char *userns)
 {
 	uint64_t ns_caps = 0;
 
@@ -277,7 +306,14 @@ void isolate_user(uid_t uid, gid_t gid, bool use_userns, const char *userns,
 	 * netns
 	 */
 	ns_caps |= BIT(CAP_SYS_ADMIN);
-	if (mode == MODE_PASTA) {
+
+	/* Only keep CAP_SYS_CHROOT for the --chroot-fallback case. Otherwise
+	 * it can be dropped
+	 */
+	if (c->chroot_fallback)
+		ns_caps |= BIT(CAP_SYS_CHROOT);
+
+	if (c->mode == MODE_PASTA) {
 		/* Keep CAP_NET_ADMIN, so we can configure the if */
 		ns_caps |= BIT(CAP_NET_ADMIN);
 		/* Keep CAP_NET_BIND_SERVICE, so we can splice
@@ -331,7 +367,7 @@ int isolate_prefork(const struct ctx *c)
 	if (mount("", TMPDIR, "tmpfs",
 		  MS_NODEV | MS_NOEXEC | MS_NOSUID | MS_RDONLY,
 		  "nr_inodes=2,nr_blocks=0")) {
-		err_perror("Failed to mount empty tmpfs for pivot_root()");
+		err_perror("Failed to mount empty tmpfs for sandboxing");
 		return -errno;
 	}
 
@@ -341,13 +377,20 @@ int isolate_prefork(const struct ctx *c)
 	}
 
 	if (syscall(SYS_pivot_root, ".", ".")) {
-		err_perror("Failed to pivot_root() into empty tmpfs");
-		return -errno;
-	}
-
-	if (umount2(".", MNT_DETACH | UMOUNT_NOFOLLOW)) {
-		err_perror("Failed to unmount original root filesystem");
-		return -errno;
+		if (c->chroot_fallback) {
+			int rc;
+			info("Failed to pivot_root(), fallback to chroot()...");
+			if ((rc = move_root()))
+				return rc;
+		} else {
+			err_perror("Failed to pivot_root() into empty tmpfs");
+			return -errno;
+		}
+	} else {
+		if (umount2(".", MNT_DETACH | UMOUNT_NOFOLLOW)) {
+			err_perror("Failed to unmount original root filesystem");
+			return -errno;
+		}
 	}
 
 	/* Now that initialization is more-or-less complete, we can

@@ -15,7 +15,11 @@
 #define PESTO_SERVER_MAGIC	"basil:s"
 
 /* Version 0 is reserved for unreleased / unsupported experimental versions */
-#define PESTO_PROTOCOL_VERSION	1
+/* Version 1 had no target address field in struct fwd_rule.  It was released,
+ * but was little enough used that we decided not to implement backwards
+ * compatiblity code (i.e. a v2 pesto will not work with a v1 pasta)
+ */
+#define PESTO_PROTOCOL_VERSION	2
 
 /* Maximum size of a pif name, including \0 */
 #define	PIF_NAME_SIZE	(128)

@@ -653,6 +653,7 @@ static void usage(const char *name, FILE *f, int status)
 		"  --no-ra		Disable router advertisements\n"
 		"  --freebind		Bind to any address for forwarding\n"
 		"  --no-map-gw		Don't map gateway address to host\n"
+		"  --chroot-fallback	Use chroot() if pivot_root() fails\n"
 		"  -4, --ipv4-only	Enable IPv4 operation only\n"
 		"  -6, --ipv6-only	Enable IPv6 operation only\n"
 		"  -t, --tcp-ports SPEC	TCP port forwarding to %s\n"
@@ -1314,6 +1315,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"migrate-no-linger", no_argument,	NULL,		30 },
 		{"stats", required_argument,		NULL,		31 },
 		{"conf-path",	required_argument,	NULL,		'c' },
+		{"chroot-fallback", no_argument,	NULL, 		32 },
 		{ 0 },
 	};
 	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
@@ -1551,6 +1553,9 @@ void conf(struct ctx *c, int argc, char **argv)
 			if (!c->foreground)
 				die("Can't display statistics if not running in foreground");
 			c->stats = strtol(optarg, NULL, 0);
+			break;
+		case 32:
+			c->chroot_fallback = true;
 			break;
 		case 'd':
 			c->debug = 1;
@@ -1911,7 +1916,7 @@ void conf(struct ctx *c, int argc, char **argv)
 
 	conf_open_files(c);	/* Before any possible setuid() / setgid() */
 
-	isolate_user(uid, gid, !netns_only, userns, c->mode);
+	isolate_user(c, uid, gid, !netns_only, userns);
 
 	if (c->no_icmp)
 		c->no_ndp = 1;

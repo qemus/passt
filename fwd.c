@@ -1023,7 +1023,9 @@ uint8_t fwd_nat_from_host(const struct ctx *c,
 	/* Common for spliced and non-spliced cases */
 	tgt->eport = rule->to + (ini->oport - rule->first);
 
-	if (!c->no_splice && inany_is_loopback(&ini->eaddr) &&
+	/* TODO: Allow splicing with specified target address */
+	if (!c->no_splice && inany_is_unspecified(&rule->taddr) &&
+	    inany_is_loopback(&ini->eaddr) &&
 	    (proto == IPPROTO_TCP || proto == IPPROTO_UDP)) {
 		/* spliceable */
 
@@ -1074,7 +1076,9 @@ uint8_t fwd_nat_from_host(const struct ctx *c,
 	}
 	tgt->oport = ini->eport;
 
-	if (inany_v4(&tgt->oaddr)) {
+	if (!inany_is_unspecified(&rule->taddr)) {
+		tgt->eaddr = rule->taddr;
+	} else if (inany_v4(&tgt->oaddr)) {
 		tgt->eaddr = inany_from_v4(c->ip4.addr_seen);
 	} else {
 		if (inany_is_linklocal6(&tgt->oaddr))
