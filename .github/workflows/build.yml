@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '30 0 * * *'
-    
+
 concurrency:
   group: build
   cancel-in-progress: false
@@ -23,49 +23,164 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - 
+      -
         name: Retrieve latest tag
         run: |
-          #!/bin/bash
-          set -eu
-          echo "exists=true" >> $GITHUB_ENV
-          if git ls-remote --tags https://passt.top/passt >/dev/null; then
-            echo "exists=false" >> $GITHUB_ENV
-            latest_branch=$(git ls-remote --tags --refs --sort="v:refname" https://passt.top/passt | tail -n1 | sed 's/.*\///' )
-            latest_tag="${latest_branch%%.*}"
-            echo "Found tag: \"${latest_tag}\"" 
-            echo "latest_tag=$latest_tag" >> $GITHUB_ENV
-            echo "latest_branch=$latest_branch" >> $GITHUB_ENV
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          repository="https://passt.top/passt"
+
+          refs=$(
+            git ls-remote \
+              --tags \
+              --refs \
+              --sort="v:refname" \
+              "$repository"
+          )
+
+          mapfile -t branches < <(
+            sed 's|.*/||' <<< "$refs"
+          )
+
+          count=${#branches[@]}
+
+          if [ "$count" -eq 0 ]; then
+            echo "ERROR: No upstream tags were found." >&2
+            exit 1
           fi
-      - 
+
+          latest_index=$((count - 1))
+          latest_branch=${branches[$latest_index]}
+          latest_tag=${latest_branch%%.*}
+
+          previous_branch=""
+
+          if [ "$count" -gt 1 ]; then
+            previous_index=$((count - 2))
+            previous_branch=${branches[$previous_index]}
+          fi
+
+          if [ -z "$latest_tag" ]; then
+            echo "ERROR: Tag not found." >&2
+            exit 1
+          fi
+
+          echo "Found tag: \"$latest_tag\""
+          echo "Upstream tag: \"$latest_branch\""
+
+          if [ -n "$previous_branch" ]; then
+            echo "Previous upstream tag: \"$previous_branch\""
+          fi
+
+          {
+            echo "latest_tag=$latest_tag"
+            echo "latest_branch=$latest_branch"
+            echo "previous_branch=$previous_branch"
+          } >> "$GITHUB_ENV"
+      -
         name: Check if the tag exists locally
-        if: env.exists == 'false'
         uses: action-pack/tag-exists@v1
         id: checkTag
-        with: 
+        with:
           tag: 'v${{ env.latest_tag }}'
       -
         name: Finish when found
-        if: env.exists == 'false'
         run: |
-          #!/bin/bash
-          set -eu
-          val="${{ steps.checkTag.outputs.exists }}"
-          echo "exists=${val}" >> $GITHUB_ENV
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          echo "exists=${{ steps.checkTag.outputs.exists }}" >> "$GITHUB_ENV"
       -
-        name: Checkout
+        name: Generate release notes
         if: env.exists == 'false'
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - 
+        id: notes
+        env:
+          LATEST_BRANCH: ${{ env.latest_branch }}
+          PREVIOUS_BRANCH: ${{ env.previous_branch }}
+        run: |
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          repository="https://passt.top/passt"
+          source="/tmp/passt"
+          output="/tmp/release-notes.md"
+
+          latest_tag=${LATEST_BRANCH%%.*}
+          previous_tag=${PREVIOUS_BRANCH%%.*}
+
+          rm -rf "$source"
+
+          git clone \
+            --quiet \
+            --no-checkout \
+            "$repository" \
+            "$source"
+
+          if ! git -C "$source" rev-parse \
+            --verify \
+            --quiet \
+            "refs/tags/$LATEST_BRANCH^{commit}" \
+            >/dev/null; then
+            echo "ERROR: Upstream tag not found: $LATEST_BRANCH" >&2
+            exit 1
+          fi
+
+          {
+            echo "## Changes"
+            echo
+            echo "**$latest_tag**"
+
+            if [ -n "$PREVIOUS_BRANCH" ]; then
+              if ! git -C "$source" rev-parse \
+                --verify \
+                --quiet \
+                "refs/tags/$PREVIOUS_BRANCH^{commit}" \
+                >/dev/null; then
+                echo "ERROR: Previous upstream tag not found: $PREVIOUS_BRANCH" >&2
+                exit 1
+              fi
+
+              echo
+              echo "Changes since \`$previous_tag\`:"
+              echo
+
+              changes=$(
+                git -C "$source" log \
+                  --no-merges \
+                  --reverse \
+                  --format='- %s' \
+                  "$PREVIOUS_BRANCH..$LATEST_BRANCH"
+              )
+
+              if [ -n "$changes" ]; then
+                echo "$changes"
+              else
+                echo "- No changes were listed."
+              fi
+            else
+              echo
+              echo "- Initial packaged release."
+            fi
+          } > "$output"
+
+          cat "$output"
+
+          delimiter="RELEASE_NOTES_$(date +%s%N)"
+
+          {
+            echo "release_notes<<$delimiter"
+            cat "$output"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+      -
         name: Lint Dockerfile
         if: env.exists == 'false'
         uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: Dockerfile
           ignore: DL3003,DL3008,DL3059
-          failure-threshold: warning          
+          failure-threshold: warning
       -
         name: Docker metadata
         if: env.exists == 'false'
@@ -83,7 +198,7 @@ jobs:
             org.opencontainers.image.title=${{ vars.NAME }}
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
-      - 
+      -
         name: Set up Docker Buildx
         if: env.exists == 'false'
         uses: docker/setup-buildx-action@v4
@@ -95,7 +210,7 @@ jobs:
           context: .
           push: false
           provenance: false
-          outputs: "type=local,dest=output"
+          outputs: type=local,dest=output
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -103,20 +218,32 @@ jobs:
           build-args: |
             BRANCH_ARG=${{ env.latest_branch }}
             VERSION_ARG=${{ steps.meta.outputs.version }}
-      - 
+      -
         name: Rename packages
         if: env.exists == 'false'
         run: |
-          #!/bin/bash
-          set -eu
-          mv output/linux_amd64/passt.deb output/passt_${{ steps.meta.outputs.version }}_amd64.deb
-          mv output/linux_arm64/passt.deb output/passt_${{ steps.meta.outputs.version }}_arm64.deb
-          rm -rf output/linux_amd64 && rm -rf output/linux_arm64
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+
+          version="${{ steps.meta.outputs.version }}"
+
+          mv \
+            output/linux_amd64/passt.deb \
+            "output/passt_${version}_amd64.deb"
+
+          mv \
+            output/linux_arm64/passt.deb \
+            "output/passt_${version}_arm64.deb"
+
+          rm -rf \
+            output/linux_amd64 \
+            output/linux_arm64
       -
         name: Create a release
         if: env.exists == 'false'
         uses: action-pack/github-release@v2
         with:
+          body: ${{ steps.notes.outputs.release_notes }}
           tag: "v${{ steps.meta.outputs.version }}"
           title: "v${{ steps.meta.outputs.version }}"
           token: ${{ secrets.REPO_ACCESS_TOKEN }}
@@ -133,11 +260,11 @@ jobs:
         if: env.exists == 'false'
         uses: action-pack/send-mail@v1
         with:
-          to: ${{secrets.MAILTO}}
-          from: Github Actions <${{secrets.MAILTO}}>
-          connection_url: ${{secrets.MAIL_CONNECTION}}
+          to: ${{ secrets.MAILTO }}
+          from: Github Actions <${{ secrets.MAILTO }}>
+          connection_url: ${{ secrets.MAIL_CONNECTION }}
           subject: Build of ${{ github.event.repository.name }} v${{ steps.meta.outputs.version }} completed
           body: |
-              The build job of ${{ github.event.repository.name }} v${{ steps.meta.outputs.version }} was completed successfully! 
-              
-              See https://github.com/${{ github.repository }}/actions for more information.
+            The build job of ${{ github.event.repository.name }} v${{ steps.meta.outputs.version }} was completed successfully!
+
+            See https://github.com/${{ github.repository }}/actions for more information.
