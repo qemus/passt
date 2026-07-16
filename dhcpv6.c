@@ -370,12 +370,14 @@ notonlink:
 /**
  * dhcpv6_send_ia_notonlink() - Send NotOnLink status
  * @c:			Execution context
+ * @caddr:		Source address of client message (reply destination)
  * @ia_base:		Non-appropriate IA_NA or IA_TA base
  * @client_id_base:	Client ID message option base
  * @len:		Client ID length
  * @xid:		Transaction ID for message exchange
  */
 static void dhcpv6_send_ia_notonlink(struct ctx *c,
+				     const struct in6_addr *caddr,
 				     const struct iov_tail *ia_base,
 				     const struct iov_tail *client_id_base,
 				     int len, uint32_t xid)
@@ -405,8 +407,7 @@ static void dhcpv6_send_ia_notonlink(struct ctx *c,
 
 	resp_not_on_link.hdr.xid = xid;
 
-	tap_udp6_send(c, src, 547, tap_ip6_daddr(c, src), 546,
-		      xid, &resp_not_on_link, n);
+	tap_udp6_send(c, src, 547, caddr, 546, xid, &resp_not_on_link, n);
 }
 
 /**
@@ -590,8 +591,6 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 	if (mlen + sizeof(*uh) != ntohs(uh->len) || mlen < sizeof(*mh))
 		return -1;
 
-	c->ip6.addr_ll_seen = *saddr;
-
 	src = &c->ip6.our_tap_ll;
 
 	mh = IOV_REMOVE_HEADER(data, mh_storage);
@@ -630,8 +629,10 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 
 		if (dhcpv6_ia_notonlink(data, &c->ip6.addr)) {
 
-			dhcpv6_send_ia_notonlink(c, data, &client_id_base,
-						 ntohs(client_id->l), mh->xid);
+			dhcpv6_send_ia_notonlink(c, saddr, data,
+						 &client_id_base,
+						 ntohs(client_id->l),
+						 mh->xid);
 
 			return 1;
 		}
@@ -680,8 +681,7 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 
 	resp.hdr.xid = mh->xid;
 
-	tap_udp6_send(c, src, 547, tap_ip6_daddr(c, src), 546,
-		      mh->xid, &resp, n);
+	tap_udp6_send(c, src, 547, saddr, 546, mh->xid, &resp, n);
 	c->ip6.addr_seen = c->ip6.addr;
 
 	return 1;

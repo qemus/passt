@@ -307,7 +307,7 @@ flow_sidx_t udp_flow_from_tap(const struct ctx *c,
 	ini = flow_initiate_af(flow, PIF_TAP, af, saddr, srcport,
 			       daddr, dstport);
 
-	if (inany_is_unspecified(&ini->eaddr) || ini->eport == 0 ||
+	if (!inany_is_unicast(&ini->eaddr) || ini->eport == 0 ||
 	    inany_is_unspecified(&ini->oaddr) || ini->oport == 0) {
 		flow_dbg(flow, "Invalid endpoint on UDP packet");
 		flow_alloc_cancel(flow);

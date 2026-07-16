@@ -59,6 +59,8 @@ extern const union inany_addr inany_any4;
 
 #define inany_from_v4(a4)	\
 	((union inany_addr)INANY_INIT4((a4)))
+#define inany_from_v6(a6_)	\
+	((union inany_addr){.a6 = (a6_)})
 
 /** union sockaddr_inany - Either a sockaddr_in or a sockaddr_in6
  * @sa_family:	Address family, AF_INET or AF_INET6

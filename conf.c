@@ -1796,6 +1796,8 @@ void conf(struct ctx *c, int argc, char **argv)
 		if (c->splice_only)
 			die("--splice-only is for pasta mode only");
 	}
+	if (c->no_splice && c->host_lo_to_ns_lo)
+		die("--host-lo-to-ns-lo is incompatible with --no-splice");
 
 	if (c->mode == MODE_PASTA && !c->pasta_conf_ns) {
 		if (copy_routes_opt)

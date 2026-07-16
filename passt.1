@@ -672,10 +672,11 @@ Default is \fBauto\fR.
 
 .TP
 .BR \-\-host-lo-to-ns-lo
-If specified, connections forwarded with \fB\-t\fR and \fB\-u\fR from
-the host's loopback address will appear on the loopback address in the
-guest as well.  Without this option such forwarded packets will appear
-to come from the guest's public address.
+If specified, connections to a host loopback address forwarded with
+\fB\-t\fR or \fB\-u\fR will be delivered to the same loopback address
+in the namespace.  Without this option such connections are forwarded
+to the namespace's public address.  This option is incompatible with
+\fB--no-splice\fR.
 
 .TP
 .BR \-\-userns " " \fIspec

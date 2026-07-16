@@ -161,21 +161,6 @@ void tap_send_single(const struct ctx *c, const void *data, size_t l2len)
 }
 
 /**
- * tap_ip6_daddr() - Normal IPv6 destination address for inbound packets
- * @c:		Execution context
- * @src:	Source address
- *
- * Return: pointer to IPv6 address
- */
-const struct in6_addr *tap_ip6_daddr(const struct ctx *c,
-				     const struct in6_addr *src)
-{
-	if (IN6_IS_ADDR_LINKLOCAL(src))
-		return &c->ip6.addr_ll_seen;
-	return &c->ip6.addr_seen;
-}
-
-/**
  * tap_push_l2h() - Build an L2 header for an inbound packet
  * @c:		Execution context
  * @buf:	Buffer address at which to generate header

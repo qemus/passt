@@ -7,7 +7,7 @@
 #define DHCPV6_H
 
 int dhcpv6(struct ctx *c, struct iov_tail *data,
-	   struct in6_addr *saddr, struct in6_addr *daddr);
+	   const struct in6_addr *saddr, const struct in6_addr *daddr);
 void dhcpv6_init(const struct ctx *c);
 
 #endif /* DHCPV6_H */

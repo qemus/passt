@@ -96,8 +96,6 @@ void tap_udp4_send(const struct ctx *c, struct in_addr src, in_port_t sport,
 		   const void *in, size_t dlen);
 void tap_icmp4_send(const struct ctx *c, struct in_addr src, struct in_addr dst,
 		    const void *in, const void *src_mac, size_t l4len);
-const struct in6_addr *tap_ip6_daddr(const struct ctx *c,
-				     const struct in6_addr *src);
 void *tap_push_ip6h(struct ipv6hdr *ip6h,
 		    const struct in6_addr *src, const struct in6_addr *dst,
 		    size_t l4len, uint8_t proto, uint32_t flow);
