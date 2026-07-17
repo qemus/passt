@@ -48,7 +48,7 @@ to prepare patches and participate in the email-based review process.
     The `Subsystem` means: which part of the code your change touches.
     For example, it could be "tcp", "test", or "doc" etc.
 
-    If there are some references, use "Links:" tag for anything.
+    If there are some references, use "Link:" tags for anything.
 
     Besides, passt uses the Linux kernel's "Signed-off-by" process. If you can
     certify the below:

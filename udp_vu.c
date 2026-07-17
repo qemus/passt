@@ -67,11 +67,15 @@ static ssize_t udp_vu_sock_recv(struct iov_tail *payload, size_t *cnt, int s)
 	struct iovec msg_iov[VIRTQUEUE_MAX_SIZE];
 	struct msghdr msg  = { 0 };
 	size_t iov_used;
+	ssize_t iovlen;
 	ssize_t dlen;
 
+	iovlen = iov_tail_clone(msg_iov, ARRAY_SIZE(msg_iov), payload);
+	if (iovlen < 0)
+		return -1;
+
 	msg.msg_iov = msg_iov;
-	msg.msg_iovlen = iov_tail_clone(msg.msg_iov, ARRAY_SIZE(msg_iov),
-					payload);
+	msg.msg_iovlen = iovlen;
 
 	/* read data from the socket */
 	dlen = recvmsg(s, &msg, 0);

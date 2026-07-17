@@ -65,6 +65,9 @@ char pkt_buf[PKT_BUF_BYTES]	__attribute__ ((aligned(PAGE_SIZE)));
 struct ctx passt_ctx = {
 	.pidfile_fd		= -1,
 	.fd_tap			= -1,
+	.fd_tap_listen		= -1,
+	.fd_control_listen	= -1,
+	.fd_repair_listen	= -1,
 	.pasta_netns_fd		= -1,
 	.device_state_fd	= -1,
 };

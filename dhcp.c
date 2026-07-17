@@ -49,7 +49,7 @@ struct opt {
 	uint8_t c[255];
 };
 
-static struct opt opts[255];
+static struct opt opts[256];
 
 #define DHCPDISCOVER	1
 #define DHCPOFFER	2
@@ -363,25 +363,29 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	for (i = 0; i < ARRAY_SIZE(opts); i++)
 		opts[i].clen = -1;
 
-	opt_len = iov_tail_size(data);
-	while (opt_len >= 2) {
+	while ((opt_len = iov_tail_size(data))) {
 		uint8_t olen_storage, type_storage;
 		const uint8_t *olen;
 		uint8_t *type;
 
-		type = IOV_REMOVE_HEADER(data, type_storage);
-		olen = IOV_REMOVE_HEADER(data, olen_storage);
-		if (!type || !olen)
+		if (!(type = IOV_REMOVE_HEADER(data, type_storage)))
 			return -1;
 
-		opt_len = iov_tail_size(data);
-		if (opt_len < *olen)
+		if (*type == 255)
+			break;
+
+		if (*type == 0) /* Pad Option (RFC 2132, 3.1): one byte */
+			continue;
+
+		if (!(olen = IOV_REMOVE_HEADER(data, olen_storage)))
+			return -1;
+
+		if (opt_len - 2 < *olen)
 			return -1;
 
 		iov_to_buf(&data->iov[0], data->cnt, data->off, &opts[*type].c, *olen);
 		opts[*type].clen = *olen;
 		iov_drop_header(data, *olen);
-		opt_len -= *olen;
 	}
 
 	opts[80].slen = -1;
