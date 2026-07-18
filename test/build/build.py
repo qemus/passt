@@ -68,7 +68,7 @@ def test_make(target: str, expected_files: list[str]) -> None:
             assert not p.exists(), f"{p} existed after make clean"
 
 
-BINARIES = ['passt', 'pasta', 'qrap', 'passt-repair', 'pesto']
+BINARIES = ['passt', 'pasta', 'passt-repair', 'pesto']
 
 
 for bin in BINARIES:
@@ -104,7 +104,7 @@ def test_install_uninstall() -> None:
              as prefix:
             bindir = Path(prefix) / 'bin'
             mandir = Path(prefix) / 'share/man'
-            progs = ['passt', 'pasta', 'qrap']
+            progs = ['passt', 'pasta']
 
             # Install
             sh(f'make install CFLAGS="-Werror" prefix={prefix}')

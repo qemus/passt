@@ -39,13 +39,12 @@ PASST_SRCS = arch.c arp.c bitmap.c checksum.c conf.c dhcp.c dhcpv6.c \
 	parse.c passt.c pasta.c pcap.c pif.c repair.c serialise.c tap.c tcp.c \
 	tcp_buf.c tcp_splice.c tcp_vu.c udp.c udp_flow.c udp_vu.c util.c \
 	vhost_user.c virtio.c vu_common.c
-QRAP_SRCS = qrap.c
 PASST_REPAIR_SRCS = passt-repair.c
 PESTO_SRCS = pesto.c bitmap.c fwd_rule.c inany.c ip.c lineread.c parse.c \
 	serialise.c
-SRCS = $(PASST_SRCS) $(QRAP_SRCS) $(PASST_REPAIR_SRCS) $(PESTO_SRCS)
+SRCS = $(PASST_SRCS) $(PASST_REPAIR_SRCS) $(PESTO_SRCS)
 
-MANPAGES = passt.1 pasta.1 pesto.1 qrap.1 passt-repair.1
+MANPAGES = passt.1 pasta.1 pesto.1 passt-repair.1
 
 PASST_HEADERS = arch.h arp.h bitmap.h checksum.h conf.h dhcp.h dhcpv6.h \
 	epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h icmp_flow.h \
@@ -54,7 +53,6 @@ PASST_HEADERS = arch.h arp.h bitmap.h checksum.h conf.h dhcp.h dhcpv6.h \
 	serialise.h siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h \
 	tcp_splice.h tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h \
 	vhost_user.h virtio.h vu_common.h
-QRAP_HEADERS = arp.h ip.h passt.h util.h
 PASST_REPAIR_HEADERS = linux_dep.h
 PESTO_HEADERS = bitmap.h common.h fwd_rule.h inany.h ip.h log.h parse.h \
 	pesto.h serialise.h
@@ -76,7 +74,7 @@ docdir		?= $(datarootdir)/doc/passt
 mandir		?= $(datarootdir)/man
 man1dir		?= $(mandir)/man1
 
-BASEBIN := passt qrap passt-repair pesto
+BASEBIN := passt passt-repair pesto
 ifeq ($(TARGET_ARCH),x86_64)
 BASEBIN += passt.avx2
 endif
@@ -111,9 +109,6 @@ passt.avx2: $(PASST_SRCS) $(PASST_HEADERS) seccomp.h
 
 pasta.avx2 pasta.1 pasta: pasta%: passt%
 	ln -sf $< $@
-
-qrap: BASE_CPPFLAGS += -DARCH=\"$(TARGET_ARCH)\"
-qrap: $(QRAP_SRCS) $(QRAP_HEADERS)
 
 passt-repair: $(PASST_REPAIR_SRCS) $(PASST_REPAIR_HEADERS) seccomp_repair.h
 
