@@ -1329,7 +1329,7 @@ static void tap_pasta_input(struct ctx *c, const struct timespec *now)
 				continue;
 			}
 
-			if (errno == EAGAIN && errno == EWOULDBLOCK)
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
 				break; /* all done for now */
 
 			die("Error on tap device, exiting");
