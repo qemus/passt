@@ -1153,17 +1153,32 @@ static void conf_sock_listen(const struct ctx *c)
 
 /**
  * conf_tap_fd() - Read tap fd as supplied by -F command line option
- * @arg:	Argument to -F command line option
+ * @argc:	Argument count
+ * @argv:	Command line options
+ *
+ * Return: fd number from --fd option, or -1 if not supplied
  */
-int conf_tap_fd(const char *arg)
+int conf_tap_fd(int argc, char **argv)
 {
-	const char *p = arg;
+	const struct option optfd[] = {	{ "fd", required_argument, NULL, 'F' },
+					{ 0 }, };
+	const char *fdarg = NULL, *p;
 	unsigned long val;
+	int name;
 
-	if (!parse_unsigned(&p, 0, &val) || !parse_eoi(p)	||
-	    val > INT_MAX					||
-	    (val != STDIN_FILENO && val <= STDERR_FILENO))
-		die("Invalid --fd: %s", arg);
+	optind = 0;
+	do {
+		name = getopt_long(argc, argv, "-:F:", optfd, NULL);
+		if (name == 'F')
+			fdarg = optarg;
+	} while (name != -1);
+
+	if (!fdarg)
+		return -1;
+
+	p = fdarg;
+	if (!parse_unsigned(&p, 0, &val) || !parse_eoi(p) || val > INT_MAX)
+		die("Invalid --fd: %s", fdarg);
 
 	return val;
 }
@@ -1593,7 +1608,7 @@ void conf(struct ctx *c, int argc, char **argv)
 			c->fd_control_listen = c->fd_control = -1;
 			break;
 		case 'F':
-			c->fd_tap = conf_tap_fd(optarg);
+			/* --fd was parsed early and c->fd_tap set in main() */
 			c->one_off = true;
 			*c->sock_path = 0;
 			break;

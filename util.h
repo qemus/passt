@@ -168,7 +168,6 @@ intmax_t read_file_integer(const char *path, intmax_t fallback);
 int write_remainder(int fd, const struct iovec *iov, size_t iovcnt,
 		    size_t skip, size_t length);
 int read_remainder(int fd, const struct iovec *iov, size_t cnt, size_t skip);
-void close_open_files(int argc, char **argv);
 bool snprintf_check(char *str, size_t size, const char *format, ...);
 long clamped_scale(long x, long y, long lo, long hi, long f);
 

@@ -24,13 +24,18 @@
  * done anything we need to do with those resources, so we have
  * multiple stages of self-isolation.  In order these are:
  *
- * 1. isolate_initial()
+ * 1a. isolate_initial()
  * ====================
  *
  * Executed immediately after startup, drops capabilities we don't
  * need at any point during execution (or which we gain back when we
- * need by joining other namespaces), and closes any leaked file we
- * might have inherited from the parent process.
+ * need by joining other namespaces).
+ *
+ * 1b. isolate_fds()
+ * ================
+ *
+ * Executed immediately after isolate_initial().  Closes any leaked
+ * files we might have inherited from the parent process.
  *
  * 2. isolate_user()
  * =================
@@ -88,6 +93,7 @@
 #include "passt.h"
 #include "log.h"
 #include "isolation.h"
+#include "conf.h"
 
 #define CAP_VERSION	_LINUX_CAPABILITY_VERSION_3
 #define CAP_WORDS	_LINUX_CAPABILITY_U32S_3
@@ -193,16 +199,13 @@ static int move_root(void)
 
 /**
  * isolate_initial() - Early, mostly config independent self isolation
- * @argc:	Argument count
- * @argv:	Command line options: only --fd (if present) is relevant here
  *
  * Should:
  *  - drop unneeded capabilities
- *  - close all open files except for standard streams and the one from --fd
  * Mustn't:
  *  - remove filesystem access (we need to access files during setup)
  */
-void isolate_initial(int argc, char **argv)
+void isolate_initial(void)
 {
 	uint64_t keep;
 
@@ -243,8 +246,49 @@ void isolate_initial(int argc, char **argv)
 		keep |= BIT(CAP_SETFCAP) | BIT(CAP_SYS_PTRACE);
 
 	drop_caps_ep_except(keep);
+}
 
-	close_open_files(argc, argv);
+/*
+ * isolate_fds() - Close leaked files, but not --fd, stdin, stdout, stderr
+ * @argc:	Argument count
+ * @argv:	Command line options, as we need to skip any file given via --fd
+ *
+ * Should:
+ *  - close all open files except for standard streams and the one from --fd
+ *  - move the --fd descriptor out of the range 0-2
+ *
+ * Return: new fd number for descriptor from --fd, or -1 if not specified
+ */
+int isolate_fds(int argc, char **argv)
+{
+	int fd, close_from = STDERR_FILENO + 1;
+
+	fd = conf_tap_fd(argc, argv);
+
+	if (fd >= 0) {
+		/* Move the passed fd to a more convenient location */
+		if (fd != close_from			&&
+		    (dup2(fd, close_from) != close_from	||
+		     close(fd)))
+			die_perror("Could not move --fd descriptor");
+		fd = close_from++;
+	}
+
+	if (close_range(close_from, ~0U, CLOSE_RANGE_UNSHARE)) {
+		if (errno == ENOSYS || errno == EINVAL) {
+			/* This probably means close_range() or the
+			 * CLOSE_RANGE_UNSHARE flag is not supported by the
+			 * kernel.  Not much we can do here except carry on and
+			 * hope for the best.
+			 */
+			warn(
+"Can't use close_range() to ensure no files leaked by parent");
+		} else {
+			die_perror("Failed to close files leaked by parent");
+		}
+	}
+
+	return fd;
 }
 
 /**
