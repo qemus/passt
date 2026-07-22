@@ -435,9 +435,16 @@ static unsigned int conf_ip4(unsigned int ifi, struct ip4_ctx *ip4)
  */
 static void conf_ip4_local(struct ip4_ctx *ip4)
 {
-	ip4->addr_seen = ip4->addr = IP4_LL_GUEST_ADDR;
-	ip4->our_tap_addr = ip4->guest_gw = IP4_LL_GUEST_GW;
-	ip4->prefix_len = IP4_LL_PREFIX_LEN;
+	if (IN4_IS_ADDR_UNSPECIFIED(&ip4->addr))
+		ip4->addr = IP4_LL_GUEST_ADDR;
+	ip4->addr_seen = ip4->addr;
+
+	if (IN4_IS_ADDR_UNSPECIFIED(&ip4->guest_gw))
+		ip4->guest_gw = IP4_LL_GUEST_GW;
+	ip4->our_tap_addr = ip4->guest_gw;
+
+	if (!ip4->prefix_len)
+		ip4->prefix_len = IP4_LL_PREFIX_LEN;
 
 	ip4->no_copy_addrs = ip4->no_copy_routes = true;
 }
@@ -497,7 +504,13 @@ static unsigned int conf_ip6(unsigned int ifi, struct ip6_ctx *ip6)
  */
 static void conf_ip6_local(struct ip6_ctx *ip6)
 {
-	ip6->our_tap_ll = ip6->guest_gw = IP6_LL_GUEST_GW;
+	if (IN6_IS_ADDR_UNSPECIFIED(&ip6->guest_gw))
+		ip6->guest_gw = IP6_LL_GUEST_GW;
+
+	if (IN6_IS_ADDR_LINKLOCAL(&ip6->guest_gw))
+		ip6->our_tap_ll = ip6->guest_gw;
+	else
+		ip6->our_tap_ll = IP6_LL_GUEST_GW;
 
 	ip6->no_copy_addrs = ip6->no_copy_routes = true;
 }
