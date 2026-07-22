@@ -490,6 +490,8 @@ static unsigned int conf_ip6(unsigned int ifi, struct ip6_ctx *ip6)
 
 	if (IN6_IS_ADDR_LINKLOCAL(&ip6->guest_gw))
 		ip6->our_tap_ll = ip6->guest_gw;
+	else
+		ip6->our_tap_addr = ip6->guest_gw;
 
 	if (IN6_IS_ADDR_UNSPECIFIED(&ip6->addr) ||
 	    IN6_IS_ADDR_UNSPECIFIED(&ip6->our_tap_ll))
@@ -507,10 +509,12 @@ static void conf_ip6_local(struct ip6_ctx *ip6)
 	if (IN6_IS_ADDR_UNSPECIFIED(&ip6->guest_gw))
 		ip6->guest_gw = IP6_LL_GUEST_GW;
 
-	if (IN6_IS_ADDR_LINKLOCAL(&ip6->guest_gw))
+	if (IN6_IS_ADDR_LINKLOCAL(&ip6->guest_gw)) {
 		ip6->our_tap_ll = ip6->guest_gw;
-	else
+	} else {
+		ip6->our_tap_addr = ip6->guest_gw;
 		ip6->our_tap_ll = IP6_LL_GUEST_GW;
+	}
 
 	ip6->no_copy_addrs = ip6->no_copy_routes = true;
 }

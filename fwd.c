@@ -1090,7 +1090,11 @@ uint8_t fwd_nat_from_host(const struct ctx *c,
 				return PIF_NONE;
 			tgt->oaddr = inany_from_v4(c->ip4.our_tap_addr);
 		} else {
-			tgt->oaddr.a6 = c->ip6.our_tap_ll;
+			if (inany_is_linklocal6(&tgt->eaddr) ||
+			    IN6_IS_ADDR_UNSPECIFIED(&c->ip6.our_tap_addr))
+				tgt->oaddr.a6 = c->ip6.our_tap_ll;
+			else
+				tgt->oaddr.a6 = c->ip6.our_tap_addr;
 		}
 	}
 	tgt->oport = ini->eport;

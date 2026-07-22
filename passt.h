@@ -121,6 +121,7 @@ struct ip4_ctx {
  * @dns:		DNS addresses for DHCPv6 and NDP
  * @dns_match:		Forward DNS query if sent to this address
  * @our_tap_ll:		Link-local IPv6 address for passt's use on tap
+ * @our_tap_addr:	Non-LL IPv6 address for passt's use on tap (if any)
  * @dns_host:		Use this DNS on the host for forwarding
  * @addr_out:		Optional source address for outbound traffic
  * @ifname_out:		Optional interface name to bind outbound sockets to
@@ -140,6 +141,7 @@ struct ip6_ctx {
 	struct in6_addr dns[MAXNS];
 	struct in6_addr dns_match;
 	struct in6_addr our_tap_ll;
+	struct in6_addr our_tap_addr;
 
 	/* PIF_HOST addresses */
 	struct in6_addr dns_host;
