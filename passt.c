@@ -144,7 +144,7 @@ static void random_init(struct ctx *c)
  */
 static void timer_init(struct ctx *c, const struct timespec *now)
 {
-	c->tcp.timer_run = c->udp.timer_run = c->icmp.timer_run = *now;
+	c->tcp.timer_run = *now;
 }
 
 /**

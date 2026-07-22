@@ -20,12 +20,5 @@ int icmp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		     struct iov_tail *data, const struct timespec *now);
 void icmp_init(void);
 
-/**
- * struct icmp_ctx - Execution context for ICMP routines
- * @timer_run:		Timestamp of most recent timer run
- */
-struct icmp_ctx {
-	struct timespec timer_run;
-};
 
 #endif /* ICMP_H */

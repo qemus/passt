@@ -45,7 +45,7 @@ static inline const char *pif_type(enum pif_type pt)
 		return pif_type_str[pt];
 	else
 		return "?";
-	static_assert(sizeof("?") <= PIF_NAME_SIZE);
+	static_assert(sizeof("?") <= PIF_NAME_SIZE, "PIF_NAME_SIZE too small");
 }
 
 static inline const char *pif_name(uint8_t pif)

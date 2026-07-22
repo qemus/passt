@@ -200,7 +200,6 @@ struct ip6_ctx {
  * @no_udp:		Disable UDP operation
  * @udp:		Context for UDP protocol handler
  * @no_icmp:		Disable ICMP operation
- * @icmp:		Context for ICMP protocol handler
  * @mtu:		MTU passed via DHCP/NDP
  * @no_dns:		Do not source/use DNS servers for any purpose
  * @no_dns_search:	Do not source/use domain search lists for any purpose
@@ -286,7 +285,6 @@ struct ctx {
 	int no_udp;
 	struct udp_ctx udp;
 	int no_icmp;
-	struct icmp_ctx icmp;
 
 	int no_dns;
 	int no_dns_search;
