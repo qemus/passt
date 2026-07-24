@@ -236,10 +236,11 @@ static int pasta_spawn_cmd(void *arg)
  * @c:		Execution context
  * @uid:	UID we're running as in the init namespace
  * @gid:	GID we're running as in the init namespace
+ * @config_idmaps:	Whether to configure user mappings
  * @argc:	Number of arguments for spawned command
  * @argv:	Command to spawn and arguments
  */
-void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid,
+void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid, bool config_idmaps,
 		    int argc, char *argv[])
 {
 	char ns_fn_stack[NS_FN_STACK_SIZE]
@@ -249,7 +250,6 @@ void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid,
 		.argv = argv,
 		.c = c,
 	};
-	char uidmap[BUFSIZ], gidmap[BUFSIZ];
 	char *sh_argv[] = { NULL, NULL };
 	char sh_arg0[PATH_MAX + 1];
 	sigset_t set;
@@ -259,16 +259,20 @@ void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid,
 		c->quiet = 1;
 
 	/* Configure user and group mappings */
-	if (snprintf_check(uidmap, BUFSIZ, "0 %u 1", uid))
-		die_perror("Can't build uidmap");
+	if (config_idmaps) {
+		char uidmap[BUFSIZ], gidmap[BUFSIZ];
 
-	if (snprintf_check(gidmap, BUFSIZ, "0 %u 1", gid))
-		die_perror("Can't build gidmap");
+		if (snprintf_check(uidmap, BUFSIZ, "0 %u 1", uid))
+			die_perror("Can't build uidmap");
 
-	if (write_file("/proc/self/uid_map", uidmap) ||
-	    write_file("/proc/self/setgroups", "deny") ||
-	    write_file("/proc/self/gid_map", gidmap)) {
-		warn("Couldn't configure user mappings");
+		if (snprintf_check(gidmap, BUFSIZ, "0 %u 1", gid))
+			die_perror("Can't build gidmap");
+
+		if (write_file("/proc/self/uid_map", uidmap) ||
+		    write_file("/proc/self/setgroups", "deny") ||
+		    write_file("/proc/self/gid_map", gidmap)) {
+			warn("Couldn't configure user mappings");
+		}
 	}
 
 	if (argc == 0) {

@@ -85,6 +85,7 @@ run() {
 
 	setup pasta_options
 	test pasta_options/log_to_file
+	test pasta_options/netns_only
 	teardown pasta_options
 
 	setup build

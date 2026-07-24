@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# PASST - Plug A Simple Socket Transport
+#  for qemu/UNIX domain socket mode
+#
+# PASTA - Pack A Subtle Tap Abstraction
+#  for network namespace/tap device mode
+#
+# test/pasta_options/netns_only - Check --netns-only handling
+
+htools	unshare grep
+
+test	--netns-only skips id mapping configuration
+set	OUT __STATEDIR__/netns-only.out
+set	ERR __STATEDIR__/netns-only.err
+
+passt	unshare -r -- ./pasta -q --netns-only -- echo TEST > __OUT__ 2> __ERR__
+check	grep -qx TEST __OUT__
+check	[ ! -s __ERR__ ]
