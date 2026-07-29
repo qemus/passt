@@ -392,17 +392,22 @@ static int fwd_sync_one(const struct ctx *c, uint8_t pif, unsigned idx,
 		fd = pif_listen(c, rule->proto, pif, addr, ifname, port, idx);
 		if (fd < 0) {
 			char astr[INANY_ADDRSTRLEN];
+			int pri = LOG_WARNING;
 
-			warn("Listen failed for %s %s port %s%s%s/%u: %s",
-			     pif_name(pif), ipproto_name(rule->proto),
-			     inany_ntop(addr, astr, sizeof(astr)),
-			     ifname ? "%" : "", ifname ? ifname : "",
-			     port, strerror_(-fd));
+			if (rule->flags & FWD_WEAK)
+				pri = LOG_DEBUG;
 
-			if (!(rule->flags & FWD_WEAK))
-				return -1;
+			logmsg(true, false, pri,
+			       "Listen failed for %s %s port %s%s%s/%u: %s",
+			       pif_name(pif), ipproto_name(rule->proto),
+			       inany_ntop(addr, astr, sizeof(astr)),
+			       ifname ? "%" : "", ifname ? ifname : "",
+			       port, strerror_(-fd));
 
-			continue;
+			if (rule->flags & FWD_WEAK)
+				continue;
+
+			return -1;
 		}
 
 		socks[port - rule->first] = fd;
@@ -1090,7 +1095,11 @@ uint8_t fwd_nat_from_host(const struct ctx *c,
 				return PIF_NONE;
 			tgt->oaddr = inany_from_v4(c->ip4.our_tap_addr);
 		} else {
-			tgt->oaddr.a6 = c->ip6.our_tap_ll;
+			if (inany_is_linklocal6(&tgt->eaddr) ||
+			    IN6_IS_ADDR_UNSPECIFIED(&c->ip6.our_tap_addr))
+				tgt->oaddr.a6 = c->ip6.our_tap_ll;
+			else
+				tgt->oaddr.a6 = c->ip6.our_tap_addr;
 		}
 	}
 	tgt->oport = ini->eport;

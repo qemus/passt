@@ -580,8 +580,7 @@ Default is \fBnone\fR for \fBpasst\fR and \fBauto\fR for \fBpasta\fR.
 
 .TP
 .BR \-s ", " \-\-socket-path ", " \-\-socket " " \fIpath
-Path for UNIX domain socket used by \fBqemu\fR(1) or \fBqrap\fR(1) to connect to
-\fBpasst\fR.
+Path for UNIX domain socket used by \fBqemu\fR(1) to connect to \fBpasst\fR.
 Default is to probe a free socket, not accepting connections, starting from
 \fI/tmp/passt_1.socket\fR to \fI/tmp/passt_64.socket\fR.
 
@@ -762,129 +761,132 @@ forwards loopback traffic between namespaces.
 .RS
 .nf
 $ iperf3 -s -D
-$ ./pasta
-Outbound interface: eth0, namespace interface: eth0
-ARP:
-    address: 28:16:ad:39:a9:ea
-DHCP:
-    assign: 192.168.1.118
-    mask: 255.255.255.0
-    router: 192.168.1.1
-NDP/DHCPv6:
-    assign: 2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17
-    router: fe80::62e3:27ff:fe33:2b01
-#
-# dhclient -4 --no-pid
-# dhclient -6 --no-pid
+
+$ pasta --config-net
+
 # ip address show
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
        valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host 
+    inet6 ::1/128 scope host proto kernel_lo 
        valid_lft forever preferred_lft forever
-2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65520 qdisc pfifo_fast state UNKNOWN group default qlen 1000
-    link/ether 5e:90:02:eb:b0:2a brd ff:ff:ff:ff:ff:ff
-    inet 192.168.1.118/24 brd 192.168.1.255 scope global eth0
+2: enp9s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65520 qdisc fq_codel state UNKNOWN group default qlen 1000
+    link/ether be:16:49:5a:65:dc brd ff:ff:ff:ff:ff:ff
+    inet 88.198.0.164/27 brd 88.198.0.191 scope global noprefixroute enp9s0
        valid_lft forever preferred_lft forever
-    inet6 2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17/128 scope global 
+    inet6 2a01:4f8:222:904::2/64 scope global nodad 
        valid_lft forever preferred_lft forever
-    inet6 2a02:6d40:3ca5:2001:5c90:2ff:feeb:b02a/64 scope global dynamic mngtmpaddr 
-       valid_lft 3591sec preferred_lft 3591sec
-    inet6 fe80::5c90:2ff:feeb:b02a/64 scope link 
+    inet6 fe80::bc16:49ff:fe5a:65dc/64 scope link nodad proto kernel_ll 
        valid_lft forever preferred_lft forever
+
 # ip route show
-default via 192.168.1.1 dev eth0 
-192.168.1.0/24 dev eth0 proto kernel scope link src 192.168.1.118 
+default via 88.198.0.161 dev enp9s0 proto dhcp metric 1002 
+88.198.0.160/27 dev enp9s0 proto dhcp scope link metric 1002 
+
 # ip -6 route show
-2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17 dev eth0 proto kernel metric 256 pref medium
-2a02:6d40:3ca5:2001::/64 dev eth0 proto kernel metric 256 expires 3584sec pref medium
-fe80::/64 dev eth0 proto kernel metric 256 pref medium
-default via fe80::62e3:27ff:fe33:2b01 dev eth0 proto ra metric 1024 expires 3584sec pref medium
+2a01:4f8:222:904::/64 dev enp9s0 proto kernel metric 256 pref medium
+fe80::/64 dev enp9s0 proto kernel metric 256 pref medium
+default via fe80::1 dev enp9s0 metric 1024 onlink pref medium
+
 # iperf3 -c 127.0.0.1 -t1
 Connecting to host 127.0.0.1, port 5201
-[  5] local 127.0.0.1 port 51938 connected to 127.0.0.1 port 5201
+[  5] local 127.0.0.1 port 59112 connected to 127.0.0.1 port 5201
 [ ID] Interval           Transfer     Bitrate         Retr  Cwnd
-[  5]   0.00-1.00   sec  4.46 GBytes  38.3 Gbits/sec    0   3.93 MBytes       
+[  5]   0.00-1.00   sec  3.89 GBytes  33.4 Gbits/sec    0   2.62 MBytes       
 - - - - - - - - - - - - - - - - - - - - - - - - -
 [ ID] Interval           Transfer     Bitrate         Retr
-[  5]   0.00-1.00   sec  4.46 GBytes  38.3 Gbits/sec    0             sender
-[  5]   0.00-1.41   sec  4.45 GBytes  27.1 Gbits/sec                  receiver
+[  5]   0.00-1.00   sec  3.89 GBytes  33.4 Gbits/sec    0             sender
+[  5]   0.00-1.00   sec  3.89 GBytes  33.4 Gbits/sec                  receiver
 
 iperf Done.
+
 # iperf3 -c ::1 -t1
 Connecting to host ::1, port 5201
-[  5] local ::1 port 50108 connected to ::1 port 5201
+[  5] local ::1 port 49138 connected to ::1 port 5201
 [ ID] Interval           Transfer     Bitrate         Retr  Cwnd
-[  5]   0.00-1.00   sec  4.35 GBytes  37.4 Gbits/sec    0   4.99 MBytes       
+[  5]   0.00-1.00   sec  4.32 GBytes  37.0 Gbits/sec    0   1.06 MBytes       
 - - - - - - - - - - - - - - - - - - - - - - - - -
 [ ID] Interval           Transfer     Bitrate         Retr
-[  5]   0.00-1.00   sec  4.35 GBytes  37.4 Gbits/sec    0             sender
-[  5]   0.00-1.41   sec  4.35 GBytes  26.4 Gbits/sec                  receiver
+[  5]   0.00-1.00   sec  4.32 GBytes  37.0 Gbits/sec    0             sender
+[  5]   0.00-1.00   sec  4.32 GBytes  37.0 Gbits/sec                  receiver
 
 iperf Done.
-# ping -c1 -4 spaghetti.pizza
-PING spaghetti.pizza (172.67.192.217) 56(84) bytes of data.
-64 bytes from 172.67.192.217: icmp_seq=1 ttl=255 time=37.3 ms
+
+# ping -nc1 -4 spaghetti.pizza
+PING spaghetti.pizza (5.161.47.86) 56(84) bytes of data.
+64 bytes from 5.161.47.86: icmp_seq=1 ttl=255 time=99.4 ms
 
 --- spaghetti.pizza ping statistics ---
 1 packets transmitted, 1 received, 0% packet loss, time 0ms
-# ping -c1 -6 spaghetti.pizza
-PING spaghetti.pizza(2606:4700:3034::6815:147a (2606:4700:3034::6815:147a)) 56 data bytes
-64 bytes from 2606:4700:3034::6815:147a: icmp_seq=1 ttl=255 time=35.6 ms
+rtt min/avg/max/mdev = 99.433/99.433/99.433/0.000 ms
+# ping -nc1 -6 spaghetti.pizza
+PING spaghetti.pizza (2a01:4f8:1c1e:d6f1::1) 56 data bytes
+64 bytes from 2a01:4f8:1c1e:d6f1::1: icmp_seq=1 ttl=255 time=3.11 ms
 
 --- spaghetti.pizza ping statistics ---
 1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 35.605/35.605/35.605/0.000 ms
-# logout
-$
-
-.RE
+rtt min/avg/max/mdev = 3.110/3.110/3.110/0.000 ms
 .fi
+.RE
 
 .BR "Connect an existing user and network namespace"
 .RS
 .nf
 $ unshare -rUn
+
 # echo $$
-2446678
-
+1295969
 .fi
-.BR "	[From another terminal]"
+
+.BR "[From another terminal]"
 .nf
-$ ./pasta 2446678
-Outbound interface: eth0, namespace interface: eth0
-ARP:
-    address: 28:16:ad:39:a9:ea
+$ pasta --config-net 1295969
+Template interface: enp9s0 (IPv4), enp9s0 (IPv6)
+Namespace interface: enp9s0
+MAC:
+    host: 9a:55:9a:55:9a:55
+    NAT to host 127.0.0.1: 88.198.0.161
 DHCP:
-    assign: 192.168.1.118
-    mask: 255.255.255.0
-    router: 192.168.1.1
+    assign: 88.198.0.164
+    mask: 255.255.255.224
+    router: 88.198.0.161
+DNS:
+    185.12.64.1
+    185.12.64.2
+    NAT to host ::1: fe80::1
 NDP/DHCPv6:
-    assign: 2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17
-    router: fe80::62e3:27ff:fe33:2b01
-
+    assign: 2a01:4f8:222:904::2
+    router: fe80::1
+    our link-local: fe80::1
+Inbound forwarding rules (HOST):
+    TCP [*]:1-32767  =>  1-32767  (best effort) (auto-scan)
+    TCP [*]:61000-65535  =>  61000-65535  (best effort) (auto-scan)
+    UDP [*]:1-32767  =>  1-32767  (best effort) (auto-scan)
+    UDP [*]:61000-65535  =>  61000-65535  (best effort) (auto-scan)
+Outbound forwarding rules (SPLICE):
+    TCP [*]%lo:1-32767  =>  1-32767  (best effort) (auto-scan)
+    TCP [*]%lo:61000-65535  =>  61000-65535  (best effort) (auto-scan)
+    UDP [*]%lo:1-32767  =>  1-32767  (best effort) (auto-scan)
+    UDP [*]%lo:61000-65535  =>  61000-65535  (best effort) (auto-scan)
 .fi
-.BR "	[Back to the original terminal]"
+
+.BR "[Back to the original terminal]"
 .nf
-# dhclient -4 --no-pid
-# dhclient -6 --no-pid
 # ip address show
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
        valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host 
+    inet6 ::1/128 scope host proto kernel_lo 
        valid_lft forever preferred_lft forever
-2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65520 qdisc pfifo_fast state UNKNOWN group default qlen 1000
-    link/ether fa:c1:2a:27:92:a9 brd ff:ff:ff:ff:ff:ff
-    inet 192.168.1.118/24 brd 192.168.1.255 scope global eth0
+2: enp9s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65520 qdisc fq_codel state UNKNOWN group default qlen 1000
+    link/ether 9a:44:5e:54:d3:2c brd ff:ff:ff:ff:ff:ff
+    inet 88.198.0.164/27 brd 88.198.0.191 scope global noprefixroute enp9s0
        valid_lft forever preferred_lft forever
-    inet6 2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17/128 scope global 
+    inet6 2a01:4f8:222:904::2/64 scope global nodad 
        valid_lft forever preferred_lft forever
-    inet6 2a02:6d40:3ca5:2001:f8c1:2aff:fe27:92a9/64 scope global dynamic mngtmpaddr 
-       valid_lft 3594sec preferred_lft 3594sec
-    inet6 fe80::f8c1:2aff:fe27:92a9/64 scope link 
+    inet6 fe80::9844:5eff:fe54:d32c/64 scope link nodad proto kernel_ll 
        valid_lft forever preferred_lft forever
 .fi
 .RE
@@ -893,72 +895,69 @@ NDP/DHCPv6:
 .BR "Start and connect a guest with basic port forwarding"
 .RS
 .nf
-$ ./passt -f -t 2222:22
-Outbound interface: eth0
-ARP:
-    address: 28:16:ad:39:a9:ea
-DHCP:
-    assign: 192.168.1.118
-    mask: 255.255.255.0
-    router: 192.168.1.1
-        search:
-            redhat.com
-NDP/DHCPv6:
-    assign: 2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17
-    router: fe80::62e3:27ff:fe33:2b01
-        search:
-            redhat.com
+$ passt -f -t 2222:22
 UNIX domain socket bound at /tmp/passt_1.socket
+No IPv6 nameserver available for NDP/DHCPv6
+Template interface: enp9s0 (IPv4), enp9s0 (IPv6)
+MAC:
+    host: 9a:55:9a:55:9a:55
+    NAT to host 127.0.0.1: 88.198.0.161
+DHCP:
+    assign: 88.198.0.164
+    mask: 255.255.255.224
+    router: 88.198.0.161
+DNS:
+    185.12.64.1
+    185.12.64.2
+    NAT to host ::1: fe80::1
+NDP/DHCPv6:
+    assign: 2a01:4f8:222:904::2
+    router: fe80::1
+    our link-local: fe80::1
+Inbound forwarding rules (HOST):
+    TCP [*]:2222  =>  22 
 
-You can now start qrap:
-    ./qrap 5 qemu-system-x86_64 ... -net socket,fd=5 -net nic,model=virtio
-or directly qemu, patched with:
-    qemu/0001-net-Allow-also-UNIX-domain-sockets-to-be-used-as-net.patch
-as follows:
-    qemu-system-x86_64 ... -net socket,connect=/tmp/passt_1.socket -net nic,model=virtio
-
+You can now start qemu (>= 7.2, with commit 13c6be96618c):
+    kvm ... -device virtio-net-pci,netdev=s -netdev stream,id=s,server=off,addr.type=unix,addr.path=/tmp/passt_1.socket
 .fi
-.BR "	[From another terminal]"
+
+.BR "[From another terminal]"
 .nf
-$ ./qrap 5 qemu-system-x86_64 test.qcow2 -m 1024 -display none -nodefaults -nographic -net socket,fd=5 -net nic,model=virtio
-Connected to /tmp/passt_1.socket
-
+$ qemu-system-x86_64 -m 128 test.qcow2 -display none -nodefaults -nographic -device virtio-net-pci,netdev=s -netdev stream,id=s,server=off,addr.type=unix,addr.path=/tmp/passt_1.socket
 .fi
-.BR "	[Back to the original terminal]"
+
+.BR "[Back to the original terminal]"
 .nf
-passt: DHCP: ack to request
-passt:     from 52:54:00:12:34:56
-passt: NDP: received NS, sending NA
-passt: NDP: received RS, sending RA
-passt: DHCPv6: received SOLICIT, sending ADVERTISE
-passt: NDP: received NS, sending NA
-passt: DHCPv6: received REQUEST/RENEW/CONFIRM, sending REPLY
-passt: NDP: received NS, sending NA
-
+accepted connection from PID 1301736
+New guest MAC address observed: 52:54:00:12:34:56
+DHCP: offer to discover
+    from 52:54:00:12:34:56
+DHCP: ack to request
+    from 52:54:00:12:34:56
+NDP: received RS, sending RA
 .fi
-.BR "	[From yet another terminal]"
+
+.BR "[From yet another terminal]"
 .nf
 $ ssh -p 2222 root@localhost
 root@localhost's password: 
 .fi
-.BR "	[...]"
+.BR "[...]"
 .nf
 # ip address show
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
        valid_lft forever preferred_lft forever
     inet6 ::1/128 scope host 
        valid_lft forever preferred_lft forever
-2: ens2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 65520 qdisc pfifo_fast state UP group default qlen 1000
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
     link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
-    inet 192.168.1.118/24 brd 192.168.1.255 scope global noprefixroute ens2
+    inet 88.198.0.164/27 scope global eth0
        valid_lft forever preferred_lft forever
-    inet6 2a02:6d40:3ca5:2001:b81d:fa4a:8cdd:cf17/128 scope global noprefixroute 
+    inet6 2a01:4f8:222:904:5054:ff:fe12:3456/64 scope global dynamic flags 100 
        valid_lft forever preferred_lft forever
-    inet6 2a02:6d40:3ca5:2001:b019:9ae2:a2fe:e6b4/64 scope global dynamic noprefixroute 
-       valid_lft 3588sec preferred_lft 3588sec
-    inet6 fe80::1f98:d09f:9309:9e77/64 scope link noprefixroute 
+    inet6 fe80::5054:ff:fe12:3456/64 scope link 
        valid_lft forever preferred_lft forever
 .fi
 .RE

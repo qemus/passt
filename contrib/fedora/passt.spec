@@ -118,12 +118,10 @@ fi
 %doc %{_docdir}/%{name}/demo.sh
 %{_bindir}/passt
 %{_bindir}/pasta
-%{_bindir}/qrap
 %{_bindir}/passt-repair
 %{_bindir}/pesto
 %{_mandir}/man1/passt.1*
 %{_mandir}/man1/pasta.1*
-%{_mandir}/man1/qrap.1*
 %{_mandir}/man1/passt-repair.1*
 %{_mandir}/man1/pesto.1*
 %ifarch x86_64

@@ -1377,8 +1377,6 @@ static void tap_backend_show_hints(const struct ctx *c)
 		info("\nYou can now start qemu (>= 7.2, with commit 13c6be96618c):");
 		info("    kvm ... -device virtio-net-pci,netdev=s -netdev stream,id=s,server=off,addr.type=unix,addr.path=%s",
 		     c->sock_path);
-		info("or qrap, for earlier qemu versions:");
-		info("    ./qrap 5 kvm ... -net socket,fd=5 -net nic,model=virtio");
 		break;
 	case MODE_VU:
 		info("You can start qemu with:");

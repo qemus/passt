@@ -177,7 +177,7 @@ into_ns() {
 	next
 	[ "${KEY}" = "s" ] && ${SHELL}
 
-	cmd passt -P "${DEMO_DIR}/passt.pid"
+	cmd passt -P "${DEMO_DIR}/passt.pid" -s "${DEMO_DIR}/passt.socket"
 	echo
 	echo "...passt is running."
 	next
@@ -198,15 +198,12 @@ into_ns() {
 		echo "can download and use mbuto (https://mbuto.sh/) to build a"
 		echo "basic initramfs image. Otherwise, press 's' to skip this"
 		echo "step, and start an existing virtual machine yourself."
-		echo "You'll need to use the qrap(1) wrapper, with qemu options"
-		echo "as reported above."
 
 		next
 	else
 		echo "This script doesn't know, yet, how to run a virtual"
 		echo "machine on your architecture (${__arch}). Please start an"
-		echo "existing virtual machine yourself, using the qrap(1)"
-		echo "wrapper, with qemu options as reported above."
+		echo "existing virtual machine yourself."
 		echo
 	fi
 
@@ -225,12 +222,13 @@ into_ns() {
 	next
 
 	# shellcheck disable=SC2086
-	cmd qrap 5 ${__qemu_arch}					    \
+	cmd ${__qemu_arch}						    \
 		-smp "$(nproc)" -m 1024					    \
 		-nographic -serial stdio -nodefaults -no-reboot -vga none   \
 		-initrd "${DEMO_DIR}/demo.img"				    \
 		-kernel "/boot/vmlinuz-$(uname -r)" -append "console=ttyS0" \
-		-net socket,fd=5 -net nic,model=virtio || :
+		-device virtio-net-pci,netdev=s				    \
+		-netdev stream,id=s,server=off,addr.type=unix,addr.path="${DEMO_DIR}/passt.socket" || :
 }
 
 STTY_BACKUP="$(stty -g)"
