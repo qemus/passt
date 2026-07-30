@@ -23,15 +23,45 @@
 #include "util.h"
 #include "log.h"
 #include "isolation.h"
+#include "conf.h"
 
 /**
- * isolate_initial() - Close inherited file descriptors
- * @argc:	Argument count
- * @argv:	Command line options
+ * isolate_initial() - No-op initial isolation hook
  */
-void isolate_initial(int argc, char **argv)
+void isolate_initial(void)
 {
-	close_open_files(argc, argv);
+}
+
+/**
+ * isolate_fds() - Close inherited file descriptors
+ * @argc:	Argument count
+ * @argv:	Command line options, used to locate any descriptor from --fd
+ *
+ * Return: new fd number for descriptor from --fd, or -1 if not specified
+ */
+int isolate_fds(int argc, char **argv)
+{
+	int fd, close_from = STDERR_FILENO + 1;
+	long max_fd;
+
+	fd = conf_tap_fd(argc, argv);
+
+	if (fd >= 0) {
+		if (fd != close_from &&
+		    (dup2(fd, close_from) != close_from || close(fd)))
+			die_perror("Could not move --fd descriptor");
+
+		fd = close_from++;
+	}
+
+	max_fd = sysconf(_SC_OPEN_MAX);
+	if (max_fd < 0)
+		max_fd = 1024;
+
+	while (close_from < max_fd)
+		close(close_from++);
+
+	return fd;
 }
 
 /**
