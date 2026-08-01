@@ -16,7 +16,6 @@
 #include <errno.h>
 #include <grp.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -33,11 +32,11 @@ void isolate_initial(void)
 }
 
 /**
- * isolate_fds() - Close inherited file descriptors
+ * isolate_fds() - Preserve an optional descriptor supplied through --fd
  * @argc:	Argument count
  * @argv:	Command line options, used to locate any descriptor from --fd
  *
- * Return: new fd number for descriptor from --fd, or -1 if not specified
+ * Return: descriptor supplied through --fd, moved to fd 3, or -1
  */
 int isolate_fds(int argc, char **argv)
 {
@@ -86,7 +85,7 @@ void isolate_user(const struct ctx *c, uid_t uid, gid_t gid, bool use_userns,
 
 /**
  * isolate_prefork() - No-op isolation hook
- * @c:		Execution context
+ * @c:	Execution context
  *
  * Return: always zero
  */
@@ -99,7 +98,7 @@ int isolate_prefork(const struct ctx *c)
 
 /**
  * isolate_postfork() - No-op isolation hook
- * @c:		Execution context
+ * @c:	Execution context
  */
 void isolate_postfork(const struct ctx *c)
 {
