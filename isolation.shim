@@ -41,25 +41,17 @@ void isolate_initial(void)
  */
 int isolate_fds(int argc, char **argv)
 {
-	int fd, close_from = STDERR_FILENO + 1;
-	long max_fd;
+	int fd, target = STDERR_FILENO + 1;
 
 	fd = conf_tap_fd(argc, argv);
 
 	if (fd >= 0) {
-		if (fd != close_from &&
-		    (dup2(fd, close_from) != close_from || close(fd)))
+		if (fd != target &&
+		    (dup2(fd, target) != target || close(fd)))
 			die_perror("Could not move --fd descriptor");
 
-		fd = close_from++;
+		fd = target;
 	}
-
-	max_fd = sysconf(_SC_OPEN_MAX);
-	if (max_fd < 0)
-		max_fd = 1024;
-
-	while (close_from < max_fd)
-		close(close_from++);
 
 	return fd;
 }
