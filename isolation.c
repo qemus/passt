@@ -89,6 +89,7 @@
 #include <linux/seccomp.h>
 
 #include "util.h"
+#include "linux_dep.h"
 #include "seccomp.h"
 #include "passt.h"
 #include "log.h"
