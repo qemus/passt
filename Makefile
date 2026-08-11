@@ -48,8 +48,8 @@ MANPAGES = passt.1 pasta.1 pesto.1 passt-repair.1
 
 PASST_HEADERS = arch.h arp.h bitmap.h checksum.h conf.h dhcp.h dhcpv6.h \
 	epoll_ctl.h flow.h fwd.h fwd_rule.h flow_table.h icmp.h icmp_flow.h \
-	inany.h iov.h ip.h isolation.h lineread.h log.h migrate.h ndp.h \
-	netlink.h packet.h parse.h passt.h pasta.h pcap.h pif.h repair.h \
+	inany.h iov.h ip.h isolation.h lineread.h linux_dep.h log.h migrate.h \
+	ndp.h netlink.h packet.h parse.h passt.h pasta.h pcap.h pif.h repair.h \
 	serialise.h siphash.h tap.h tcp.h tcp_buf.h tcp_conn.h tcp_internal.h \
 	tcp_splice.h tcp_vu.h udp.h udp_flow.h udp_internal.h udp_vu.h util.h \
 	vhost_user.h virtio.h vu_common.h
