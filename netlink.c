@@ -271,6 +271,7 @@ unsigned int nl_get_ext_if(int s, sa_family_t af)
 	};
 	unsigned defifi = 0, anyifi = 0;
 	unsigned ndef = 0, nany = 0;
+	bool multi_anyif = false;
 	struct nlmsghdr *nh;
 	struct rtattr *rta;
 	char buf[NLBUFSIZ];
@@ -330,6 +331,8 @@ unsigned int nl_get_ext_if(int s, sa_family_t af)
 			nany++;
 			if (!anyifi)
 				anyifi = thisifi;
+			else if (anyifi != thisifi)
+				multi_anyif = true;
 		}
 	}
 
@@ -345,7 +348,7 @@ unsigned int nl_get_ext_if(int s, sa_family_t af)
 	}
 
 	if (anyifi) {
-		if (nany > 1) {
+		if (multi_anyif) {
 			info("Multiple interfaces with %s routes, picked first",
 			     af_name(af));
 		}
