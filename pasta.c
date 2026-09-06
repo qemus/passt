@@ -194,14 +194,16 @@ static int pasta_spawn_cmd(void *arg)
 	if (prctl(PR_SET_PDEATHSIG, SIGKILL))
 		die_perror("Couldn't set PR_SET_PDEATHSIG");
 
-	/* We run in a detached PID and mount namespace: mount /proc over */
-	if (mount("", "/proc", "proc", 0, NULL))
+	a = (const struct pasta_spawn_cmd_arg *)arg;
+
+	/* We run in a detached mount namespace, and, unless --no-pidns was
+	 * given, in a detached PID namespace: mount /proc over
+	 */
+	if (!a->c->no_pidns && mount("", "/proc", "proc", 0, NULL))
 		warn_perror("Couldn't mount /proc");
 
 	if (write_file("/proc/sys/net/ipv4/ping_group_range", "0 0"))
 		warn("Cannot set ping_group_range, ICMP requests might fail");
-
-	a = (const struct pasta_spawn_cmd_arg *)arg;
 
 	conf_hostname_len = strlen(a->c->hostname);
 	if (conf_hostname_len > 0) {
@@ -239,6 +241,7 @@ static int pasta_spawn_cmd(void *arg)
  */
 void pasta_start_ns(struct ctx *c, int argc, char *argv[])
 {
+	int flags = CLONE_NEWIPC | CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWNS;
 	char ns_fn_stack[NS_FN_STACK_SIZE]
 	__attribute__ ((aligned(__alignof__(max_align_t))));
 	struct pasta_spawn_cmd_arg arg = {
@@ -272,10 +275,11 @@ void pasta_start_ns(struct ctx *c, int argc, char *argv[])
 	sigaddset(&set, SIGUSR1);
 	sigprocmask(SIG_BLOCK, &set, NULL);
 
+	if (!c->no_pidns)
+		flags |= CLONE_NEWPID;
+
 	pasta_child_pid = do_clone(pasta_spawn_cmd, ns_fn_stack,
-				   sizeof(ns_fn_stack),
-				   CLONE_NEWIPC | CLONE_NEWPID | CLONE_NEWNET |
-				   CLONE_NEWUTS | CLONE_NEWNS  | SIGCHLD,
+				   sizeof(ns_fn_stack), flags | SIGCHLD,
 				   (void *)&arg);
 
 	if (pasta_child_pid == -1)

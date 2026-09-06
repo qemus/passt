@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# PASST - Plug A Simple Socket Transport
+#  for qemu/UNIX domain socket mode
+#
+# PASTA - Pack A Subtle Tap Abstraction
+#  for network namespace/tap device mode
+#
+# test/pasta_options/no_pidns - Check --no-pidns handling
+
+htools	readlink
+
+test	Command is spawned in a new PID namespace by default
+set	PIDNS __STATEDIR__/pidns
+set	OUT __STATEDIR__/no-pidns.out
+set	ERR __STATEDIR__/no-pidns.err
+
+passt	readlink /proc/self/ns/pid > __PIDNS__
+passt	./pasta -q -- readlink /proc/self/ns/pid > __OUT__ 2> __ERR__
+check	[ "$(cat __PIDNS__)" != "$(cat __OUT__)" ]
+
+test	--no-pidns keeps command in the caller's PID namespace
+passt	./pasta -q --no-pidns -- readlink /proc/self/ns/pid > __OUT__ 2> __ERR__
+check	[ "$(cat __PIDNS__)" = "$(cat __OUT__)" ]
+check	[ ! -s __ERR__ ]

@@ -705,6 +705,18 @@ network namespace is represented by a procfs entry, and that entry is deleted,
 representing the fact that a process with the given PID terminated.
 
 .TP
+.BR \-\-no-pidns
+Don't create a new PID namespace for the spawned command or shell: keep it in
+the PID namespace \fBpasta\fR itself runs in, and don't mount a new
+\fIprocfs\fR instance on \fI/proc\fR for it. This is useful in environments
+where mounting \fIprocfs\fR is not permitted, such as containers, where the
+command would otherwise get a \fI/proc\fR view that doesn't match its own PID
+namespace. Note that, without a PID namespace, processes started by the
+command are not terminated once the command exits.
+
+This option can't be specified with a PID or with \-\-netns.
+
+.TP
 .BR \-\-config-net
 Configure networking in the namespace: set up addresses and routes as configured
 or sourced from the host, and bring up the tap interface.
