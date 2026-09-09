@@ -24,6 +24,7 @@
   capability setpcap,
   capability net_admin,
   capability sys_ptrace,
+  capability setfcap,
   userns,
 
   /					r,	# isolate_prefork(), isolation.c

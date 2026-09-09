@@ -12,12 +12,11 @@
 extern int pasta_child_pid;
 
 void pasta_open_ns(struct ctx *c, const char *netns);
-void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid, bool config_idmaps,
-		    int argc, char *argv[]);
+void pasta_start_ns(struct ctx *c, int argc, char *argv[]);
 void pasta_ns_conf(struct ctx *c);
 void pasta_child_handler(int signal);
 void pasta_netns_quit_init(const struct ctx *c);
-void pasta_netns_quit_inotify_handler(struct ctx *c, int inotify_fd);
-void pasta_netns_quit_timer_handler(struct ctx *c, union epoll_ref ref);
+void pasta_netns_quit_inotify_handler(const struct ctx *c, int inotify_fd);
+void pasta_netns_quit_timer_handler(const struct ctx *c, union epoll_ref ref);
 
 #endif /* PASTA_H */

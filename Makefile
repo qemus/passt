@@ -222,4 +222,5 @@ pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:ip.h
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:serialise.c
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=staticFunction:fwd_rule.c
 pesto.cppcheck: CPPCHECK_FLAGS += --suppress=staticFunction:parse.c
+pesto.cppcheck: CPPCHECK_FLAGS += --suppress=unusedFunction:parse.c
 pesto.cppcheck: $(PESTO_SRCS) $(PESTO_HEADERS) seccomp_pesto.h

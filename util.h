@@ -290,4 +290,6 @@ static inline int wrap_getsockname(int sockfd, struct sockaddr *addr,
 #define PASST_MAXDNAME 254 /* 253 (RFC 1035) + 1 (the terminator) */
 void encode_domain_name(char *buf, const char *domain_name);
 
+void make_ugid_map(pid_t pid, uid_t uid, gid_t gid);
+
 #endif /* UTIL_H */

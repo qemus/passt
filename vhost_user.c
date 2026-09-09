@@ -1081,6 +1081,7 @@ void vu_cleanup(struct vu_dev *vdev)
 		struct vu_virtq *vq = &vdev->vq[i];
 
 		vq->started = false;
+		vq->enable = false;
 		vq->notification = true;
 
 		if (vq->call_fd != -1) {

@@ -19,6 +19,7 @@
 #include <limits.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <netinet/if_ether.h>
 
 #include "common.h"
 #include "parse.h"
@@ -240,5 +241,34 @@ bool parse_ifspec(const char **cursor, char *ifname)
 	memcpy(ifname, p, len);
 	ifname[len] = '\0';
 	*cursor = p + len;
+	return true;
+}
+
+/**
+ * parse_mac() - Parse an (Ethernet) MAC address from a string
+ * @cursor:	Point to parse from, updated on success
+ * @mac:	On success, updated with binary MAC address
+ */
+bool parse_mac(const char **cursor, unsigned char *mac)
+{
+	unsigned char tmp[ETH_ALEN];
+	const char *p = *cursor;
+	size_t i;
+
+	for (i = 0; i < sizeof(tmp); i++) {
+		const char *octet = p;
+		unsigned long b;
+
+		if (!parse_unsigned(&p, 16, &b) || p != octet + 2 ||
+		    b > UCHAR_MAX)
+			return false;
+
+		if (i < ETH_ALEN - 1 && !parse_literal(&p, ":"))
+			return false;
+		tmp[i] = b;
+	}
+
+	memcpy(mac, tmp, sizeof(tmp));
+	*cursor = p;
 	return true;
 }

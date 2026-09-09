@@ -1117,39 +1117,6 @@ static void conf_open_files(struct ctx *c)
 }
 
 /**
- * parse_mac() - Parse a MAC address from a string
- * @mac:	Binary MAC address, initialised on success
- * @str:	String to parse
- *
- * Parses @str as an Ethernet MAC address stored in @mac on success.  Exits on
- * failure.
- */
-static void parse_mac(unsigned char mac[ETH_ALEN], const char *str)
-{
-	size_t i;
-
-	if (strlen(str) != (ETH_ALEN * 3 - 1))
-		goto fail;
-
-	for (i = 0; i < ETH_ALEN; i++) {
-		const char *octet = str + 3 * i;
-		unsigned long b;
-		char *end;
-
-		errno = 0;
-		b = strtoul(octet, &end, 16);
-		if (b > UCHAR_MAX || errno || end != octet + 2 ||
-		    *end != ((i == ETH_ALEN - 1) ? '\0' : ':'))
-			goto fail;
-		mac[i] = b;
-	}
-	return;
-
-fail:
-	die("Invalid MAC address: %s", str);
-}
-
-/**
  * conf_sock_listen() - Start listening for connections on configuration socket
  * @c:		Execution context
  */
@@ -1411,7 +1378,10 @@ void conf(struct ctx *c, int argc, char **argv)
 			if (c->mode != MODE_PASTA)
 				die("--ns-mac-addr is for pasta mode only");
 
-			parse_mac(c->guest_mac, optarg);
+			p = optarg;
+			if (!parse_mac(&p, c->guest_mac) ||
+			    !parse_eoi(p))
+				die("Invalid MAC address: %s", optarg);
 			break;
 		case 5:
 			if (c->mode != MODE_PASTA)
@@ -1678,7 +1648,10 @@ void conf(struct ctx *c, int argc, char **argv)
 			opt_n = c->ip4.prefix_len + 96;
 			break;
 		case 'M':
-			parse_mac(c->our_tap_mac, optarg);
+			p = optarg;
+			if (!parse_mac(&p, c->our_tap_mac) ||
+			    !parse_eoi(p))
+				die("Invalid MAC address: %s", optarg);
 			break;
 		case 'g':
 			if (inet_pton(AF_INET6, optarg, &c->ip6.guest_gw) &&
@@ -1962,8 +1935,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		if (*netns) {
 			pasta_open_ns(c, netns);
 		} else {
-			pasta_start_ns(c, uid, gid, !netns_only,
-				       argc - optind, argv + optind);
+			pasta_start_ns(c, argc - optind, argv + optind);
 		}
 	}
 

@@ -46,7 +46,7 @@
 
 #include "util.h"
 #include "passt.h"
-#include "isolation.h"
+#include "pasta.h"
 #include "netlink.h"
 #include "log.h"
 #include "epoll_ctl.h"
@@ -234,14 +234,10 @@ static int pasta_spawn_cmd(void *arg)
 /**
  * pasta_start_ns() - Fork command in new namespace if target ns is not given
  * @c:		Execution context
- * @uid:	UID we're running as in the init namespace
- * @gid:	GID we're running as in the init namespace
- * @config_idmaps:	Whether to configure user mappings
  * @argc:	Number of arguments for spawned command
  * @argv:	Command to spawn and arguments
  */
-void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid, bool config_idmaps,
-		    int argc, char *argv[])
+void pasta_start_ns(struct ctx *c, int argc, char *argv[])
 {
 	char ns_fn_stack[NS_FN_STACK_SIZE]
 	__attribute__ ((aligned(__alignof__(max_align_t))));
@@ -257,23 +253,6 @@ void pasta_start_ns(struct ctx *c, uid_t uid, gid_t gid, bool config_idmaps,
 	c->foreground = 1;
 	if (!c->debug)
 		c->quiet = 1;
-
-	/* Configure user and group mappings */
-	if (config_idmaps) {
-		char uidmap[BUFSIZ], gidmap[BUFSIZ];
-
-		if (snprintf_check(uidmap, BUFSIZ, "0 %u 1", uid))
-			die_perror("Can't build uidmap");
-
-		if (snprintf_check(gidmap, BUFSIZ, "0 %u 1", gid))
-			die_perror("Can't build gidmap");
-
-		if (write_file("/proc/self/uid_map", uidmap) ||
-		    write_file("/proc/self/setgroups", "deny") ||
-		    write_file("/proc/self/gid_map", gidmap)) {
-			warn("Couldn't configure user mappings");
-		}
-	}
 
 	if (argc == 0) {
 		arg.exe = getenv("SHELL");

@@ -30,11 +30,8 @@
 #include "util.h"
 #include "iov.h"
 #include "passt.h"
-#include "packet.h"
 #include "log.h"
 #include "pcap.h"
-#include "epoll_ctl.h"
-#include "pasta.h"
 #include "serialise.h"
 #ifdef HAS_GETRANDOM
 #include <sys/random.h>
@@ -964,7 +961,7 @@ void raw_random(void *buf, size_t buflen)
 {
 	size_t random_read = 0;
 #ifndef HAS_GETRANDOM
-	int fd = open(DEV_RANDOM, O_RDONLY);
+	int fd = open(DEV_RANDOM, O_RDONLY | O_CLOEXEC);
 
 	if (fd < 0)
 		die_perror("Couldn't open %s", DEV_RANDOM);
@@ -1072,7 +1069,7 @@ void passt_exit(int status)
 	/* Make sure we don't leave any messages incomplete */
 	(void)fflush(stderr);
 	(void)fflush(stdout);
-	
+
 	_exit(status);
 }
 
@@ -1112,4 +1109,43 @@ long clamped_scale(long x, long y, long lo, long hi, long f)
 		return x * f / 100;
 
 	return x - (x * (y - lo) / (hi - lo)) * (100 - f) / 100;
+}
+
+/**
+ * make_ugid_map() - Create userns UID & GID mappings
+ * @pid:	PID of process owning the userns, or 0 for self
+ * @uid:	Parent UID to map to 0 within userns
+ * @gid:	Parent GID to map to 0 within userns
+ */
+void make_ugid_map(pid_t pid, uid_t uid, gid_t gid)
+{
+	char setgroups_path[PATH_MAX] = "/proc/self/setgroups";
+	char uidmap_path[PATH_MAX] = "/proc/self/uid_map";
+	char gidmap_path[PATH_MAX] = "/proc/self/gid_map";
+	char uidmap[BUFSIZ], gidmap[BUFSIZ];
+
+	if (pid) {
+		if (snprintf_check(uidmap_path, sizeof(uidmap_path),
+				   "/proc/%u/uid_map", pid))
+			die_perror("Can't build uidmap path");
+
+		if (snprintf_check(gidmap_path, sizeof(gidmap_path),
+				   "/proc/%u/gid_map", pid))
+			die_perror("Can't build gidmap path");
+
+		if (snprintf_check(setgroups_path, sizeof(setgroups_path),
+				   "/proc/%u/setgroups", pid))
+			die_perror("Can't build setgroups path");
+	}
+
+	if (snprintf_check(uidmap, sizeof(uidmap), "0 %u 1", uid))
+		die_perror("Can't build uidmap");
+
+	if (snprintf_check(gidmap, BUFSIZ, "0 %u 1", gid))
+		die_perror("Can't build gidmap");
+
+	if (write_file(uidmap_path, uidmap) ||
+	    write_file(setgroups_path, "deny") ||
+	    write_file(gidmap_path, gidmap))
+		die("Couldn't configure user mappings");
 }
