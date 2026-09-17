@@ -742,6 +742,7 @@ pasta_opts:
 		"    implied if PATH or NAME are given without --userns\n"
 		"  --no-netns-quit	Don't quit if filesystem-bound target\n"
 		"  			network namespace is deleted\n"
+		"  --no-pidns		Don't spawn command in a new PID namespace\n"
 		"  --config-net		Configure tap interface in namespace\n"
 		"  --no-copy-routes	DEPRECATED:\n"
 		"			Don't copy all routes to namespace\n"
@@ -1315,6 +1316,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"stats", required_argument,		NULL,		31 },
 		{"conf-path",	required_argument,	NULL,		'c' },
 		{"chroot-fallback", no_argument,	NULL, 		32 },
+		{"no-pidns",	no_argument,		NULL,		33 },
 		{ 0 },
 	};
 	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
@@ -1558,6 +1560,12 @@ void conf(struct ctx *c, int argc, char **argv)
 			break;
 		case 32:
 			c->chroot_fallback = true;
+			break;
+		case 33:
+			if (c->mode != MODE_PASTA)
+				die("--no-pidns is for pasta mode only");
+
+			c->no_pidns = true;
 			break;
 		case 'd':
 			c->debug = 1;
@@ -1920,6 +1928,9 @@ void conf(struct ctx *c, int argc, char **argv)
 		conf_pasta_ns(&netns_only, userns, netns, optind, argc, argv);
 	else if (optind != argc)
 		die("Extra non-option argument: %s", argv[optind]);
+
+	if (c->no_pidns && *netns)
+		die("--no-pidns is incompatible with PID or --netns");
 
 	conf_open_files(c);	/* Before any possible setuid() / setgid() */
 
