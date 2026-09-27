@@ -267,6 +267,7 @@ flow_sidx_t udp_flow_from_sock(const struct ctx *c, uint8_t pif,
  * @daddr:	Destination address guest side
  * @srcport:	Source port on guest side
  * @dstport:	Destination port on guest side
+ * @now:	Current timestamp
  *
  * Return: sidx for the destination side of the flow for this packet, or
  *         FLOW_SIDX_NONE if we couldn't find or create a flow.

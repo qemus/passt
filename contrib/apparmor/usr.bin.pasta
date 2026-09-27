@@ -18,8 +18,7 @@ include <tunables/global>
 profile pasta /usr/bin/pasta{,.avx2} flags=(attach_disconnected) {
   include <abstractions/pasta>
 
-  # Alternatively: include <abstractions/user-tmp>
-  /tmp/**				rw,	# tap_sock_unix_open(),
+  include <abstractions/user-tmp>		# tap_sock_unix_open(),
 						# tap_sock_unix_init(), pcap(),
 						# pidfile_open(),
 						# pidfile_write(),
