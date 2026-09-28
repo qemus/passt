@@ -2417,15 +2417,22 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 	/* Established connections not accepting data from tap */
 	if (conn->events & TAP_FIN_RCVD) {
+		bool fin_only, retr;
 		size_t dlen;
-		bool retr;
 
 		if ((dlen = tcp_packet_data_len(th, l4len))) {
 			flow_dbg(conn, "data segment in CLOSE-WAIT (%zu B)",
 				 dlen);
 		}
 
-		retr = th->ack && !th->fin &&
+		/* If only our FIN is outstanding, rewinding on a duplicate ACK
+		 * would re-send it on every ACK, bypassing the backoff and
+		 * retry limit of tcp_timer_handler(): let the timer do it.
+		 */
+		fin_only = (conn->events & TAP_FIN_SENT) &&
+			   conn->seq_to_tap == conn->seq_ack_from_tap + 1;
+
+		retr = th->ack && !th->fin && !fin_only &&
 		       ntohl(th->ack_seq) == conn->seq_ack_from_tap &&
 		       ntohs(th->window) == conn->wnd_from_tap;
 
