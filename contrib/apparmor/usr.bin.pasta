@@ -22,8 +22,11 @@ profile pasta /usr/bin/pasta{,.avx2} flags=(attach_disconnected) {
 						# tap_sock_unix_init(), pcap(),
 						# pidfile_open(),
 						# pidfile_write(),
-						# logfile_init(),
-						# pasta_open_ns()
+						# logfile_init()
+
+  # user-tmp is using "owner" which is not compatible with netns paths
+  # as they show up with ouid=0 in the kernel AppArmor checks
+  /tmp/**				rw,	# pasta_open_ns()
 
   owner @{HOME}/**			w,	# pcap(), pidfile_open(),
 						# pidfile_write()
