@@ -87,7 +87,7 @@ require {
 	type init_t;
 
 	class capability { sys_tty_config setuid setgid };
-	class cap_userns { setpcap sys_admin sys_ptrace net_bind_service net_admin };
+	class cap_userns { setpcap sys_admin sys_ptrace net_bind_service net_admin setgid setuid };
 	class user_namespace create;
 
 	# Container requires

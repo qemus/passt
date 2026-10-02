@@ -23,6 +23,7 @@ require {
 	type user_home_t;
 	type tmpfs_t;
 	type root_t;
+	type nsfs_t;
 
 	# Workaround: passt --vhost-user needs to map guest memory, but
 	# libvirt doesn't maintain its own policy, which makes updates
@@ -61,7 +62,7 @@ require {
 	type sysctl_net_t;
 
 	class capability { sys_tty_config setuid setgid };
-	class cap_userns { setpcap sys_admin sys_ptrace };
+	class cap_userns { setpcap setgid setuid sys_admin sys_ptrace };
 	class user_namespace create;
 }
 
@@ -104,10 +105,12 @@ allow syslogd_t self:cap_userns sys_ptrace;
 
 allow passt_t self:process setcap;
 allow passt_t self:capability { sys_tty_config setpcap net_bind_service setuid setgid};
-allow passt_t self:cap_userns { setpcap sys_admin sys_ptrace };
+allow passt_t self:cap_userns { setgid setuid setpcap sys_admin sys_ptrace };
 allow passt_t self:user_namespace create;
 
 auth_read_passwd(passt_t)
+
+allow passt_t nsfs_t:file { open read };
 
 allow passt_t proc_net_t:file read;
 allow passt_t tmp_t:sock_file { create unlink write };
