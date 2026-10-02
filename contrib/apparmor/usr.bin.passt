@@ -15,7 +15,7 @@ abi <abi/4.0>,
 
 include <tunables/global>
 
-profile passt /usr/bin/passt{,.avx2} {
+profile passt /usr/bin/passt{,.avx2} flags=(attach_disconnected) {
   include <abstractions/passt>
 
   include <abstractions/user-tmp>		# tap_sock_unix_open(),

@@ -35,10 +35,6 @@
 
   /dev/net/tun				rw,	# tap_ns_tun(), tap.c
 
-  owner @{PROC}/@{pid}/gid_map		w,	# pasta_start_ns(), conf_ugid()
-  owner @{PROC}/@{pid}/setgroups	w,
-  owner @{PROC}/@{pid}/uid_map		rw,
-
   owner @{PROC}/sys/net/ipv4/ping_group_range w, # pasta_spawn_cmd(), pasta.c
   /{usr/,}bin/**			Ux,
 
