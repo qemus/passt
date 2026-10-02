@@ -1147,5 +1147,5 @@ void make_ugid_map(pid_t pid, uid_t uid, gid_t gid)
 	if (write_file(uidmap_path, uidmap) ||
 	    write_file(setgroups_path, "deny") ||
 	    write_file(gidmap_path, gidmap))
-		die("Couldn't configure user mappings");
+		warn("Couldn't configure user mappings");
 }
