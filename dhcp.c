@@ -35,6 +35,18 @@
 #include "dhcp.h"
 #include "parse.h"
 
+#define OPT_MIN		60 /* RFC 951 */
+
+/* Total option size (excluding end option) is 576 (RFC 2131), minus
+ * offset of options (268), minus end option (1).
+ */
+#define OPT_MAX		307
+
+/* RFC 3396: maximum option data that can be split across options field,
+ * file field, and sname field.
+ */
+#define OPT_CONCAT_MAX	(OPT_MAX - 2 + 64 - 2 + 128 - 2)
+
 /**
  * enum opt_conf - DHCP option configuration
  * @OPT_UNSET:		Option not configured
@@ -51,18 +63,18 @@ enum opt_conf {
  * struct opt - DHCP option
  * @sent:	Convenience flag, set while filling replies
  * @slen:	Length of option defined for server
- * @s:		Option payload from server
  * @clen:	Length of option received from client, -1 if not received
- * @c:		Option payload from client
  * @conf:	Option configuration (unset, default, or user)
+ * @c:		Option payload from client
+ * @s:		Option payload from server
  */
 struct opt {
 	int sent;
 	int slen;
-	uint8_t s[255];
 	int clen;
-	uint8_t c[255];
 	enum opt_conf conf;
+	uint8_t c[255];
+	uint8_t s[OPT_CONCAT_MAX];
 };
 
 static struct opt opts[256];
@@ -83,32 +95,23 @@ static struct opt opts[256];
 #define DHCPINFORM	8
 #define DHCPFORCERENEW	9
 
-#define OPT_MIN		60 /* RFC 951 */
-
-/* Total option size (excluding end option) is 576 (RFC 2131), minus
- * offset of options (268), minus end option (1).
- */
-#define OPT_MAX		307
-
 /**
  * dhcp_init() - Initialise DHCP options
  */
 void dhcp_init(void)
 {
 	if (opts[1].conf != OPT_USER) 			/* Mask */
-		opts[1] = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+		opts[1] = (struct opt) { 0, 4, 0, OPT_DEFAULT, { 0 }, { 0 } };
 	if (opts[3].conf != OPT_USER) 			/* Router */
-		opts[3] = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+		opts[3] = (struct opt) { 0, 4, 0, OPT_DEFAULT, { 0 }, { 0 } };
 	if (opts[51].conf != OPT_USER) {		/* Lease time */
-		opts[51] = (struct opt) { 0, 4, { 0xff, 0xff, 0xff, 0xff },
-					       0, { 0 }, OPT_DEFAULT };
+		opts[51] = (struct opt) { 0, 4, 0, OPT_DEFAULT, { 0 },
+					  { 0xff, 0xff, 0xff, 0xff } };
 	}
 	/* Type */
-	opts[53] = (struct opt) { 0, 1, {  0 }, 0, { 0 }, OPT_DEFAULT };
-	if (opts[54].conf != OPT_USER) {		/* Server ID */
-		opts[54] = (struct opt) { 0, 4, {  0 }, 0, { 0 },
-							OPT_DEFAULT };
-	}
+	opts[53] = (struct opt) { 0, 1, 0, OPT_DEFAULT, { 0 }, { 0 } };
+	if (opts[54].conf != OPT_USER) 		/* Server ID */
+		opts[54] = (struct opt) { 0, 4, 0, OPT_DEFAULT, { 0 }, { 0 } };
 }
 
 /**
@@ -215,6 +218,11 @@ static const enum dhcp_opt_type dhcp_opt_types[] = {
 	[252] = DHCP_OPT_STR,		/* WPAD URL */
 };
 
+/* Options requiring RFC 3396 concatenation, indexed by code */
+static const bool concat_req[256] = {
+	[81] = true,	/* Client FQDN (RFC 4702, Section 2) */
+};
+
 /**
  * dhcp_opt_parse() - Parse a DHCP option value
  * @code:	DHCP option code
@@ -311,6 +319,9 @@ static int dhcp_opt_parse(uint8_t code, const char *str,
 		return width;
 	case DHCP_OPT_STR:
 		slen = strlen(str);
+
+		if (!concat_req[code] && slen > 255)
+			return -1;
 
 		if (slen > buf_len)
 			return -1;
@@ -447,6 +458,45 @@ static void fill_one(uint8_t *buf, size_t size, int o, int *offset)
 }
 
 /**
+ * fill_split() - Write a split portion of an option into a buffer
+ * @buf:	Buffer to write into
+ * @size:	Usable size of @buf
+ * @o:		Option number (code)
+ * @offset:	Current offset within @buf, updated on write
+ * @data:	Pointer to remaining option data to write
+ * @remaining:	Bytes of option data still to write
+ * @dry_run:	If true, calculate size without writing to @buf
+ *
+ * Return: number of data bytes written (excluding code+length header)
+ */
+static size_t fill_split(uint8_t *buf, size_t size, int o, int *offset,
+			 const uint8_t *data, size_t remaining,
+			 bool dry_run)
+{
+	size_t avail, chunk;
+
+	if (*offset + 2 >= (int)size)
+		return 0;
+
+	avail = size - *offset - 2;
+	chunk = MIN(MIN(remaining, avail), 255);
+	if (!chunk)
+		return 0;
+
+	if (!dry_run) {
+		buf[*offset] = o;
+		buf[*offset + 1] = chunk;
+	}
+	*offset += 2;
+
+	if (!dry_run)
+		memcpy(buf + *offset, data, chunk);
+	*offset += chunk;
+
+	return chunk;
+}
+
+/**
  * enum dhcp_overload - DHCP option overload values (RFC 2132, Section 9.3)
  * @DHCP_OVERLOAD_NONE:		No overload
  * @DHCP_OVERLOAD_FILE:		file field carries options
@@ -457,6 +507,43 @@ enum dhcp_overload {
 	DHCP_OVERLOAD_FILE  = 1,
 	DHCP_OVERLOAD_SNAME = 2,
 };
+
+/**
+ * fill_split_areas() - Write a split option across options, file, and sname areas
+ * @m:			Message to write into
+ * @opt_size:		Usable size of the options area
+ * @o:			Option number (code)
+ * @opt_off:		Current offset within options area, updated on write
+ * @file_off:		Current offset within file area, updated on write
+ * @sname_off:		Current offset within sname area, updated on write
+ * @has_bootfile:	If true, skip the file field
+ * @dry_run:		If true, calculate size without writing
+ *
+ * Return: total data bytes written across all areas
+ */
+static size_t fill_split_areas(struct msg *m, size_t opt_size, int o,
+			       int *opt_off, int *file_off, int *sname_off,
+			       bool has_bootfile, bool dry_run)
+{
+	size_t written;
+
+	written = fill_split(m->o, opt_size, o, opt_off,
+			      opts[o].s, opts[o].slen, dry_run);
+	if (written < (size_t)opts[o].slen && !has_bootfile) {
+		written += fill_split(m->file, sizeof(m->file) - 1, o,
+				      file_off,
+				      opts[o].s + written,
+				      opts[o].slen - written, dry_run);
+	}
+	if (written < (size_t)opts[o].slen) {
+		written += fill_split(m->sname, sizeof(m->sname) - 1, o,
+				      sname_off,
+				      opts[o].s + written,
+				      opts[o].slen - written, dry_run);
+	}
+
+	return written;
+}
 
 /**
  * fill() - Fill options in message, with overload into file/sname if needed
@@ -501,6 +588,40 @@ static int fill(struct msg *m, bool has_bootfile)
 	if (!has_bootfile) {
 		foreach_unsent_opt(o)
 			fill_one(m->file, sizeof(m->file) - 1, o, &file_off);
+	}
+
+	/* RFC 3396: split concatenation-requiring options that didn't fit
+	 * as a single option.  Split order: options, file, sname.
+	 */
+	foreach_unsent_opt(o) {
+		int dry_off, dry_file_off, dry_sname_off;
+		size_t total, written;
+
+		if (!concat_req[o])
+			continue;
+
+		/* Dry run: verify the option fits across all areas */
+		dry_off = offset;
+		dry_file_off = file_off;
+		dry_sname_off = sname_off;
+
+		total = fill_split_areas(m, size, o,
+					 &dry_off, &dry_file_off,
+					 &dry_sname_off,
+					 has_bootfile, true);
+
+		if (total < (size_t)opts[o].slen) {
+			debug("DHCP: skipping option %i (no space)", o);
+			continue;
+		}
+
+		/* Actual write */
+		written = fill_split_areas(m, size, o,
+					   &offset, &file_off, &sname_off,
+					   has_bootfile, false);
+
+		if (written >= (size_t)opts[o].slen)
+			opts[o].sent = 1;
 	}
 
 	/* Report any options that could not be sent */
