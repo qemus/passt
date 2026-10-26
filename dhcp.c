@@ -67,6 +67,12 @@ struct opt {
 
 static struct opt opts[256];
 
+#define foreach_opt(o)	for ((o) = 0; (size_t)(o) < ARRAY_SIZE(opts); (o)++)
+
+#define foreach_unsent_opt(o)						\
+	foreach_opt((o))						\
+		if (opts[(o)].conf != OPT_UNSET && !opts[(o)].sent)
+
 #define DHCPDISCOVER	1
 #define DHCPOFFER	2
 #define DHCPREQUEST	3
@@ -419,16 +425,14 @@ const char *dhcp_opt_to_str(uint8_t code, char *buf, size_t buf_len)
  * @size:	Usable size of @buf (excluding end marker)
  * @o:		Option number
  * @offset:	Current offset within @buf, updated on insertion
- *
- * Return: false if @buf has space to write the option, true otherwise
  */
-static bool fill_one(uint8_t *buf, size_t size, int o, int *offset)
+static void fill_one(uint8_t *buf, size_t size, int o, int *offset)
 {
 	size_t slen = opts[o].slen;
 
 	/* If we don't have space to write the option, then just skip */
 	if (*offset + 2 /* code and length of option */ + slen > size)
-		return true;
+		return;
 
 	buf[*offset] = o;
 	buf[*offset + 1] = slen;
@@ -440,17 +444,33 @@ static bool fill_one(uint8_t *buf, size_t size, int o, int *offset)
 
 	opts[o].sent = 1;
 	*offset += slen;
-	return false;
 }
 
 /**
- * fill() - Fill options in message
- * @m:		Message to fill
+ * enum dhcp_overload - DHCP option overload values (RFC 2132, Section 9.3)
+ * @DHCP_OVERLOAD_NONE:		No overload
+ * @DHCP_OVERLOAD_FILE:		file field carries options
+ * @DHCP_OVERLOAD_SNAME:	sname field carries options
+ */
+enum dhcp_overload {
+	DHCP_OVERLOAD_NONE  = 0,
+	DHCP_OVERLOAD_FILE  = 1,
+	DHCP_OVERLOAD_SNAME = 2,
+};
+
+/**
+ * fill() - Fill options in message, with overload into file/sname if needed
+ * @m:			Message to fill
+ * @has_bootfile:	Reserve file field for boot file name
  *
  * Return: current size of options field
  */
-static int fill(struct msg *m)
+static int fill(struct msg *m, bool has_bootfile)
 {
+	enum dhcp_overload overload = DHCP_OVERLOAD_NONE;
+	int sname_off = 0, file_off = 0;
+	/* Reserve 3 bytes for option 52 (overload) if needed */
+	size_t size = OPT_MAX - 3;
 	int i, o, offset = 0;
 
 	for (o = 0; o < 255; o++)
@@ -460,24 +480,47 @@ static int fill(struct msg *m)
 	 * option 53 at the beginning of the list.
 	 * Put it there explicitly, unless requested via option 55.
 	 */
-	if (opts[55].clen > 0 && !memchr(opts[55].c, 53, opts[55].clen)) {
-		if (fill_one(m->o, OPT_MAX, 53, &offset))
-			debug("DHCP: skipping option 53");
-	}
+	if (opts[55].clen > 0 && !memchr(opts[55].c, 53, opts[55].clen))
+		fill_one(m->o, size, 53, &offset);
 
 	for (i = 0; i < opts[55].clen; i++) {
 		o = opts[55].c[i];
-		if (opts[o].conf != OPT_UNSET) {
-			if (fill_one(m->o, OPT_MAX, o, &offset))
-				debug("DHCP: skipping option %i", o);
-		}
+		if (opts[o].conf != OPT_UNSET)
+			fill_one(m->o, size, o, &offset);
 	}
 
 	for (o = 0; o < 255; o++) {
-		if (opts[o].conf != OPT_UNSET && !opts[o].sent) {
-			if (fill_one(m->o, OPT_MAX, o, &offset))
-				debug("DHCP: skipping option %i", o);
-		}
+		if (opts[o].conf != OPT_UNSET && !opts[o].sent)
+			fill_one(m->o, size, o, &offset);
+	}
+
+	/* Overflow unsent options into sname, then file */
+	foreach_unsent_opt(o)
+		fill_one(m->sname, sizeof(m->sname) - 1, o, &sname_off);
+
+	if (!has_bootfile) {
+		foreach_unsent_opt(o)
+			fill_one(m->file, sizeof(m->file) - 1, o, &file_off);
+	}
+
+	/* Report any options that could not be sent */
+	foreach_unsent_opt(o)
+		debug("DHCP: skipping option %i", o);
+
+	if (sname_off) {
+		m->sname[sname_off] = 255;
+		overload |= DHCP_OVERLOAD_SNAME;
+	}
+
+	if (file_off) {
+		m->file[file_off] = 255;
+		overload |= DHCP_OVERLOAD_FILE;
+	}
+
+	if (overload) {
+		m->o[offset++] = 52;
+		m->o[offset++] = 1;
+		m->o[offset++] = overload;
 	}
 
 	m->o[offset++] = 255;
@@ -770,16 +813,18 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 		}
 	}
 
-	if (!c->no_dhcp_dns_search)
-		opt_set_dns_search(c, sizeof(m->o));
+	if (!c->no_dhcp_dns_search) {
+		/* 3 bytes reserved for option 52 (code, length, value) */
+		opt_set_dns_search(c, OPT_MAX - 3);
+	}
 
 	/* RFC 2132, Section 9.5: put boot file name in the 'file' header
-	 * field.
+	 * field.  Reserve the file field from overload.
 	 */
 	has_bootfile = opts[67].slen > 0 &&
 		       (size_t)opts[67].slen < sizeof(reply.file);
 
-	dlen = offsetof(struct msg, o) + fill(&reply);
+	dlen = offsetof(struct msg, o) + fill(&reply, has_bootfile);
 
 	if (has_bootfile)
 		memcpy(reply.file, opts[67].s, opts[67].slen);
