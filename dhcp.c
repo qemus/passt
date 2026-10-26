@@ -131,28 +131,29 @@ struct msg {
 } __attribute__((__packed__));
 
 /**
- * fill_one() - Fill a single option in message
- * @m:		Message to fill
+ * fill_one() - Fill a single option into a buffer
+ * @buf:	Buffer to write option
+ * @size:	Usable size of @buf (excluding end marker)
  * @o:		Option number
- * @offset:	Current offset within options field, updated on insertion
+ * @offset:	Current offset within @buf, updated on insertion
  *
- * Return: false if m has space to write the option, true otherwise
+ * Return: false if @buf has space to write the option, true otherwise
  */
-static bool fill_one(struct msg *m, int o, int *offset)
+static bool fill_one(uint8_t *buf, size_t size, int o, int *offset)
 {
 	size_t slen = opts[o].slen;
 
 	/* If we don't have space to write the option, then just skip */
-	if (*offset + 2 /* code and length of option */ + slen > OPT_MAX)
+	if (*offset + 2 /* code and length of option */ + slen > size)
 		return true;
 
-	m->o[*offset] = o;
-	m->o[*offset + 1] = slen;
+	buf[*offset] = o;
+	buf[*offset + 1] = slen;
 
 	/* Move to option */
 	*offset += 2;
 
-	memcpy(&m->o[*offset], opts[o].s, slen);
+	memcpy(buf + *offset, opts[o].s, slen);
 
 	opts[o].sent = 1;
 	*offset += slen;
@@ -177,19 +178,19 @@ static int fill(struct msg *m)
 	 * Put it there explicitly, unless requested via option 55.
 	 */
 	if (opts[55].clen > 0 && !memchr(opts[55].c, 53, opts[55].clen))
-		if (fill_one(m, 53, &offset))
-			 debug("DHCP: skipping option 53");
+		if (fill_one(m->o, OPT_MAX, 53, &offset))
+			debug("DHCP: skipping option 53");
 
 	for (i = 0; i < opts[55].clen; i++) {
 		o = opts[55].c[i];
 		if (opts[o].slen != -1)
-			if (fill_one(m, o, &offset))
+			if (fill_one(m->o, OPT_MAX, o, &offset))
 				debug("DHCP: skipping option %i", o);
 	}
 
 	for (o = 0; o < 255; o++) {
 		if (opts[o].slen != -1 && !opts[o].sent)
-			if (fill_one(m, o, &offset))
+			if (fill_one(m->o, OPT_MAX, o, &offset))
 				debug("DHCP: skipping option %i", o);
 	}
 
