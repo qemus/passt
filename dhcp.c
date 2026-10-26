@@ -600,6 +600,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	const struct udphdr *uh;
 	struct msg m_storage;
 	struct msg const *m;
+	bool has_bootfile;
 	struct msg reply;
 	unsigned int i;
 
@@ -772,7 +773,16 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	if (!c->no_dhcp_dns_search)
 		opt_set_dns_search(c, sizeof(m->o));
 
+	/* RFC 2132, Section 9.5: put boot file name in the 'file' header
+	 * field.
+	 */
+	has_bootfile = opts[67].slen > 0 &&
+		       (size_t)opts[67].slen < sizeof(reply.file);
+
 	dlen = offsetof(struct msg, o) + fill(&reply);
+
+	if (has_bootfile)
+		memcpy(reply.file, opts[67].s, opts[67].slen);
 
 	if (m->flags & FLAG_BROADCAST)
 		dst = in4addr_broadcast;

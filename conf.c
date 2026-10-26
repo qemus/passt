@@ -634,7 +634,8 @@ static void usage(const char *name, FILE *f, int status)
 		"    a single, empty option disables the DNS search list\n"
 		"  -H, --hostname NAME 	Hostname to configure client with\n"
 		"  --fqdn NAME		FQDN to configure client with\n"
-		"  --dhcp-opt CODE,VAL	Set DHCP option CODE to VAL\n");
+		"  --dhcp-opt CODE,VAL	Set DHCP option CODE to VAL\n"
+		"  --dhcp-boot FILE	Boot file name for network boot\n");
 	if (strstr(name, "pasta"))
 		FPRINTF(f, "    default: don't use any search list\n");
 	else
@@ -1324,6 +1325,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"chroot-fallback", no_argument,	NULL, 		32 },
 		{"no-pidns",	no_argument,		NULL,		33 },
 		{"dhcp-opt", required_argument,		NULL,		34 },
+		{"dhcp-boot", required_argument,	NULL,		35 },
 		{ 0 },
 	};
 	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
@@ -1589,6 +1591,9 @@ void conf(struct ctx *c, int argc, char **argv)
 			}
 
 			dhcp_set_opt(optcode, p);
+			break;
+		case 35:
+			dhcp_set_opt(67, optarg);
 			break;
 		case 'd':
 			c->debug = 1;

@@ -482,6 +482,13 @@ Only the following option codes are supported (unsupported codes cause an error)
 .RE
 
 .TP
+.BR \-\-dhcp-boot " " \fIfile
+Convenience shorthand for \fB\-\-dhcp-opt\fR 67,\fIfile\fR.
+Sets the boot file name (DHCP option 67) for network boot.
+For UEFI HTTP boot, the vendor class identifier also needs to be set using
+\fB\-\-dhcp-opt\fR 60,HTTPClient.
+
+.TP
 .BR \-t ", " \-\-tcp-ports " " \fIspec
 Configure TCP port forwarding to guest or namespace. \fIspec\fR can be either:
 .RS
