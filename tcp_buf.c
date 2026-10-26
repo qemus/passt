@@ -335,6 +335,9 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 	struct iovec *iov;
 	uint32_t seq;
 
+	if (!mss)
+		return 0;
+
 	/* Set up buffer descriptors we'll fill completely and partially. */
 	fill_bufs = DIV_ROUND_UP(wnd_scaled - already_sent, mss);
 	if (fill_bufs > TCP_FRAMES) {

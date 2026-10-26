@@ -51,8 +51,14 @@ struct tcp_tap_conn {
 
 #define TCP_MSS_BITS			14
 	unsigned int	tap_mss		:TCP_MSS_BITS;
-#define MSS_SET(conn, mss)	(conn->tap_mss = (mss >> (16 - TCP_MSS_BITS)))
-#define MSS_GET(conn)		(conn->tap_mss << (16 - TCP_MSS_BITS))
+
+	/* Clamp non-zero MSS < 4 to 1 to avoid rounding to zero */
+#define MSS_SET(conn, mss)						\
+	(conn->tap_mss = (mss) ? MAX(1, (mss) >> (16 - TCP_MSS_BITS)) : 0)
+
+	/* tap_mss is stored as 1 for any non-zero MSS value <= 4 */
+#define MSS_GET(conn)							\
+	((conn->tap_mss == 1) ? 1 : (conn->tap_mss << (16 - TCP_MSS_BITS)))
 
 #define RTT_EXP_BITS			4
 	unsigned int	rtt_exp		:RTT_EXP_BITS;
