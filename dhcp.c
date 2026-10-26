@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <limits.h>
+#include <errno.h>
 
 #include "util.h"
 #include "ip.h"
@@ -32,15 +33,18 @@
 #include "tap.h"
 #include "log.h"
 #include "dhcp.h"
+#include "parse.h"
 
 /**
  * enum opt_conf - DHCP option configuration
  * @OPT_UNSET:		Option not configured
  * @OPT_DEFAULT:	Option derived from host configuration
+ * @OPT_USER:		Option set via --dhcp-opt command line
  */
 enum opt_conf {
 	OPT_UNSET = 0,
 	OPT_DEFAULT,
+	OPT_USER,
 };
 
 /**
@@ -50,7 +54,7 @@ enum opt_conf {
  * @s:		Option payload from server
  * @clen:	Length of option received from client, -1 if not received
  * @c:		Option payload from client
- * @conf:	Option configuration (unset or default)
+ * @conf:	Option configuration (unset, default, or user)
  */
 struct opt {
 	int sent;
@@ -85,17 +89,20 @@ static struct opt opts[256];
  */
 void dhcp_init(void)
 {
-	/* Mask */
-	opts[1]  = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
-	/* Router */
-	opts[3]  = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
-	/* Lease time */
-	opts[51] = (struct opt) { 0, 4, { 0xff, 0xff, 0xff, 0xff },
-						       0, { 0 }, OPT_DEFAULT };
+	if (opts[1].conf != OPT_USER) 			/* Mask */
+		opts[1] = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+	if (opts[3].conf != OPT_USER) 			/* Router */
+		opts[3] = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+	if (opts[51].conf != OPT_USER) {		/* Lease time */
+		opts[51] = (struct opt) { 0, 4, { 0xff, 0xff, 0xff, 0xff },
+					       0, { 0 }, OPT_DEFAULT };
+	}
 	/* Type */
 	opts[53] = (struct opt) { 0, 1, {  0 }, 0, { 0 }, OPT_DEFAULT };
-	/* Server ID */
-	opts[54] = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+	if (opts[54].conf != OPT_USER) {		/* Server ID */
+		opts[54] = (struct opt) { 0, 4, {  0 }, 0, { 0 },
+							OPT_DEFAULT };
+	}
 }
 
 /**
@@ -139,6 +146,272 @@ struct msg {
 	uint32_t magic;
 	uint8_t o[OPT_MAX + 1 /* End option */ ];
 } __attribute__((__packed__));
+
+/**
+ * enum dhcp_opt_type - DHCP option value types per RFC 2132
+ * @DHCP_OPT_NONE:	Unsupported or unknown option
+ * @DHCP_OPT_STR:	Variable-length string
+ * @DHCP_OPT_IPV4:	Single IPv4 address
+ * @DHCP_OPT_IPV4_LIST:	Multiple IPv4 addresses, comma-separated
+ * @DHCP_OPT_UINT8:	Unsigned 8-bit integer
+ * @DHCP_OPT_UINT16:	Unsigned 16-bit integer
+ * @DHCP_OPT_UINT32:	Unsigned 32-bit integer
+ * @DHCP_OPT_INT32:	Signed 32-bit integer
+ */
+enum dhcp_opt_type {
+	DHCP_OPT_NONE,
+	DHCP_OPT_STR,
+	DHCP_OPT_IPV4,
+	DHCP_OPT_IPV4_LIST,
+	DHCP_OPT_UINT8,
+	DHCP_OPT_UINT16,
+	DHCP_OPT_UINT32,
+	DHCP_OPT_INT32,
+};
+
+/**
+ * dhcp_opt_types - Maps option code to RFC 2132 value type, indexed by code
+ */
+static const enum dhcp_opt_type dhcp_opt_types[] = {
+	[1]   = DHCP_OPT_IPV4,		/* Subnet Mask */
+	[2]   = DHCP_OPT_INT32,	/* Time Offset */
+	[3]   = DHCP_OPT_IPV4_LIST,	/* Router */
+	[4]   = DHCP_OPT_IPV4_LIST,	/* Time Server */
+	[5]   = DHCP_OPT_IPV4_LIST,	/* Name Server */
+	[6]   = DHCP_OPT_IPV4_LIST,	/* Domain Name Server */
+	[7]   = DHCP_OPT_IPV4_LIST,	/* Log Server */
+	[8]   = DHCP_OPT_IPV4_LIST,	/* Cookie Server */
+	[9]   = DHCP_OPT_IPV4_LIST,	/* LPR Server */
+	[10]  = DHCP_OPT_IPV4_LIST,	/* Impress Server */
+	[11]  = DHCP_OPT_IPV4_LIST,	/* Resource Location Server */
+	[12]  = DHCP_OPT_STR,		/* Host Name */
+	[13]  = DHCP_OPT_UINT16,	/* Boot File Size */
+	[15]  = DHCP_OPT_STR,		/* Domain Name */
+	[16]  = DHCP_OPT_IPV4,		/* Swap Server */
+	[17]  = DHCP_OPT_STR,		/* Root Path */
+	[19]  = DHCP_OPT_UINT8,	/* IP Forwarding */
+	[23]  = DHCP_OPT_UINT8,	/* Default IP TTL */
+	[26]  = DHCP_OPT_UINT16,	/* Interface MTU */
+	[28]  = DHCP_OPT_IPV4,		/* Broadcast Address */
+	[37]  = DHCP_OPT_UINT8,	/* TCP Default TTL */
+	[38]  = DHCP_OPT_UINT32,	/* TCP Keepalive Interval */
+	[40]  = DHCP_OPT_STR,		/* NIS Domain Name */
+	[41]  = DHCP_OPT_IPV4_LIST,	/* NIS Servers */
+	[42]  = DHCP_OPT_IPV4_LIST,	/* NTP Servers */
+	[44]  = DHCP_OPT_IPV4_LIST,	/* NetBIOS Name Server */
+	[51]  = DHCP_OPT_UINT32,	/* IP Address Lease Time */
+	[54]  = DHCP_OPT_IPV4,		/* Server Identifier */
+	[58]  = DHCP_OPT_UINT32,	/* Renewal (T1) Time */
+	[59]  = DHCP_OPT_UINT32,	/* Rebinding (T2) Time */
+	[60]  = DHCP_OPT_STR,		/* Vendor Class Identifier */
+	[66]  = DHCP_OPT_STR,		/* TFTP Server Name */
+	[67]  = DHCP_OPT_STR,		/* Bootfile Name */
+	[252] = DHCP_OPT_STR,		/* WPAD URL */
+};
+
+/**
+ * dhcp_opt_parse() - Parse a DHCP option value
+ * @code:	DHCP option code
+ * @str:	Value string from command line
+ * @buf:	Output buffer for binary value
+ * @buf_len:	Size of output buffer
+ *
+ * Return: number of bytes written to @buf, or -1 on error
+ */
+static int dhcp_opt_parse(uint8_t code, const char *str,
+			  uint8_t *buf, size_t buf_len)
+{
+	enum dhcp_opt_type type;
+	unsigned long val;
+	uint8_t width;
+	size_t slen;
+	size_t len;
+	char *end;
+
+	if (code >= ARRAY_SIZE(dhcp_opt_types))
+		return -1;
+
+	type = dhcp_opt_types[code];
+
+	if (!*str)
+		return -1;
+
+	switch (type) {
+	case DHCP_OPT_NONE:
+		return -1;
+	case DHCP_OPT_IPV4:
+	case DHCP_OPT_IPV4_LIST:
+		len = 0;
+
+		do {
+			if (len + sizeof(struct in_addr) > buf_len)
+				return -1;
+
+			if (!parse_ipv4(&str,
+					(struct in_addr *)(buf + len)))
+				return -1;
+
+			len += sizeof(struct in_addr);
+
+			if (type == DHCP_OPT_IPV4)
+				break;
+		} while (parse_literal(&str, ","));
+
+		if (!len || !parse_eoi(str))
+			return -1;
+
+		return len;
+	case DHCP_OPT_UINT8:
+	case DHCP_OPT_UINT16:
+	case DHCP_OPT_UINT32:
+	case DHCP_OPT_INT32:
+		if (type == DHCP_OPT_UINT8)
+			width = 1;
+		else if (type == DHCP_OPT_UINT16)
+			width = 2;
+		else
+			width = 4;
+
+		if (buf_len < width)
+			return -1;
+
+		if (type == DHCP_OPT_INT32) {
+			long sval;
+
+			errno = 0;
+			sval = strtol(str, &end, 0);
+			if (*end || errno ||
+			    sval < INT32_MIN || sval > INT32_MAX)
+				return -1;
+			val = (uint32_t)sval;
+		} else {
+			if (!parse_unsigned(&str, 0, &val) ||
+			    !parse_eoi(str) ||
+			    val >= (1ULL << (width * 8)))
+				return -1;
+		}
+
+		if (type == DHCP_OPT_UINT16) {
+			uint16_t v16 = htons(val);
+			memcpy(buf, &v16, sizeof(v16));
+		} else if (type == DHCP_OPT_UINT32 ||
+			   type == DHCP_OPT_INT32) {
+			uint32_t v32 = htonl(val);
+			memcpy(buf, &v32, sizeof(v32));
+		} else {
+			buf[0] = val;
+		}
+
+		return width;
+	case DHCP_OPT_STR:
+		slen = strlen(str);
+
+		if (slen > buf_len)
+			return -1;
+
+		memcpy(buf, str, slen);
+
+		return slen;
+	}
+
+	return -1;
+}
+
+/**
+ * dhcp_set_opt() - Parse and store a user-specified DHCP option
+ * @code:	DHCP option code
+ * @val_str:	Value string from command line
+ */
+void dhcp_set_opt(uint8_t code, const char *val_str)
+{
+	int ret;
+
+	ret = dhcp_opt_parse(code, val_str, opts[code].s, sizeof(opts[code].s));
+	if (ret < 0)
+		die("Invalid value for DHCP option %u: %s", code, val_str);
+
+	opts[code].slen = ret;
+	opts[code].conf = OPT_USER;
+}
+
+/**
+ * dhcp_opt_to_str() - Render a binary DHCP option value to a printable string
+ * @code:	DHCP option code
+ * @buf:	Output string buffer
+ * @buf_len:	Size of output buffer
+ *
+ * Return: pointer to @buf if option is set, NULL otherwise
+ */
+const char *dhcp_opt_to_str(uint8_t code, char *buf, size_t buf_len)
+{
+	enum dhcp_opt_type type;
+	unsigned int slen;
+	unsigned int i;
+	int off = 0;
+
+	if (opts[code].conf == OPT_UNSET)
+		return NULL;
+
+	assert(code < ARRAY_SIZE(dhcp_opt_types));
+
+	type = dhcp_opt_types[code];
+	slen = opts[code].slen;
+
+	switch (type) {
+	case DHCP_OPT_IPV4:
+	case DHCP_OPT_IPV4_LIST:
+		for (i = 0; i + sizeof(struct in_addr) <= slen;
+		     i += sizeof(struct in_addr)) {
+			if (off) {
+				if (off + 1 >= (int)buf_len)
+					return NULL;
+				buf[off++] = ',';
+			}
+			if (!inet_ntop(AF_INET, opts[code].s + i,
+				       buf + off, buf_len - off))
+				return NULL;
+			off += strlen(buf + off);
+		}
+		return buf;
+	case DHCP_OPT_UINT8:
+	case DHCP_OPT_UINT16:
+	case DHCP_OPT_UINT32: {
+		uint32_t uval = 0;
+
+		if (slen == 1) {
+			uval = opts[code].s[0];
+		} else if (slen == 2) {
+			uint16_t v16;
+			memcpy(&v16, opts[code].s, sizeof(v16));
+			uval = ntohs(v16);
+		} else if (slen == 4) {
+			memcpy(&uval, opts[code].s, sizeof(uval));
+			uval = ntohl(uval);
+		}
+
+		if (snprintf(buf, buf_len, "%u", uval) >= (int)buf_len)
+			return NULL;
+		return buf;
+	}
+	case DHCP_OPT_INT32: {
+		int32_t sval;
+		uint32_t v32;
+
+		assert(slen == 4);
+		memcpy(&v32, opts[code].s, sizeof(v32));
+		sval = (int32_t)ntohl(v32);
+
+		if (snprintf(buf, buf_len, "%d", sval) >= (int)buf_len)
+			return NULL;
+		return buf;
+	}
+	case DHCP_OPT_STR:
+		(void)snprintf(buf, buf_len, "%.*s", slen, opts[code].s);
+		return buf;
+	default:
+		assert(0);
+	}
+}
 
 /**
  * fill_one() - Fill a single option into a buffer
@@ -424,9 +697,14 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	info("    from %s", eth_ntop(m->chaddr, macstr, sizeof(macstr)));
 
 	mask.s_addr = htonl(0xffffffff << (32 - c->ip4.prefix_len));
-	memcpy(opts[1].s,  &mask,                sizeof(mask));
-	memcpy(opts[3].s,  &c->ip4.guest_gw,     sizeof(c->ip4.guest_gw));
-	memcpy(opts[54].s, &c->ip4.our_tap_addr, sizeof(c->ip4.our_tap_addr));
+	if (opts[1].conf == OPT_DEFAULT)
+		memcpy(opts[1].s, &mask, sizeof(mask));
+	if (opts[3].conf == OPT_DEFAULT)
+		memcpy(opts[3].s, &c->ip4.guest_gw, sizeof(c->ip4.guest_gw));
+	if (opts[54].conf == OPT_DEFAULT) {
+		memcpy(opts[54].s, &c->ip4.our_tap_addr,
+		       sizeof(c->ip4.our_tap_addr));
+	}
 
 	/* If the gateway is not on the assigned subnet, send an option 121
 	 * (Classless Static Routing) adding a dummy route to it.
@@ -443,25 +721,30 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 		       &c->ip4.guest_gw, sizeof(c->ip4.guest_gw));
 	}
 
-	if (c->mtu) {
+	if (opts[26].conf != OPT_USER && c->mtu) {
+		uint16_t mtu_n = htons(c->mtu);
+
 		opts[26].slen = 2;
 		opts[26].conf = OPT_DEFAULT;
-		opts[26].s[0] = c->mtu / 256;
-		opts[26].s[1] = c->mtu % 256;
+		memcpy(opts[26].s, &mtu_n, sizeof(mtu_n));
 	}
 
-	for (i = 0, opts[6].slen = 0;
-	     !c->no_dhcp_dns && i < ARRAY_SIZE(c->ip4.dns); i++) {
-		if (IN4_IS_ADDR_UNSPECIFIED(&c->ip4.dns[i]))
-			break;
-		((struct in_addr *)opts[6].s)[i] = c->ip4.dns[i];
-		opts[6].slen += sizeof(uint32_t);
+	if (opts[6].conf != OPT_USER) {
+		opts[6].slen = 0;
+		for (i = 0;
+		     !c->no_dhcp_dns && i < ARRAY_SIZE(c->ip4.dns);
+		     i++) {
+			if (IN4_IS_ADDR_UNSPECIFIED(&c->ip4.dns[i]))
+				break;
+			((struct in_addr *)opts[6].s)[i] = c->ip4.dns[i];
+			opts[6].slen += sizeof(uint32_t);
+		}
+		if (opts[6].slen)
+			opts[6].conf = OPT_DEFAULT;
 	}
-	if (opts[6].slen)
-		opts[6].conf = OPT_DEFAULT;
 
 	opt_len = strlen(c->hostname);
-	if (opt_len > 0) {
+	if (opts[12].conf != OPT_USER && opt_len > 0) {
 		opts[12].slen = opt_len;
 		opts[12].conf = OPT_DEFAULT;
 		memcpy(opts[12].s, &c->hostname, opt_len);

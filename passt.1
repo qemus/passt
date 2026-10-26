@@ -441,6 +441,47 @@ FQDN to configure the client with.
 Send \fIname\fR as Client FQDN: DHCP option 81 and DHCPv6 option 39.
 
 .TP
+.BR \-\-dhcp-opt " " \fICODE\fR,\fIVALUE\fR
+Set DHCP option \fICODE\fR (1\-254) to \fIVALUE\fR. The value format depends
+on the option type and is determined automatically from the option code.
+Multiple IPv4 addresses are comma-separated.
+This option can be specified multiple times. If the same option code is
+given more than once, the last value wins. Options set with
+\fB\-\-dhcp-opt\fR override built-in values.
+.PP
+Examples:
+.nf
+  \-\-dhcp-opt 6,8.8.8.8,4.4.4.4
+  \-\-dhcp-opt 12,myhostname
+.fi
+.PP
+Only the following option codes are supported (unsupported codes cause an error):
+.RS
+.TP
+.B IPv4 address options
+1 (Subnet Mask), 16 (Swap Server), 28 (Broadcast Address),
+54 (Server Identifier)
+.TP
+.B IPv4 address list options (comma-separated)
+3 (Router), 4 (Time Server), 5 (Name Server), 6 (DNS), 7 (Log Server),
+8 (Cookie Server), 9 (LPR Server), 10 (Impress Server),
+11 (Resource Location Server), 41 (NIS Servers),
+42 (NTP Servers), 44 (NetBIOS Name Server)
+.TP
+.B Integer options
+2 (Time Offset, 32-bit), 13 (Boot File Size, 16-bit), 19 (IP Forwarding, 8-bit),
+23 (Default IP TTL, 8-bit), 26 (Interface MTU, 16-bit),
+37 (TCP Default TTL, 8-bit), 38 (TCP Keepalive Interval, 32-bit),
+51 (IP Address Lease Time, 32-bit),
+58 (Renewal Time, 32-bit), 59 (Rebinding Time, 32-bit)
+.TP
+.B String options
+12 (Host Name), 15 (Domain Name), 17 (Root Path), 40 (NIS Domain Name),
+60 (Vendor Class Identifier), 66 (TFTP Server Name),
+67 (Bootfile Name), 252 (WPAD URL)
+.RE
+
+.TP
 .BR \-t ", " \-\-tcp-ports " " \fIspec
 Configure TCP port forwarding to guest or namespace. \fIspec\fR can be either:
 .RS

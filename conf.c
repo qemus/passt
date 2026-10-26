@@ -47,6 +47,7 @@
 #include "lineread.h"
 #include "isolation.h"
 #include "log.h"
+#include "dhcp.h"
 #include "vhost_user.h"
 #include "epoll_ctl.h"
 #include "conf.h"
@@ -632,7 +633,8 @@ static void usage(const char *name, FILE *f, int status)
 		"  -S, --search LIST	Space-separated list, search domains\n"
 		"    a single, empty option disables the DNS search list\n"
 		"  -H, --hostname NAME 	Hostname to configure client with\n"
-		"  --fqdn NAME		FQDN to configure client with\n");
+		"  --fqdn NAME		FQDN to configure client with\n"
+		"  --dhcp-opt CODE,VAL	Set DHCP option CODE to VAL\n");
 	if (strstr(name, "pasta"))
 		FPRINTF(f, "    default: don't use any search list\n");
 	else
@@ -861,6 +863,10 @@ static void conf_print(const struct ctx *c)
 			info("    router: %s",
 			     inet_ntop(AF_INET, &c->ip4.guest_gw,
 				       buf, sizeof(buf)));
+			for (i = 1; i < 255; i++) {
+				if (dhcp_opt_to_str(i, buf, sizeof(buf)))
+					info("    option %u: %s", i, buf);
+			}
 		}
 
 		for (i = 0; i < ARRAY_SIZE(c->ip4.dns); i++) {
@@ -1317,6 +1323,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"conf-path",	required_argument,	NULL,		'c' },
 		{"chroot-fallback", no_argument,	NULL, 		32 },
 		{"no-pidns",	no_argument,		NULL,		33 },
+		{"dhcp-opt", required_argument,		NULL,		34 },
 		{ 0 },
 	};
 	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
@@ -1331,6 +1338,7 @@ void conf(struct ctx *c, int argc, char **argv)
 	unsigned int ifi4 = 0, ifi6 = 0;
 	bool opt_a_is_prefix = false;
 	const char *logfile = NULL;
+	unsigned long optcode;
 	char *runas = NULL;
 	size_t logsize = 0;
 	uint8_t opt_n = 0;
@@ -1566,6 +1574,21 @@ void conf(struct ctx *c, int argc, char **argv)
 				die("--no-pidns is for pasta mode only");
 
 			c->no_pidns = true;
+			break;
+		case 34:
+			p = optarg;
+
+			if (!parse_unsigned(&p, 0, &optcode) ||
+			    !parse_literal(&p, ",")) {
+				die("--dhcp-opt requires CODE,VALUE format");
+			}
+
+			if (optcode < 1 || optcode > 254) {
+				die("DHCP option code must be 1-254: %s",
+				    optarg);
+			}
+
+			dhcp_set_opt(optcode, p);
 			break;
 		case 'd':
 			c->debug = 1;
