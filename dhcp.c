@@ -34,12 +34,23 @@
 #include "dhcp.h"
 
 /**
+ * enum opt_conf - DHCP option configuration
+ * @OPT_UNSET:		Option not configured
+ * @OPT_DEFAULT:	Option derived from host configuration
+ */
+enum opt_conf {
+	OPT_UNSET = 0,
+	OPT_DEFAULT,
+};
+
+/**
  * struct opt - DHCP option
  * @sent:	Convenience flag, set while filling replies
- * @slen:	Length of option defined for server, -1 if not going to be sent
+ * @slen:	Length of option defined for server
  * @s:		Option payload from server
  * @clen:	Length of option received from client, -1 if not received
  * @c:		Option payload from client
+ * @conf:	Option configuration (unset or default)
  */
 struct opt {
 	int sent;
@@ -47,6 +58,7 @@ struct opt {
 	uint8_t s[255];
 	int clen;
 	uint8_t c[255];
+	enum opt_conf conf;
 };
 
 static struct opt opts[256];
@@ -73,19 +85,17 @@ static struct opt opts[256];
  */
 void dhcp_init(void)
 {
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(opts); i++)
-		opts[i].slen = -1;
-
-	opts[1]  = (struct opt) { 0, 4, {     0 }, 0, { 0 }, };	/* Mask */
-	opts[3]  = (struct opt) { 0, 4, {     0 }, 0, { 0 }, };	/* Router */
-	opts[51] = (struct opt) { 0, 4, {  0xff,
-					   0xff,
-					   0xff,
-					   0xff }, 0, { 0 }, };	/* Lease time */
-	opts[53] = (struct opt) { 0, 1, {     0 }, 0, { 0 }, };	/* Type */
-	opts[54] = (struct opt) { 0, 4, {     0 }, 0, { 0 }, };	/* Server ID */
+	/* Mask */
+	opts[1]  = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+	/* Router */
+	opts[3]  = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
+	/* Lease time */
+	opts[51] = (struct opt) { 0, 4, { 0xff, 0xff, 0xff, 0xff },
+						       0, { 0 }, OPT_DEFAULT };
+	/* Type */
+	opts[53] = (struct opt) { 0, 1, {  0 }, 0, { 0 }, OPT_DEFAULT };
+	/* Server ID */
+	opts[54] = (struct opt) { 0, 4, {  0 }, 0, { 0 }, OPT_DEFAULT };
 }
 
 /**
@@ -177,21 +187,24 @@ static int fill(struct msg *m)
 	 * option 53 at the beginning of the list.
 	 * Put it there explicitly, unless requested via option 55.
 	 */
-	if (opts[55].clen > 0 && !memchr(opts[55].c, 53, opts[55].clen))
+	if (opts[55].clen > 0 && !memchr(opts[55].c, 53, opts[55].clen)) {
 		if (fill_one(m->o, OPT_MAX, 53, &offset))
 			debug("DHCP: skipping option 53");
+	}
 
 	for (i = 0; i < opts[55].clen; i++) {
 		o = opts[55].c[i];
-		if (opts[o].slen != -1)
+		if (opts[o].conf != OPT_UNSET) {
 			if (fill_one(m->o, OPT_MAX, o, &offset))
 				debug("DHCP: skipping option %i", o);
+		}
 	}
 
 	for (o = 0; o < 255; o++) {
-		if (opts[o].slen != -1 && !opts[o].sent)
+		if (opts[o].conf != OPT_UNSET && !opts[o].sent) {
 			if (fill_one(m->o, OPT_MAX, o, &offset))
 				debug("DHCP: skipping option %i", o);
+		}
 	}
 
 	m->o[offset++] = 255;
@@ -290,8 +303,8 @@ static void opt_set_dns_search(const struct ctx *c, size_t max_len)
 		}
 	}
 
-	if (!opts[119].slen)
-		opts[119].slen = -1;
+	if (opts[119].slen)
+		opts[119].conf = OPT_DEFAULT;
 }
 
 /**
@@ -389,7 +402,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 		iov_drop_header(data, *olen);
 	}
 
-	opts[80].slen = -1;
+	opts[80].conf = OPT_UNSET;
 	if (opts[53].clen > 0 && opts[53].c[0] == DHCPDISCOVER) {
 		if (opts[80].clen == -1) {
 			info("DHCP: offer to discover");
@@ -398,6 +411,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 			info("DHCP: ack to discover (Rapid Commit)");
 			opts[53].s[0] = DHCPACK;
 			opts[80].slen = 0;
+			opts[80].conf = OPT_DEFAULT;
 		}
 	} else if (opts[53].clen <= 0 || opts[53].c[0] == DHCPREQUEST) {
 		info("%s: ack to request", /* DHCP needs a valid message type */
@@ -421,6 +435,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	    != (c->ip4.guest_gw.s_addr & mask.s_addr)) {
 		/* a.b.c.d/32:0.0.0.0, 0:a.b.c.d */
 		opts[121].slen = 14;
+		opts[121].conf = OPT_DEFAULT;
 		opts[121].s[0] = 32;
 		memcpy(opts[121].s + 1,
 		       &c->ip4.guest_gw, sizeof(c->ip4.guest_gw));
@@ -430,6 +445,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 
 	if (c->mtu) {
 		opts[26].slen = 2;
+		opts[26].conf = OPT_DEFAULT;
 		opts[26].s[0] = c->mtu / 256;
 		opts[26].s[1] = c->mtu % 256;
 	}
@@ -441,12 +457,13 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 		((struct in_addr *)opts[6].s)[i] = c->ip4.dns[i];
 		opts[6].slen += sizeof(uint32_t);
 	}
-	if (!opts[6].slen)
-		opts[6].slen = -1;
+	if (opts[6].slen)
+		opts[6].conf = OPT_DEFAULT;
 
 	opt_len = strlen(c->hostname);
 	if (opt_len > 0) {
 		opts[12].slen = opt_len;
+		opts[12].conf = OPT_DEFAULT;
 		memcpy(opts[12].s, &c->hostname, opt_len);
 	}
 
@@ -463,6 +480,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 			encode_domain_name((char *)opts[81].s + 3, c->fqdn);
 
 			opts[81].slen = opt_len;
+			opts[81].conf = OPT_DEFAULT;
 		} else {
 			debug("DHCP: client FQDN option doesn't fit, skipping");
 		}
