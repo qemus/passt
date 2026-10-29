@@ -536,8 +536,10 @@ int fwd_listen_init(const struct ctx *c)
 /**
  * fwd_listen_switch() - Switch from current to pending rules table
  * @c:		Execution context
+ *
+ * Return: 0 on success, -1 on failure
  */
-void fwd_listen_switch(struct ctx *c)
+int fwd_listen_switch(struct ctx *c)
 {
 	struct fwd_table *tmp[PIF_NUM_TYPES];
 	unsigned i;
@@ -549,9 +551,8 @@ void fwd_listen_switch(struct ctx *c)
 		if (!fwd)
 			continue;
 
-		debug("Flushing %u old %s rules", fwd->count, pif_name(i));
+		debug("Flushing %u %s rules", fwd->count, pif_name(i));
 		fwd_listen_close(fwd);
-		fwd->count = fwd->sock_count = 0;
 	}
 
 	/* Swap active and pending tables */
@@ -563,8 +564,7 @@ void fwd_listen_switch(struct ctx *c)
 	memcpy((void *)c->fwd_pending, &tmp, sizeof(c->fwd_pending));
 
 	/* Start listening on the new tables */
-	if (fwd_listen_init(c) < 0)
-		err("Error switching to new forwarding rules");
+	return fwd_listen_init(c);
 }
 
 /* See enum in kernel's include/net/tcp_states.h */

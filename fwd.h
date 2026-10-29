@@ -61,7 +61,7 @@ int fwd_listen_sync(const struct ctx *c, uint8_t pif,
 		    const struct fwd_scan *tcp, const struct fwd_scan *udp);
 void fwd_listen_close(const struct fwd_table *fwd);
 int fwd_listen_init(const struct ctx *c);
-void fwd_listen_switch(struct ctx *c);
+int fwd_listen_switch(struct ctx *c);
 
 bool nat_inbound(const struct ctx *c, const union inany_addr *addr,
 		 union inany_addr *translated);

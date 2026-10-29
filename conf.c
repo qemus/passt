@@ -2250,7 +2250,12 @@ void conf_handler(struct ctx *c, uint32_t events)
 				       "    ", "");
 		}
 
-		fwd_listen_switch(c);
+		if (fwd_listen_switch(c) < 0) {
+			err("Error switching to new forwarding rules");
+			/* Switch back to old rules (still in c->fwd_pending) */
+			if (fwd_listen_switch(c) < 0)
+				err("Couldn't restore old forwarding rules");
+		}
 	}
 
 	if (events & EPOLLHUP) {
