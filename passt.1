@@ -489,6 +489,37 @@ For UEFI HTTP boot, the vendor class identifier also needs to be set using
 \fB\-\-dhcp-opt\fR 60,HTTPClient.
 
 .TP
+.BR \-\-dhcpv6-opt " " \fICODE\fR,\fIVALUE\fR
+Set DHCPv6 option \fICODE\fR to \fIVALUE\fR.  The value format depends
+on the option type and is determined automatically from the option code.
+Multiple IPv6 addresses are comma-separated.
+This option can be specified multiple times.  If the same option code is
+given more than once, the last value wins.
+.RS
+.TP
+.B String options
+59 (Boot File URL, RFC 5970)
+.TP
+.B Length-prefixed string list options (comma-separated entries)
+15 (User Class, RFC 9915), 60 (Boot File Params, RFC 5970).
+Each comma-separated entry is encoded with a 2-byte length prefix.
+Example: \fB\-\-dhcpv6-opt 15,class1,class2\fR.
+.TP
+.B Vendor class options (ENTERPRISE:DATA format)
+16 (Vendor Class, RFC 9915).
+VALUE is \fIENTERPRISE\fR:\fIDATA\fR where \fIENTERPRISE\fR is the IANA
+Private Enterprise Number and \fIDATA\fR is the vendor class string.
+Example: \fB\-\-dhcpv6-opt 16,0:HTTPClient\fR for UEFI HTTP Boot.
+.TP
+.B IPv6 address list options (comma-separated)
+31 (SNTP Servers)
+.TP
+.B Integer options
+7 (Preference, 8-bit), 32 (Information Refresh Time, 32-bit),
+82 (SOL_MAX_RT, 32-bit), 83 (INF_MAX_RT, 32-bit)
+.RE
+
+.TP
 .BR \-t ", " \-\-tcp-ports " " \fIspec
 Configure TCP port forwarding to guest or namespace. \fIspec\fR can be either:
 .RS

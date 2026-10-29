@@ -31,6 +31,8 @@
 #include "passt.h"
 #include "tap.h"
 #include "log.h"
+#include "inany.h"
+#include "parse.h"
 
 /**
  * struct opt_hdr - DHCPv6 option header
@@ -62,6 +64,11 @@ struct opt_hdr {
 				 sizeof(struct opt_hdr))
 #define OPT_MAX_SIZE		IPV6_MIN_MTU - (sizeof(struct ipv6hdr) + \
 						UDP_MSG_HDR_SIZE)
+
+#define for_each_in6_off(off, start, len)				\
+	for ((off) = (start);						\
+	     (off) + sizeof(struct in6_addr) <= (unsigned int)(len);	\
+	     (off) += sizeof(struct in6_addr))
 
 /**
  * struct opt_client_id - DHCPv6 Client Identifier option
@@ -279,7 +286,351 @@ static struct resp_not_on_link_t {
 };
 
 /**
- * dhcpv6_opt() - Get option from DHCPv6 message
+ * enum dhcpv6_opt_type - DHCPv6 option value types
+ * @DHCPV6_OPT_NONE:		Unsupported or unknown option
+ * @DHCPV6_OPT_STR:		Variable-length string
+ * @DHCPV6_OPT_IPV6:		Single IPv6 address
+ * @DHCPV6_OPT_IPV6_LIST:	Multiple IPv6 addresses, comma-separated
+ * @DHCPV6_OPT_UINT8:		Unsigned 8-bit integer
+ * @DHCPV6_OPT_UINT16:		Unsigned 16-bit integer
+ * @DHCPV6_OPT_UINT32:		Unsigned 32-bit integer
+ * @DHCPV6_OPT_VENDOR_CLASS:	Enterprise number + length-prefixed data
+ * @DHCPV6_OPT_LEN_STR_LIST:	Length-prefixed string list
+ */
+enum dhcpv6_opt_type {
+	DHCPV6_OPT_NONE,
+	DHCPV6_OPT_STR,
+	DHCPV6_OPT_IPV6,
+	DHCPV6_OPT_IPV6_LIST,
+	DHCPV6_OPT_UINT8,
+	DHCPV6_OPT_UINT16,
+	DHCPV6_OPT_UINT32,
+	DHCPV6_OPT_VENDOR_CLASS,
+	DHCPV6_OPT_LEN_STR_LIST,
+};
+
+/**
+ * dhcpv6_opt - Description of DHCPv6 options (value type), indexed by code
+ * RFC 9915 options: 7, 15, 16, 32, 82, 83
+ * RFC 5970 options: 59, 60
+ * RFC 4075 options: 31
+ */
+static const enum dhcpv6_opt_type dhcpv6_opt[] = {
+	[7]   = DHCPV6_OPT_UINT8,		/* Preference */
+	[15]  = DHCPV6_OPT_LEN_STR_LIST,	/* User Class */
+	[16]  = DHCPV6_OPT_VENDOR_CLASS,	/* Vendor Class */
+	[31]  = DHCPV6_OPT_IPV6_LIST,		/* SNTP Servers */
+	[32]  = DHCPV6_OPT_UINT32,		/* Information Refresh Time */
+	[59]  = DHCPV6_OPT_STR,			/* Boot File URL */
+	[60]  = DHCPV6_OPT_LEN_STR_LIST,	/* Boot File Params */
+	[82]  = DHCPV6_OPT_UINT32,		/* SOL_MAX_RT */
+	[83]  = DHCPV6_OPT_UINT32,		/* INF_MAX_RT */
+};
+
+/**
+ * dhcpv6_opt_parse() - Parse a DHCPv6 option value string into binary
+ * @code:	DHCPv6 option code
+ * @str:	Value string from command line
+ * @buf:	Output buffer for binary value
+ * @buf_len:	Size of output buffer
+ *
+ * Return: number of bytes written to @buf, or -1 on error
+ */
+static int dhcpv6_opt_parse(uint16_t code, const char *str,
+			    uint8_t *buf, size_t buf_len)
+{
+	enum dhcpv6_opt_type type;
+	union inany_addr addr;
+	unsigned long val;
+	uint16_t slen_net;
+	sa_family_t af;
+	uint8_t width;
+	uint32_t ent;
+	size_t slen;
+	int len;
+
+	if (!*str)
+		return -1;
+
+	if (code >= ARRAY_SIZE(dhcpv6_opt))
+		return -1;
+
+	type = dhcpv6_opt[code];
+
+	switch (type) {
+	case DHCPV6_OPT_NONE:
+		return -1;
+	case DHCPV6_OPT_IPV6:
+	case DHCPV6_OPT_IPV6_LIST:
+		len = 0;
+
+		do {
+			if (len + sizeof(struct in6_addr) > buf_len)
+				return -1;
+
+			if (!parse_inany_(&str, &addr, &af) || af != AF_INET6)
+				return -1;
+
+			memcpy(buf + len, &addr.a6, sizeof(struct in6_addr));
+			len += sizeof(struct in6_addr);
+
+			if (type == DHCPV6_OPT_IPV6)
+				break;
+		} while (parse_literal(&str, ","));
+
+		if (!len || !parse_eoi(str))
+			return -1;
+
+		return len;
+	case DHCPV6_OPT_UINT8:
+	case DHCPV6_OPT_UINT16:
+	case DHCPV6_OPT_UINT32:
+		if (type == DHCPV6_OPT_UINT8)
+			width = 1;
+		else if (type == DHCPV6_OPT_UINT16)
+			width = 2;
+		else
+			width = 4;
+
+		if (buf_len < width)
+			return -1;
+
+		if (!parse_unsigned(&str, 0, &val) || !parse_eoi(str) ||
+		    val >= (1ULL << (width * 8)))
+			return -1;
+
+		if (type == DHCPV6_OPT_UINT16) {
+			uint16_t v16 = htons(val);
+			memcpy(buf, &v16, sizeof(v16));
+		} else if (type == DHCPV6_OPT_UINT32) {
+			uint32_t v32 = htonl(val);
+			memcpy(buf, &v32, sizeof(v32));
+		} else {
+			buf[0] = val;
+		}
+
+		return width;
+	case DHCPV6_OPT_STR:
+		slen = strlen(str);
+
+		if (slen > buf_len)
+			return -1;
+
+		memcpy(buf, str, slen);
+
+		return slen;
+	case DHCPV6_OPT_VENDOR_CLASS:
+		if (!parse_unsigned(&str, 0, &val) ||
+		    !parse_literal(&str, ":") || val > UINT32_MAX)
+			return -1;
+
+		slen = strlen(str);
+		if (!slen)
+			return -1;
+
+		len = sizeof(uint32_t) + sizeof(uint16_t) + slen;
+		if ((size_t)len > buf_len)
+			return -1;
+
+		ent = htonl(val);
+		memcpy(buf, &ent, sizeof(ent));
+
+		slen_net = htons(slen);
+		memcpy(buf + sizeof(uint32_t), &slen_net, sizeof(slen_net));
+
+		memcpy(buf + sizeof(uint32_t) + sizeof(uint16_t), str, slen);
+
+		return len;
+	case DHCPV6_OPT_LEN_STR_LIST:
+		len = 0;
+
+		while (*str) {
+			slen = strcspn(str, ",");
+			if (!slen)
+				return -1;
+
+			if (len + (int)(sizeof(uint16_t) + slen) > (int)buf_len)
+				return -1;
+
+			slen_net = htons(slen);
+			memcpy(buf + len, &slen_net, sizeof(slen_net));
+			len += sizeof(uint16_t);
+
+			memcpy(buf + len, str, slen);
+			len += slen;
+
+			str += slen;
+			if (*str == ',')
+				str++;
+		}
+
+		if (!len)
+			return -1;
+
+		return len;
+	}
+
+	return -1;
+}
+
+/**
+ * struct dhcpv6_user_opts - User-specified DHCPv6 options from --dhcpv6-opt
+ * @val:	Binary option value in wire format
+ * @len:	Length of @val in bytes, 0 if not set
+ */
+static struct {
+	uint8_t val[UINT16_MAX];
+	int len;
+} dhcpv6_user_opts[ARRAY_SIZE(dhcpv6_opt)];
+
+/**
+ * dhcpv6_opt_to_str() - Render a binary DHCPv6 option value to printable string
+ * @code:	DHCPv6 option code
+ * @buf:	Output string buffer
+ * @buf_len:	Size of output buffer
+ * @off:	Opaque byte offset into option value, caller sets to 0 initially
+ *
+ * Return: pointer to @buf if option data was rendered, NULL when done
+ */
+const char *dhcpv6_opt_to_str(uint16_t code, char *buf, size_t buf_len,
+			      int *off)
+{
+	enum dhcpv6_opt_type type;
+	const int *opt_len;
+	uint8_t *opt_val;
+	uint32_t val = 0;
+	int buf_off = 0;
+	unsigned int i;
+	uint16_t slen;
+
+	if (code >= ARRAY_SIZE(dhcpv6_user_opts))
+		return NULL;
+
+	opt_len = &dhcpv6_user_opts[code].len;
+	if (!*opt_len)
+		return NULL;
+
+	opt_val = dhcpv6_user_opts[code].val;
+	type = dhcpv6_opt[code];
+
+	switch (type) {
+	case DHCPV6_OPT_IPV6:
+	case DHCPV6_OPT_IPV6_LIST:
+		for_each_in6_off(i, *off, *opt_len) {
+			if (buf_off) {
+				if (buf_off + 1 >= (int)buf_len)
+					break;
+				buf[buf_off++] = ',';
+			}
+			if (!inet_ntop(AF_INET6, opt_val + i,
+				       buf + buf_off, buf_len - buf_off))
+				break;
+			buf_off += strlen(buf + buf_off);
+			*off = i + sizeof(struct in6_addr);
+		}
+
+		if (!buf_off)
+			return NULL;
+
+		return buf;
+	case DHCPV6_OPT_UINT8:
+	case DHCPV6_OPT_UINT16:
+	case DHCPV6_OPT_UINT32:
+		if (*off)
+			return NULL;
+
+		if (*opt_len == 1) {
+			val = opt_val[0];
+		} else if (*opt_len == 2) {
+			uint16_t v16;
+			memcpy(&v16, opt_val, sizeof(v16));
+			val = ntohs(v16);
+		} else if (*opt_len == 4) {
+			memcpy(&val, opt_val, sizeof(val));
+			val = ntohl(val);
+		}
+
+		(void)snprintf(buf, buf_len, "%u", val);
+		*off = *opt_len;
+		return buf;
+	case DHCPV6_OPT_STR:
+		if (*off)
+			return NULL;
+
+		(void)snprintf(buf, buf_len, "%.*s", *opt_len, opt_val);
+		*off = *opt_len;
+		return buf;
+	case DHCPV6_OPT_VENDOR_CLASS:
+		if (*off)
+			return NULL;
+
+		if (*opt_len < (int)(sizeof(uint32_t) + sizeof(uint16_t)))
+			return NULL;
+
+		memcpy(&val, opt_val, sizeof(val));
+		memcpy(&slen, opt_val + sizeof(uint32_t), sizeof(slen));
+
+		(void)snprintf(buf, buf_len, "%u:%.*s",
+			       ntohl(val), ntohs(slen),
+			       opt_val + sizeof(uint32_t) + sizeof(uint16_t));
+		*off = *opt_len;
+		return buf;
+	case DHCPV6_OPT_LEN_STR_LIST:
+		if (*off)
+			return NULL;
+
+		i = 0;
+		while (i + sizeof(uint16_t) <= (unsigned int)*opt_len) {
+			memcpy(&slen, opt_val + i, sizeof(slen));
+			slen = ntohs(slen);
+			i += sizeof(uint16_t);
+
+			if (i + slen > (unsigned int)*opt_len)
+				break;
+
+			if (buf_off) {
+				if (buf_off + 1 >= (int)buf_len)
+					return NULL;
+				buf[buf_off++] = ',';
+			}
+			if (buf_off + slen >= (int)buf_len)
+				return NULL;
+			memcpy(buf + buf_off, opt_val + i, slen);
+			buf_off += slen;
+			i += slen;
+		}
+		buf[buf_off] = '\0';
+		*off = *opt_len;
+		return buf;
+	default:
+		return NULL;
+	}
+}
+
+/**
+ * dhcpv6_set_opt() - Parse and store a user-specified DHCPv6 option
+ * @code:	DHCPv6 option code
+ * @val_str:	Value string from command line
+ */
+void dhcpv6_set_opt(uint16_t code, const char *val_str)
+{
+	int ret;
+
+	if (code >= ARRAY_SIZE(dhcpv6_opt) ||
+	    dhcpv6_opt[code] == DHCPV6_OPT_NONE)
+		die("DHCPv6 option %u is not supported", code);
+
+	ret = dhcpv6_opt_parse(code, val_str,
+			       dhcpv6_user_opts[code].val,
+			       sizeof(dhcpv6_user_opts[code].val));
+	if (ret < 0)
+		die("Invalid value for DHCPv6 option %u: %s", code, val_str);
+
+	dhcpv6_user_opts[code].len = ret;
+}
+
+/**
+ * dhcpv6_get_opt() - Get option from DHCPv6 message
  * @data:	Buffer with options, set to matching option on return
  * @type:	Option type to look up, network order
  *
@@ -287,7 +638,7 @@ static struct resp_not_on_link_t {
  *         or false on malformed or missing option and @data is
  *         unmodified.
  */
-static bool dhcpv6_opt(struct iov_tail *data, uint16_t type)
+static bool dhcpv6_get_opt(struct iov_tail *data, uint16_t type)
 {
 	struct iov_tail head = *data;
 	struct opt_hdr o_storage;
@@ -334,13 +685,13 @@ static bool dhcpv6_ia_notonlink(struct iov_tail *data,
 
 	foreach(ia_type, ia_types) {
 		current = *data;
-		while (dhcpv6_opt(&current, *ia_type)) {
+		while (dhcpv6_get_opt(&current, *ia_type)) {
 			ia_base = current;
 			ia = IOV_REMOVE_HEADER(&current, ia_storage);
 			if (!ia || ntohs(ia->hdr.l) < OPT_VSIZE(ia_na))
 				goto notfound;
 
-			while (dhcpv6_opt(&current, OPT_IAAADR)) {
+			while (dhcpv6_get_opt(&current, OPT_IAAADR)) {
 				h = IOV_PEEK_HEADER(&current, h_storage);
 				if (!h || ntohs(h->l) != OPT_VSIZE(ia_addr))
 					goto notfound;
@@ -523,7 +874,7 @@ static size_t dhcpv6_client_fqdn_fill(const struct iov_tail *data,
 	o = (struct opt_client_fqdn *)(buf + offset);
 	o->flags = 0x00;
 	encode_domain_name(o->domain_name, c->fqdn);
-	if (dhcpv6_opt(&current, OPT_CLIENT_FQDN)) {
+	if (dhcpv6_get_opt(&current, OPT_CLIENT_FQDN)) {
 		struct opt_client_fqdn req_opt_storage;
 		struct opt_client_fqdn const *req_opt;
 
@@ -608,19 +959,19 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 		return -1;
 
 	client_id_base = *data;
-	if (dhcpv6_opt(&client_id_base, OPT_CLIENTID))
+	if (dhcpv6_get_opt(&client_id_base, OPT_CLIENTID))
 		client_id = IOV_PEEK_HEADER(&client_id_base, client_id_storage);
 	if (!client_id || ntohs(client_id->l) > OPT_VSIZE(client_id))
 		return -1;
 
 	opt = *data;
-	if (dhcpv6_opt(&opt, OPT_SERVERID))
+	if (dhcpv6_get_opt(&opt, OPT_SERVERID))
 		server_id = IOV_PEEK_HEADER(&opt, server_id_storage);
 	if (server_id && ntohs(server_id->hdr.l) != OPT_VSIZE(server_id))
 		return -1;
 
 	opt = *data;
-	if (dhcpv6_opt(&opt, OPT_IA_NA))
+	if (dhcpv6_get_opt(&opt, OPT_IA_NA))
 		ia = IOV_PEEK_HEADER(&opt, ia_storage);
 	if (ia && ntohs(ia->hdr.l) < MIN(OPT_VSIZE(ia_na), OPT_VSIZE(ia_ta)))
 		return -1;
@@ -654,7 +1005,7 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 		    memcmp(&resp.server_id, server_id, sizeof(resp.server_id)))
 			return -1;
 
-		if (ia || dhcpv6_opt(data, OPT_IA_TA))
+		if (ia || dhcpv6_get_opt(data, OPT_IA_TA))
 			return -1;
 
 		info("DHCPv6: received INFORMATION_REQUEST, sending REPLY");

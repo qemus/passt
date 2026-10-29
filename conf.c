@@ -48,6 +48,7 @@
 #include "isolation.h"
 #include "log.h"
 #include "dhcp.h"
+#include "dhcpv6.h"
 #include "vhost_user.h"
 #include "epoll_ctl.h"
 #include "conf.h"
@@ -658,7 +659,8 @@ static void usage(const char *name, FILE *f, int status)
 		"  -H, --hostname NAME 	Hostname to configure client with\n"
 		"  --fqdn NAME		FQDN to configure client with\n"
 		"  --dhcp-opt CODE,VAL	Set DHCP option CODE to VAL\n"
-		"  --dhcp-boot FILE	Boot file name for network boot\n");
+		"  --dhcp-boot FILE	Boot file name for network boot\n"
+		"  --dhcpv6-opt CODE,VAL	Set DHCPv6 option CODE to VAL\n");
 	if (strstr(name, "pasta"))
 		FPRINTF(f, "    default: don't use any search list\n");
 	else
@@ -827,6 +829,7 @@ enum passt_modes conf_mode(int argc, char *argv[])
  */
 static void conf_print(const struct ctx *c)
 {
+	char optbuf[INANY_ADDRSTRLEN * 2];
 	char buf[INANY_ADDRSTRLEN];
 	const struct guest_addr *a;
 	int i;
@@ -936,7 +939,15 @@ static void conf_print(const struct ctx *c)
 		info("    router: %s",
 		     inet_ntop(AF_INET6, &c->ip6.guest_gw, buf, sizeof(buf)));
 		info("    our link-local: %s",
-		     inet_ntop(AF_INET6, &c->ip6.our_tap_ll, buf, sizeof(buf)));
+		     inet_ntop(AF_INET6, &c->ip6.our_tap_ll,
+			       buf, sizeof(buf)));
+		for (i = 1; i < UINT16_MAX; i++) {
+			int offset = 0;
+
+			while (dhcpv6_opt_to_str(i, optbuf,
+						 sizeof(optbuf), &offset))
+				info("    option %u: %s", i, optbuf);
+		}
 
 dns6:
 		for (i = 0; i < ARRAY_SIZE(c->ip6.dns); i++) {
@@ -1359,6 +1370,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"dhcp-opt", required_argument,		NULL,		34 },
 		{"dhcp-boot", required_argument,	NULL,		35 },
 		{"pass-fds",	no_argument,		NULL,		36 },
+		{"dhcpv6-opt",	required_argument,	NULL,		37 },
 		{ 0 },
 	};
 	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
@@ -1371,6 +1383,7 @@ void conf(struct ctx *c, int argc, char **argv)
 	unsigned long max_mtu = IP_MAX_MTU;
 	struct fqdn *dnss = c->dns_search;
 	unsigned int ifi4 = 0, ifi6 = 0;
+	unsigned long dhcpv6_opt_code;
 	bool opt_a_is_prefix = false;
 	const char *logfile = NULL;
 	unsigned long optcode;
@@ -1633,6 +1646,19 @@ void conf(struct ctx *c, int argc, char **argv)
 			/* --pass-fds was parsed early */
 			if (c->mode != MODE_PASTA)
 				die("--pass-fds is for pasta mode only");
+			break;
+		case 37:
+			p = optarg;
+
+			if (!parse_unsigned(&p, 0, &dhcpv6_opt_code) ||
+			    !parse_literal(&p, ","))
+				die("--dhcpv6-opt requires CODE,VALUE format");
+
+			if (dhcpv6_opt_code == 0 ||
+			    dhcpv6_opt_code > UINT16_MAX)
+				die("Invalid DHCPv6 option code: %s", optarg);
+
+			dhcpv6_set_opt(dhcpv6_opt_code, p);
 			break;
 		case 'd':
 			c->debug = 1;
