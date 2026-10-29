@@ -892,16 +892,57 @@ static size_t dhcpv6_client_fqdn_fill(const struct iov_tail *data,
 }
 
 /**
+ * dhcpv6_user_opts_fill() - Append user-specified options to reply
+ * @buf:	Response message buffer
+ * @offset:	Current offset in buffer
+ * @now:	Current timestamp
+ *
+ * Return: offset after appended user options
+ */
+static size_t dhcpv6_user_opts_fill(char *buf, size_t offset,
+				    const struct timespec *now)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(dhcpv6_user_opts); i++) {
+		int vlen = dhcpv6_user_opts[i].len;
+		struct opt_hdr *hdr;
+
+		if (!vlen)
+			continue;
+
+		if (offset + sizeof(struct opt_hdr) + vlen > OPT_MAX_SIZE) {
+			warn_ratelimit(now,
+				       "DHCPv6: option %u doesn't fit, skipping",
+				       i);
+			continue;
+		}
+
+		hdr = (struct opt_hdr *)(buf + offset);
+		hdr->t = htons(i);
+		hdr->l = htons(vlen);
+		offset += sizeof(struct opt_hdr);
+
+		memcpy(buf + offset, dhcpv6_user_opts[i].val, vlen);
+		offset += vlen;
+	}
+
+	return offset;
+}
+
+/**
  * dhcpv6() - Check if this is a DHCPv6 message, reply as needed
  * @c:		Execution context
  * @data:	Single packet starting from UDP header
  * @saddr:	Source IPv6 address of original message
  * @daddr:	Destination IPv6 address of original message
+ * @now:	Current timestamp
  *
  * Return: 0 if it's not a DHCPv6 message, 1 if handled, -1 on failure
  */
 int dhcpv6(struct ctx *c, struct iov_tail *data,
-	   const struct in6_addr *saddr, const struct in6_addr *daddr)
+	   const struct in6_addr *saddr, const struct in6_addr *daddr,
+	   const struct timespec *now)
 {
 	const struct opt_server_id *server_id = NULL;
 	const struct opt_hdr *client_id = NULL;
@@ -1040,6 +1081,7 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 	    sizeof(struct opt_hdr) + ntohs(client_id->l);
 	n = dhcpv6_dns_fill(c, (char *)&resp, n);
 	n = dhcpv6_client_fqdn_fill(data, c, (char *)&resp, n);
+	n = dhcpv6_user_opts_fill((char *)&resp, n, now);
 
 	resp.hdr.xid = mh->xid;
 

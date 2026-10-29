@@ -1045,7 +1045,7 @@ resume:
 		if (proto == IPPROTO_UDP) {
 			struct iov_tail uh_data = data;
 
-			if (dhcpv6(c, &uh_data, saddr, daddr))
+			if (dhcpv6(c, &uh_data, saddr, daddr, now))
 				continue;
 		}
 
