@@ -94,6 +94,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref,
 		struct icmphdr *ih4 = (struct icmphdr *)buf;
 
 		if (sr.sa_family != AF_INET || (size_t)n < sizeof(*ih4) ||
+		    (size_t)n > USHRT_MAX - ETH_HLEN - sizeof(struct iphdr) ||
 		    ih4->type != ICMP_ECHOREPLY)
 			goto unexpected;
 
@@ -104,6 +105,7 @@ void icmp_sock_handler(const struct ctx *c, union epoll_ref ref,
 		struct icmp6hdr *ih6 = (struct icmp6hdr *)buf;
 
 		if (sr.sa_family != AF_INET6 || (size_t)n < sizeof(*ih6) ||
+		    (size_t)n > USHRT_MAX - ETH_HLEN - sizeof(struct ipv6hdr) ||
 		    ih6->icmp6_type != ICMPV6_ECHO_REPLY)
 			goto unexpected;
 
