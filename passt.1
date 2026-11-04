@@ -814,6 +814,11 @@ of local traffic in pasta\fR in the \fBNOTES\fR for more details.
 Do not create a tap device in the namespace. In this mode, \fIpasta\fR only
 forwards loopback traffic between namespaces.
 
+.TP
+.BR \-\-pass\-fds
+Preserve all open file descriptors and pass them to the spawned command.
+This option may only be used when \fBpasta\fR spawns a command.
+
 .SH EXAMPLES
 
 .SS \fBpasta

@@ -753,7 +753,8 @@ pasta_opts:
 		"			Don't copy all addresses to namespace\n"
 		"  --ns-mac-addr ADDR	Set MAC address on tap interface\n"
 		"  --no-splice		Disable inbound socket splicing\n"
-		"  --splice-only	Only enable loopback forwarding\n");
+		"  --splice-only	Only enable loopback forwarding\n"
+		"  --pass-fds		Preserve open file descriptors\n");
 
 	passt_exit(status);
 }
@@ -1144,35 +1145,38 @@ static void conf_sock_listen(const struct ctx *c)
 }
 
 /**
- * conf_tap_fd() - Read tap fd as supplied by -F command line option
+ * conf_fds() - Read fds as supplied by -F/--fd and --pass-fds options
+ * @c:		Execution context
  * @argc:	Argument count
  * @argv:	Command line options
- *
- * Return: fd number from --fd option, or -1 if not supplied
  */
-int conf_tap_fd(int argc, char **argv)
+void conf_fds(struct ctx *c, int argc, char **argv)
 {
-	const struct option optfd[] = {	{ "fd", required_argument, NULL, 'F' },
-					{ 0 }, };
-	const char *fdarg = NULL, *p;
-	unsigned long val;
+	const struct option opt[] = {
+		{ "fd",       required_argument, NULL, 'F' },
+		{ "pass-fds", no_argument,       NULL, 2 },
+		{ 0 },
+	};
 	int name;
 
+	c->fd_tap = -1;
+	c->pass_fds = false;
 	optind = 0;
 	do {
-		name = getopt_long(argc, argv, "-:F:", optfd, NULL);
-		if (name == 'F')
-			fdarg = optarg;
+		name = getopt_long(argc, argv, "-:F:", opt, NULL);
+		if (name == 'F') {
+			const char *p = optarg;
+			unsigned long val;
+
+			if (!parse_unsigned(&p, 0, &val) || !parse_eoi(p) ||
+			    val > INT_MAX)
+				die("Invalid --fd: %s", optarg);
+
+			c->fd_tap = (int)val;
+		} else if (name == 2) {
+			c->pass_fds = true;
+		}
 	} while (name != -1);
-
-	if (!fdarg)
-		return -1;
-
-	p = fdarg;
-	if (!parse_unsigned(&p, 0, &val) || !parse_eoi(p) || val > INT_MAX)
-		die("Invalid --fd: %s", fdarg);
-
-	return val;
 }
 
 /**
@@ -1326,6 +1330,7 @@ void conf(struct ctx *c, int argc, char **argv)
 		{"no-pidns",	no_argument,		NULL,		33 },
 		{"dhcp-opt", required_argument,		NULL,		34 },
 		{"dhcp-boot", required_argument,	NULL,		35 },
+		{"pass-fds",	no_argument,		NULL,		36 },
 		{ 0 },
 	};
 	const char *optstring = "+dqfel:hs:c:F:I:p:P:m:a:n:M:g:i:o:D:S:H:461t:u:T:U:";
@@ -1595,6 +1600,11 @@ void conf(struct ctx *c, int argc, char **argv)
 		case 35:
 			dhcp_set_opt(67, optarg);
 			break;
+		case 36:
+			/* --pass-fds was parsed early */
+			if (c->mode != MODE_PASTA)
+				die("--pass-fds is for pasta mode only");
+			break;
 		case 'd':
 			c->debug = 1;
 			c->quiet = 0;
@@ -1631,7 +1641,7 @@ void conf(struct ctx *c, int argc, char **argv)
 			c->fd_control_listen = c->fd_control = -1;
 			break;
 		case 'F':
-			/* --fd was parsed early and c->fd_tap set in main() */
+			/* --fd was parsed early */
 			c->one_off = true;
 			*c->sock_path = 0;
 			break;
@@ -1956,6 +1966,9 @@ void conf(struct ctx *c, int argc, char **argv)
 		conf_pasta_ns(&netns_only, userns, netns, optind, argc, argv);
 	else if (optind != argc)
 		die("Extra non-option argument: %s", argv[optind]);
+
+	if (c->pass_fds && *netns)
+		die("--pass-fds can only be used when spawning a command");
 
 	if (c->no_pidns && *netns)
 		die("--no-pidns is incompatible with PID or --netns");

@@ -345,7 +345,7 @@ int main(int argc, char **argv)
 	arch_avx2_exec(argv);
 
 	isolate_initial();
-	c->fd_tap = isolate_fds(argc, argv);
+	isolate_fds(c, argc, argv);
 
 	if ((devnull_fd = open("/dev/null", O_RDWR | O_CLOEXEC)) < 0)
 		die_perror("Failed to open /dev/null");
