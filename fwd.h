@@ -79,5 +79,9 @@ void fwd_neigh_table_free(const struct ctx *c,
 void fwd_neigh_mac_get(const struct ctx *c, const union inany_addr *addr,
 		       uint8_t *mac);
 void fwd_neigh_table_init(const struct ctx *c);
+void fwd_set_addr(struct ctx *c, const union inany_addr *addr,
+		  uint8_t flags, int prefix_len);
+const struct guest_addr *fwd_get_addr(const struct ctx *c, sa_family_t af,
+				      bool global, uint8_t flags);
 
 #endif /* FWD_H */

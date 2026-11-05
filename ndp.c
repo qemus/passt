@@ -257,7 +257,6 @@ static void ndp_ra(const struct ctx *c, const struct in6_addr *dst)
 			.valid_lifetime		= ~0U,
 			.pref_lifetime		= ~0U,
 		},
-		.prefix = c->ip6.addr,
 		.source_ll = {
 			.header = {
 				.type		= OPT_SRC_L2_ADDR,
@@ -265,7 +264,14 @@ static void ndp_ra(const struct ctx *c, const struct in6_addr *dst)
 			},
 		},
 	};
+	const struct guest_addr *a;
 	unsigned char *ptr = NULL;
+
+	a = fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY);
+	if (!a)
+		return;
+
+	ra.prefix = a->addr.a6;
 
 	ptr = &ra.var[0];
 
@@ -460,6 +466,7 @@ first:
  */
 void ndp_send_init_req(const struct ctx *c)
 {
+	const struct guest_addr *a;
 	struct ndp_ns ns = {
 		.ih = {
 			.icmp6_type		= NS,
@@ -468,8 +475,14 @@ void ndp_send_init_req(const struct ctx *c)
 			.icmp6_solicited	= 0, /* Reserved */
 			.icmp6_override		= 0, /* Reserved */
 		},
-		.target_addr = c->ip6.addr
+		.target_addr = IN6ADDR_ANY_INIT
 	};
+
+	a = fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY);
+	if (!a)
+		return;
+
+	ns.target_addr = a->addr.a6;
 	debug("Sending initial NDP NS request for guest MAC address");
-	ndp_send(c, &c->ip6.addr, &ns, sizeof(ns));
+	ndp_send(c, &a->addr.a6, &ns, sizeof(ns));
 }

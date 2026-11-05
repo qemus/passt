@@ -1005,8 +1005,12 @@ resume:
 				c->ip6.addr_seen = *saddr;
 			}
 
-			if (IN6_IS_ADDR_UNSPECIFIED(&c->ip6.addr))
-				c->ip6.addr = *saddr;
+			if (!fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY) &&
+			    !fwd_get_addr(c, AF_INET6, false, CONF_ADDR_ANY)) {
+				union inany_addr addr = { .a6 = *saddr };
+
+				fwd_set_addr(c, &addr, CONF_ADDR_GEN, 64);
+			}
 		} else if (!c->ip6.addr_fixed &&
 			   !IN6_IS_ADDR_UNSPECIFIED(saddr)) {
 			c->ip6.addr_seen = *saddr;

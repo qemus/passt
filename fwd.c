@@ -243,6 +243,62 @@ void fwd_neigh_table_init(const struct ctx *c)
 		fwd_neigh_table_update(c, &mga, c->our_tap_mac, true);
 }
 
+/**
+ * fwd_set_addr() - Add or update an address in the unified address array
+ * @c:		Execution context
+ * @addr:	Address to add (IPv4-mapped or IPv6)
+ * @flags:	CONF_ADDR_* flags for this address
+ * @prefix_len:	Prefix length in IPv6 format (96-128 for IPv4-mapped)
+ *
+ * Find the first existing entry of the same address family and
+ * overwrite it, or create a new one if none exists
+ */
+void fwd_set_addr(struct ctx *c, const union inany_addr *addr,
+		  uint8_t flags, int prefix_len)
+{
+	struct guest_addr *a;
+
+	assert(flags);
+
+	for_each_addr(a, c->addrs, c->addr_count, inany_af(addr))
+		goto found;
+
+	if (c->addr_count >= MAX_GUEST_ADDRS)
+		return;
+
+	a = &c->addrs[c->addr_count++];
+
+found:
+	a->addr = *addr;
+	a->prefix_len = prefix_len;
+	a->flags = flags;
+}
+
+/**
+ * fwd_get_addr() - Get guest address entry matching criteria
+ * @c:		Execution context
+ * @af:		Address family (AF_INET, AF_INET6, or AF_UNSPEC for any)
+ * @global:	If true, match global only; if false, match link-local only
+ * @flags:	Required provenance flags (any-match), 0 for any provenance
+ *
+ * Return: first address entry matching criteria, or NULL
+ */
+const struct guest_addr *fwd_get_addr(const struct ctx *c, sa_family_t af,
+				      bool global, uint8_t flags)
+{
+	const struct guest_addr *a;
+
+	for_each_addr(a, c->addrs, c->addr_count, af) {
+		if (inany_is_linklocal6(&a->addr) == global)
+			continue;
+		if (!(a->flags & flags))
+			continue;
+		return a;
+	}
+
+	return NULL;
+}
+
 /* Forwarding table storage, generally accessed via pointers in struct ctx */
 static struct fwd_table fwd_in;
 static struct fwd_table fwd_out;
@@ -799,8 +855,11 @@ static bool is_dns_flow(uint8_t proto, const struct flowside *ini)
  *         translation, false otherwise
  */
 static bool fwd_guest_accessible4(const struct ctx *c,
-				    const struct in_addr *addr)
+				  const struct in_addr *addr)
 {
+	const struct guest_addr *a;
+	const struct in_addr *a4;
+
 	if (IN4_IS_ADDR_LOOPBACK(addr))
 		return false;
 
@@ -815,7 +874,9 @@ static bool fwd_guest_accessible4(const struct ctx *c,
 	/* For IPv4, addr_seen is initialised to addr, so is always a valid
 	 * address
 	 */
-	if (IN4_ARE_ADDR_EQUAL(addr, &c->ip4.addr) ||
+	a = fwd_get_addr(c, AF_INET, true, CONF_ADDR_ANY);
+	a4 = a ? inany_v4(&a->addr) : NULL;
+	if ((a4 && IN4_ARE_ADDR_EQUAL(addr, a4)) ||
 	    IN4_ARE_ADDR_EQUAL(addr, &c->ip4.addr_seen))
 		return false;
 
@@ -833,10 +894,13 @@ static bool fwd_guest_accessible4(const struct ctx *c,
 static bool fwd_guest_accessible6(const struct ctx *c,
 				  const struct in6_addr *addr)
 {
+	const struct guest_addr *a;
+
 	if (IN6_IS_ADDR_LOOPBACK(addr))
 		return false;
 
-	if (IN6_ARE_ADDR_EQUAL(addr, &c->ip6.addr))
+	a = fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY);
+	if (a && IN6_ARE_ADDR_EQUAL(addr, &a->addr.a6))
 		return false;
 
 	/* For IPv6, addr_seen starts unspecified, because we don't know what LL
@@ -881,16 +945,21 @@ static bool fwd_guest_accessible(const struct ctx *c,
 static void nat_outbound(const struct ctx *c, const union inany_addr *addr,
 			 union inany_addr *translated)
 {
-	if (inany_equals4(addr, &c->ip4.map_host_loopback))
+	const struct guest_addr *ga;
+
+	if (inany_equals4(addr, &c->ip4.map_host_loopback)) {
 		*translated = inany_loopback4;
-	else if (inany_equals6(addr, &c->ip6.map_host_loopback))
+	} else if (inany_equals6(addr, &c->ip6.map_host_loopback)) {
 		*translated = inany_loopback6;
-	else if (inany_equals4(addr, &c->ip4.map_guest_addr))
-		*translated = inany_from_v4(c->ip4.addr);
-	else if (inany_equals6(addr, &c->ip6.map_guest_addr))
-		translated->a6 = c->ip6.addr;
-	else
+	} else if (inany_equals4(addr, &c->ip4.map_guest_addr)) {
+		ga = fwd_get_addr(c, AF_INET, true, CONF_ADDR_ANY);
+		*translated = ga ? ga->addr : inany_any4;
+	} else if (inany_equals6(addr, &c->ip6.map_guest_addr)) {
+		ga = fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY);
+		translated->a6 = ga ? ga->addr.a6 : in6addr_any;
+	} else {
 		*translated = *addr;
+	}
 }
 
 /**
@@ -995,16 +1064,23 @@ bool nat_inbound(const struct ctx *c, const union inany_addr *addr,
 	} else if (!IN6_IS_ADDR_UNSPECIFIED(&c->ip6.map_host_loopback) &&
 		   inany_equals6(addr, &in6addr_loopback)) {
 		translated->a6 = c->ip6.map_host_loopback;
-	} else if (!IN4_IS_ADDR_UNSPECIFIED(&c->ip4.map_guest_addr) &&
-		   inany_equals4(addr, &c->ip4.addr)) {
-		*translated = inany_from_v4(c->ip4.map_guest_addr);
-	} else if (!IN6_IS_ADDR_UNSPECIFIED(&c->ip6.map_guest_addr) &&
-		   inany_equals6(addr, &c->ip6.addr)) {
-		translated->a6 = c->ip6.map_guest_addr;
-	} else if (fwd_guest_accessible(c, addr)) {
-		*translated = *addr;
 	} else {
-		return false;
+		const struct guest_addr *ga4, *ga6;
+
+		ga4 = fwd_get_addr(c, AF_INET, true, CONF_ADDR_ANY);
+		ga6 = fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY);
+
+		if (!IN4_IS_ADDR_UNSPECIFIED(&c->ip4.map_guest_addr) &&
+		    ga4 && inany_equals(addr, &ga4->addr)) {
+			*translated = inany_from_v4(c->ip4.map_guest_addr);
+		} else if (!IN6_IS_ADDR_UNSPECIFIED(&c->ip6.map_guest_addr) &&
+			   ga6 && inany_equals(addr, &ga6->addr)) {
+			translated->a6 = c->ip6.map_guest_addr;
+		} else if (fwd_guest_accessible(c, addr)) {
+			*translated = *addr;
+		} else {
+			return false;
+		}
 	}
 
 	return true;

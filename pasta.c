@@ -299,23 +299,32 @@ void pasta_start_ns(struct ctx *c, int argc, char *argv[])
  *
  * Return: 0 on success, negative error code on failure
  */
-static int pasta_conf_addrs(struct ctx *c, sa_family_t af, int ifi,
+static int pasta_conf_addrs(const struct ctx *c, sa_family_t af, int ifi,
 			    bool no_copy)
 {
+	const struct guest_addr *a;
+
 	if (!ifi)
 		return 0;
 
 	if (!no_copy)
 		return nl_addr_dup(nl_sock, ifi, nl_sock_ns, c->pasta_ifi, af);
 
-	if (af == AF_INET && !IN4_IS_ADDR_UNSPECIFIED(&c->ip4.addr))
-		return nl_addr_set(nl_sock_ns, c->pasta_ifi, AF_INET,
-				   &c->ip4.addr, c->ip4.prefix_len);
-	if (af == AF_INET6 && !IN6_IS_ADDR_UNSPECIFIED(&c->ip6.addr))
-		return nl_addr_set(nl_sock_ns, c->pasta_ifi, AF_INET6,
-				   &c->ip6.addr, 64);
+	a = fwd_get_addr(c, af, true, CONF_ADDR_ANY);
+	if (!a)
+		return 0;
 
-	return 0;
+	if (af == AF_INET) {
+		const struct in_addr *a4;
+		int plen = 0;
+
+		a4 = inany_prefix_v4(&a->addr, a->prefix_len, &plen);
+		return nl_addr_set(nl_sock_ns, c->pasta_ifi, AF_INET,
+				   a4, plen);
+	}
+
+	return nl_addr_set(nl_sock_ns, c->pasta_ifi, AF_INET6,
+			   &a->addr.a6, a->prefix_len);
 }
 
 /**

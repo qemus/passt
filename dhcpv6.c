@@ -318,7 +318,7 @@ static bool dhcpv6_opt(struct iov_tail *data, uint16_t type)
  *         false otherwise and @data is unmodified
  */
 static bool dhcpv6_ia_notonlink(struct iov_tail *data,
-				struct in6_addr *la)
+				const struct in6_addr *la)
 {
 	int ia_types[2] = { OPT_IA_NA, OPT_IA_TA };
 	struct opt_ia_addr opt_addr_storage;
@@ -567,6 +567,7 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 	struct opt_hdr client_id_storage;
 	/* cppcheck-suppress [variableScope,unmatchedSuppression] */
 	struct opt_ia_na ia_storage;
+	const struct guest_addr *a;
 	const struct in6_addr *src;
 	struct msg_hdr mh_storage;
 	const struct msg_hdr *mh;
@@ -582,6 +583,15 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 		return 0;
 
 	if (c->no_dhcpv6)
+		return 1;
+
+	/* If no address is available, drop all messages rather than sending a
+	 * bogus address. Information-request messages could ideally still be
+	 * answered, but since we unconditionally include an IA_NA option in all
+	 * replies (RFC 9915, Appendix B.), dropping them is safer.
+	 */
+	a = fwd_get_addr(c, AF_INET6, true, CONF_ADDR_ANY);
+	if (!a)
 		return 1;
 
 	if (!IN6_IS_ADDR_MULTICAST(daddr))
@@ -627,7 +637,7 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 		if (mh->type == TYPE_CONFIRM && server_id)
 			return -1;
 
-		if (dhcpv6_ia_notonlink(data, &c->ip6.addr)) {
+		if (dhcpv6_ia_notonlink(data, &a->addr.a6)) {
 
 			dhcpv6_send_ia_notonlink(c, saddr, data,
 						 &client_id_base,
@@ -667,6 +677,7 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 	default:
 		return -1;
 	}
+
 	if (ia)
 		resp.ia_na.iaid = ((struct opt_ia_na *)ia)->iaid;
 
@@ -681,8 +692,9 @@ int dhcpv6(struct ctx *c, struct iov_tail *data,
 
 	resp.hdr.xid = mh->xid;
 
+	resp.ia_addr.addr = a->addr.a6;
 	tap_udp6_send(c, src, 547, saddr, 546, mh->xid, &resp, n);
-	c->ip6.addr_seen = c->ip6.addr;
+	c->ip6.addr_seen = a->addr.a6;
 
 	return 1;
 }
@@ -705,6 +717,4 @@ void dhcpv6_init(const struct ctx *c)
 	       c->our_tap_mac, sizeof(c->our_tap_mac));
 	memcpy(resp_not_on_link.server_id.duid_lladdr,
 	       c->our_tap_mac, sizeof(c->our_tap_mac));
-
-	resp.ia_addr.addr	= c->ip6.addr;
 }

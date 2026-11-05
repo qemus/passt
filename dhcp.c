@@ -754,7 +754,9 @@ static void opt_set_dns_search(const struct ctx *c, size_t max_len)
 int dhcp(const struct ctx *c, struct iov_tail *data)
 {
 	char macstr[ETH_ADDRSTRLEN];
+	const struct guest_addr *a;
 	size_t mlen, dlen, opt_len;
+	const struct in_addr *addr;
 	struct in_addr mask, dst;
 	struct ethhdr eh_storage;
 	struct iphdr iph_storage;
@@ -767,6 +769,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	bool has_bootfile;
 	struct msg reply;
 	unsigned int i;
+	int plen;
 
 	eh = IOV_REMOVE_HEADER(data, eh_storage);
 	iph = IOV_PEEK_HEADER(data, iph_storage);
@@ -796,6 +799,15 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	    m->op != BOOTREQUEST)
 		return -1;
 
+	a = fwd_get_addr(c, AF_INET, true, CONF_ADDR_USER);
+	if (!a)
+		a = fwd_get_addr(c, AF_INET, true, CONF_ADDR_ANY);
+	if (!a)
+		return -1;
+
+	addr = inany_prefix_v4(&a->addr, a->prefix_len, &plen);
+	assert(addr);
+
 	reply.op		= BOOTREPLY;
 	reply.htype		= m->htype;
 	reply.hlen		= m->hlen;
@@ -804,7 +816,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	reply.secs		= 0;
 	reply.flags		= m->flags;
 	reply.ciaddr		= m->ciaddr;
-	reply.yiaddr		= c->ip4.addr;
+	reply.yiaddr		= *addr;
 	reply.siaddr		= 0;
 	reply.giaddr		= m->giaddr;
 	memcpy(&reply.chaddr,	m->chaddr,	sizeof(reply.chaddr));
@@ -861,7 +873,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 
 	info("    from %s", eth_ntop(m->chaddr, macstr, sizeof(macstr)));
 
-	mask.s_addr = htonl(0xffffffff << (32 - c->ip4.prefix_len));
+	mask.s_addr = IN4_MASK(plen);
 	if (opts[1].conf == OPT_DEFAULT)
 		memcpy(opts[1].s, &mask, sizeof(mask));
 	if (opts[3].conf == OPT_DEFAULT)
@@ -874,7 +886,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	/* If the gateway is not on the assigned subnet, send an option 121
 	 * (Classless Static Routing) adding a dummy route to it.
 	 */
-	if ((c->ip4.addr.s_addr & mask.s_addr)
+	if ((addr->s_addr & mask.s_addr)
 	    != (c->ip4.guest_gw.s_addr & mask.s_addr)) {
 		/* a.b.c.d/32:0.0.0.0, 0:a.b.c.d */
 		opts[121].slen = 14;
@@ -953,7 +965,7 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	if (m->flags & FLAG_BROADCAST)
 		dst = in4addr_broadcast;
 	else
-		dst = c->ip4.addr;
+		dst = *addr;
 
 	tap_udp4_send(c, c->ip4.our_tap_addr, 67, dst, 68, &reply, dlen);
 

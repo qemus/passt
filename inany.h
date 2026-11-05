@@ -104,6 +104,36 @@ static inline struct in_addr *inany_v4(const union inany_addr *addr)
 	return (struct in_addr *)&addr->v4mapped.a4;
 }
 
+/** inany_prefix_v4() - Extract IPv4 address and prefix length from inany
+ * @addr:	IPv4 (as mapped) or IPv6 address
+ * @prefix_len:	Prefix length in IPv6 format (96-128 for IPv4)
+ * @v4_plen:	Set to IPv4 prefix length (0-32) on success
+ *
+ * Return: IPv4 address if @addr is IPv4, NULL otherwise
+ */
+static inline struct in_addr *inany_prefix_v4(const union inany_addr *addr,
+					      int prefix_len, int *v4_plen)
+{
+	struct in_addr *a4 = inany_v4(addr);
+
+	if (!a4)
+		return NULL;
+
+	*v4_plen = prefix_len - 96;
+
+	return a4;
+}
+
+/** inany_af() - Get address family of IPv[46] address
+ * @addr:	IPv4 or IPv6 address
+ *
+ * Return: AF_INET for IPv4, AF_INET6 for IPv6
+ */
+static inline sa_family_t inany_af(const union inany_addr *addr)
+{
+	return inany_v4(addr) ? AF_INET : AF_INET6;
+}
+
 /** inany_default_prefix_len() - Get default prefix length for address
  * @addr:	IPv4 or iPv6 address
  *
@@ -112,9 +142,9 @@ static inline struct in_addr *inany_v4(const union inany_addr *addr)
  */
 static inline int inany_default_prefix_len(const union inany_addr *addr)
 {
-	const struct in_addr *v4 = inany_v4(addr);
+	const struct in_addr *a4 = inany_v4(addr);
 
-	return v4 ? ip4_class_prefix_len(v4) + 96 : 64;
+	return a4 ? ip4_class_prefix_len(a4) + 96 : 64;
 }
 
 /** inany_equals - Compare two IPv[46] addresses

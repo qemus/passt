@@ -41,6 +41,9 @@
 static bool ignore_arp(const struct ctx *c,
 		       const struct arphdr *ah, const struct arpmsg *am)
 {
+	const struct guest_addr *a;
+	const struct in_addr *a4;
+
 	if (ah->ar_hrd != htons(ARPHRD_ETHER)	||
 	    ah->ar_pro != htons(ETH_P_IP)	||
 	    ah->ar_hln != ETH_ALEN		||
@@ -54,7 +57,11 @@ static bool ignore_arp(const struct ctx *c,
 		return true;
 
 	/* Don't resolve the guest's assigned address, either. */
-	if (!memcmp(am->tip, &c->ip4.addr, sizeof(am->tip)))
+	a = fwd_get_addr(c, AF_INET, true, CONF_ADDR_ANY);
+	if (!a)
+		return false;
+	a4 = inany_v4(&a->addr);
+	if (a4 && !memcmp(am->tip, a4, sizeof(am->tip)))
 		return true;
 
 	return false;
@@ -123,11 +130,21 @@ int arp(const struct ctx *c, struct iov_tail *data)
  */
 void arp_send_init_req(const struct ctx *c)
 {
+	const struct guest_addr *a;
+	const struct in_addr *a4;
 	struct {
 		struct ethhdr eh;
 		struct arphdr ah;
 		struct arpmsg am;
 	} __attribute__((__packed__)) req;
+
+	a = fwd_get_addr(c, AF_INET, true, CONF_ADDR_ANY);
+	if (!a)
+		return;
+
+	a4 = inany_v4(&a->addr);
+	if (!a4)
+		return;
 
 	/* Ethernet header */
 	req.eh.h_proto = htons(ETH_P_ARP);
@@ -145,7 +162,7 @@ void arp_send_init_req(const struct ctx *c)
 	memcpy(req.am.sha,	c->our_tap_mac,		sizeof(req.am.sha));
 	memcpy(req.am.sip,	&c->ip4.our_tap_addr,	sizeof(req.am.sip));
 	memcpy(req.am.tha,	MAC_BROADCAST,		sizeof(req.am.tha));
-	memcpy(req.am.tip,	&c->ip4.addr,		sizeof(req.am.tip));
+	memcpy(req.am.tip,	a4,			sizeof(req.am.tip));
 
 	debug("Sending initial ARP request for guest MAC address");
 	tap_send_single(c, &req, sizeof(req));

@@ -19,6 +19,8 @@
 	(ntohl(((struct in_addr *)(a))->s_addr) >> IN_CLASSA_NSHIFT == IN_LOOPBACKNET)
 #define IN4_IS_ADDR_MULTICAST(a) \
 	(IN_MULTICAST(ntohl(((struct in_addr *)(a))->s_addr)))
+#define IN4_MASK(prefix) \
+	((prefix) <= 0 ? 0 : htonl(0xffffffff << (32 - (prefix))))
 #define IN4_ARE_ADDR_EQUAL(a, b) \
 	(((struct in_addr *)(a))->s_addr == ((struct in_addr *)b)->s_addr)
 #define IN4ADDR_LOOPBACK_INIT \
