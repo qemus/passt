@@ -755,6 +755,7 @@ static void tcp_rtt_dst_check(const struct tcp_tap_conn *conn,
 			      const struct tcp_info_linux *tinfo)
 {
 	const struct flowside *tapside = TAPFLOW(conn);
+	char buf[INANY_ADDRSTRLEN];
 	int i, hole = -1;
 
 	if (!min_rtt_cap ||
@@ -773,6 +774,10 @@ static void tcp_rtt_dst_check(const struct tcp_tap_conn *conn,
 	 */
 	if (hole == -1)
 		return;
+
+	flow_dbg(conn, "Adding %s to low RTT table, minimum RTT: %u us",
+		 inany_ntop(&tapside->oaddr, buf, sizeof(buf)),
+		 tinfo->tcpi_min_rtt);
 
 	low_rtt_dst[hole++] = tapside->oaddr;
 	if (hole == LOW_RTT_TABLE_SIZE)
