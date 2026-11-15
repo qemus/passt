@@ -295,14 +295,19 @@ void flow_log__(const struct flow_common *f, int pri, bool perror, bool details,
 	(void)vsnprintf(msg, sizeof(msg), fmt, args);
 	va_end(args);
 
-	/* Show type if it's set, otherwise the state */
-	if (f->state < FLOW_STATE_TYPED)
-		type_or_state = FLOW_STATE(f);
-	else
-		type_or_state = FLOW_TYPE(f);
+	if (!f) {
+		logmsg(!perror, false, pri, "Flow: not found, error: %s", msg);
+		details = false;
+	} else {
+		/* Show type if it's set, otherwise the state */
+		if (f->state < FLOW_STATE_TYPED)
+			type_or_state = FLOW_STATE(f);
+		else
+			type_or_state = FLOW_TYPE(f);
 
-	logmsg(!perror, false, pri,
-	       "Flow %u (%s): %s", flow_idx(f), type_or_state, msg);
+		logmsg(!perror, false, pri,
+		       "Flow %u (%s): %s", flow_idx(f), type_or_state, msg);
+	}
 
 	if (perror)
 		logmsg(true, true, pri, ": %s", strerror_(errno_));
