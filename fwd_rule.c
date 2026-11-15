@@ -694,7 +694,8 @@ static void fwd_rule_parse_ports(struct fwd_table *fwd, bool del, uint8_t proto,
 
 	/* Finally handle "all" and exclude only cases */
 	if (exclude_only) {
-		fwd_port_map_ephemeral(exclude);
+		if (!(flags & FWD_SCAN))
+			fwd_port_map_ephemeral(exclude);
 
 		fwd_rule_range_except(fwd, del, proto, addr, ifname,
 				      1, NUM_PORTS - 1, exclude,
