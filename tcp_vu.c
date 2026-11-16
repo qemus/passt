@@ -291,7 +291,7 @@ static ssize_t tcp_vu_sock_recv(const struct ctx *c, struct vu_virtq *vq,
 
 		cnt = iov_tail_clone(&iov_msg[j], ARRAY_SIZE(iov_msg) - j,
 				     &data);
-		assert(cnt < ARRAY_SIZE(iov_msg) - j);
+		assert(cnt <= ARRAY_SIZE(iov_msg) - j);
 		if (cnt < 0)
 			die("Missing entries in iov_msg");
 
