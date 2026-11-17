@@ -70,7 +70,7 @@ enum opt_conf {
  */
 struct opt {
 	int sent;
-	int slen;
+	unsigned int slen;
 	int clen;
 	enum opt_conf conf;
 	uint8_t c[255];
@@ -529,13 +529,13 @@ static size_t fill_split_areas(struct msg *m, size_t opt_size, int o,
 
 	written = fill_split(m->o, opt_size, o, opt_off,
 			      opts[o].s, opts[o].slen, dry_run);
-	if (written < (size_t)opts[o].slen && !has_bootfile) {
+	if (written < opts[o].slen && !has_bootfile) {
 		written += fill_split(m->file, sizeof(m->file) - 1, o,
 				      file_off,
 				      opts[o].s + written,
 				      opts[o].slen - written, dry_run);
 	}
-	if (written < (size_t)opts[o].slen) {
+	if (written < opts[o].slen) {
 		written += fill_split(m->sname, sizeof(m->sname) - 1, o,
 				      sname_off,
 				      opts[o].s + written,
@@ -610,7 +610,7 @@ static int fill(struct msg *m, bool has_bootfile)
 					 &dry_sname_off,
 					 has_bootfile, true);
 
-		if (total < (size_t)opts[o].slen) {
+		if (total < opts[o].slen) {
 			debug("DHCP: skipping option %i (no space)", o);
 			continue;
 		}
@@ -620,7 +620,7 @@ static int fill(struct msg *m, bool has_bootfile)
 					   &offset, &file_off, &sname_off,
 					   has_bootfile, false);
 
-		if (written >= (size_t)opts[o].slen)
+		if (written >= opts[o].slen)
 			opts[o].sent = 1;
 	}
 
@@ -690,7 +690,7 @@ static int opt_dns_search_dup_ptr(unsigned char *buf, const char *cmp,
 static void opt_set_dns_search(const struct ctx *c, size_t max_len)
 {
 	char buf[NS_MAXDNAME];
-	int i;
+	unsigned int i;
 
 	opts[119].slen = 0;
 
@@ -954,8 +954,8 @@ int dhcp(const struct ctx *c, struct iov_tail *data)
 	/* RFC 2132, Section 9.5: put boot file name in the 'file' header
 	 * field.  Reserve the file field from overload.
 	 */
-	has_bootfile = opts[67].slen > 0 &&
-		       (size_t)opts[67].slen < sizeof(reply.file);
+	has_bootfile = opts[67].slen &&
+		       opts[67].slen < sizeof(reply.file);
 
 	dlen = offsetof(struct msg, o) + fill(&reply, has_bootfile);
 
