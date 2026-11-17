@@ -19,11 +19,29 @@
  * but was little enough used that we decided not to implement backwards
  * compatiblity code (i.e. a v2 pesto will not work with a v1 pasta)
  */
-#define PESTO_PROTOCOL_VERSION	2
+/* Version 3 added a status byte, sent by the server after trying to apply the
+ * new rules (see enum pesto_status)
+ */
+#define PESTO_VERSION_STATUS	3
+#define PESTO_PROTOCOL_VERSION	3
 
 /* Maximum size of a pif name, including \0 */
 #define	PIF_NAME_SIZE	(128)
 #define PIF_NONE	0
+
+/**
+ * enum pesto_status - Result of a configuration update (protocol version 3+)
+ * @PESTO_STATUS_OK:		New rules applied
+ * @PESTO_STATUS_ROLLBACK:	New rules failed, old rules restored
+ * @PESTO_STATUS_FAILED:	New rules failed, couldn't restore old ones
+ *
+ * Sent by the server as a single byte after trying to apply the new rules.
+ */
+enum pesto_status {
+	PESTO_STATUS_OK = 0,
+	PESTO_STATUS_ROLLBACK = 1,
+	PESTO_STATUS_FAILED = 2,
+};
 
 /**
  * struct pesto_hello - Server introduction message

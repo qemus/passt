@@ -2299,6 +2299,7 @@ fail:
 void conf_handler(struct ctx *c, uint32_t events)
 {
 	if (events & EPOLLIN) {
+		enum pesto_status status = PESTO_STATUS_OK;
 		unsigned pif;
 
 		/* Clear pending tables */
@@ -2323,11 +2324,18 @@ void conf_handler(struct ctx *c, uint32_t events)
 		}
 
 		if (fwd_listen_switch(c) < 0) {
+			status = PESTO_STATUS_ROLLBACK;
 			err("Error switching to new forwarding rules");
+
 			/* Switch back to old rules (still in c->fwd_pending) */
-			if (fwd_listen_switch(c) < 0)
+			if (fwd_listen_switch(c) < 0) {
+				status = PESTO_STATUS_FAILED;
 				err("Couldn't restore old forwarding rules");
+			}
 		}
+
+		if (write_u8(c->fd_control, status) < 0)
+			warn_perror("Failed to write status on control socket");
 	}
 
 	if (events & EPOLLHUP) {
