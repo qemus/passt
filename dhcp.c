@@ -728,6 +728,9 @@ static void opt_set_dns_search(const struct ctx *c, size_t max_len)
 		if (n >= max_len)
 			break;
 
+		if (opts[119].slen + n > sizeof(opts[119].s))
+			break;
+
 		memcpy(opts[119].s + opts[119].slen, buf, n);
 		opts[119].slen += n;
 		max_len -= n;
