@@ -286,7 +286,6 @@ int flowside_connect(const struct ctx *c, int s,
 void flow_log__(const struct flow_common *f, int pri, bool perror, bool details,
 		enum flow_state state, const char *fmt, ...)
 {
-	const char *type_or_state;
 	int errno_ = errno;
 	char msg[BUFSIZ];
 	va_list args;
@@ -299,6 +298,8 @@ void flow_log__(const struct flow_common *f, int pri, bool perror, bool details,
 		logmsg(!perror, false, pri, "Flow: not found, error: %s", msg);
 		details = false;
 	} else {
+		const char *type_or_state;
+
 		/* Show type if it's set, otherwise the state */
 		if (f->state < FLOW_STATE_TYPED)
 			type_or_state = FLOW_STATE(f);
