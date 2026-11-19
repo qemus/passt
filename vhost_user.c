@@ -639,6 +639,10 @@ static bool vu_set_vring_num_exec(struct vu_dev *vdev,
 
 	trace("State.index: %u", idx);
 	trace("State.num:   %u", num);
+
+	if (idx >= VHOST_USER_MAX_VQS)
+		die("Invalid vhost-user queue index (SET_VRING_NUM): %u", idx);
+
 	vdev->vq[idx].vring.num = num;
 
 	return false;
@@ -659,7 +663,14 @@ static bool vu_set_vring_addr_exec(struct vu_dev *vdev,
 	 * can be unaligned as it is packed.
 	 */
 	struct vhost_vring_addr addr = vmsg->payload.addr;
-	struct vu_virtq *vq = &vdev->vq[addr.index];
+	struct vu_virtq *vq;
+
+	if (addr.index >= VHOST_USER_MAX_VQS) {
+		die("Invalid vhost-user queue index (SET_VRING_ADDR): %u",
+		    addr.index);
+	}
+
+	vq = &vdev->vq[addr.index];
 
 	debug("vhost_vring_addr:");
 	debug("    index:  %d", addr.index);
@@ -705,6 +716,10 @@ static bool vu_set_vring_base_exec(struct vu_dev *vdev,
 
 	debug("State.index: %u", idx);
 	debug("State.num:   %u", num);
+
+	if (idx >= VHOST_USER_MAX_VQS)
+		die("Invalid vhost-user queue index (SET_VRING_BASE): %u", idx);
+
 	vdev->vq[idx].shadow_avail_idx = vdev->vq[idx].last_avail_idx = num;
 
 	return false;
@@ -724,6 +739,10 @@ static bool vu_get_vring_base_exec(struct vu_dev *vdev,
 	unsigned int idx = vmsg->payload.state.index;
 
 	debug("State.index: %u", idx);
+
+	if (idx >= VHOST_USER_MAX_VQS)
+		die("Invalid vhost-user queue index (GET_VRING_BASE): %u", idx);
+
 	vmsg->payload.state.num = vdev->vq[idx].last_avail_idx;
 	vmsg->hdr.size = sizeof(vmsg->payload.state);
 
@@ -792,10 +811,13 @@ static void vu_check_queue_msg_file(struct vhost_user_msg *vmsg)
 static bool vu_set_vring_kick_exec(struct vu_dev *vdev,
 				   struct vhost_user_msg *vmsg)
 {
+	unsigned idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 	bool nofd = vmsg->payload.u64 & VHOST_USER_VRING_NOFD_MASK;
-	int idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 
 	debug("u64: 0x%016"PRIx64, vmsg->payload.u64);
+
+	if (idx >= VHOST_USER_MAX_VQS)
+		die("Invalid vhost-user queue index (SET_VRING_KICK): %u", idx);
 
 	vu_check_queue_msg_file(vmsg);
 
@@ -832,10 +854,13 @@ static bool vu_set_vring_kick_exec(struct vu_dev *vdev,
 static bool vu_set_vring_call_exec(struct vu_dev *vdev,
 				   struct vhost_user_msg *vmsg)
 {
+	unsigned idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 	bool nofd = vmsg->payload.u64 & VHOST_USER_VRING_NOFD_MASK;
-	int idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 
 	debug("u64: 0x%016"PRIx64, vmsg->payload.u64);
+
+	if (idx >= VHOST_USER_MAX_VQS)
+		die("Invalid vhost-user queue index (SET_VRING_ADDR): %u", idx);
 
 	vu_check_queue_msg_file(vmsg);
 
@@ -867,10 +892,13 @@ static bool vu_set_vring_call_exec(struct vu_dev *vdev,
 static bool vu_set_vring_err_exec(struct vu_dev *vdev,
 				  struct vhost_user_msg *vmsg)
 {
+	unsigned idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 	bool nofd = vmsg->payload.u64 & VHOST_USER_VRING_NOFD_MASK;
-	int idx = vmsg->payload.u64 & VHOST_USER_VRING_IDX_MASK;
 
 	debug("u64: 0x%016"PRIx64, vmsg->payload.u64);
+
+	if (idx >= VHOST_USER_MAX_VQS)
+		die("Invalid vhost-user queue index (SET_VRING_ERR): %u", idx);
 
 	vu_check_queue_msg_file(vmsg);
 
