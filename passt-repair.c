@@ -119,7 +119,7 @@ static int wait_for_socket(struct sockaddr_un *a, const char *dir,
 	ret = snprintf(a->sun_path, sizeof(a->sun_path), "%s/%s",
 		       dir, ev->name);
 
-	if ((stat(a->sun_path, sb))) {
+	if (stat(a->sun_path, sb)) {
 		FPRINTF(stderr, "Can't stat() %s: %i\n", a->sun_path, errno);
 		_exit(1);
 	}
@@ -186,7 +186,7 @@ int main(int argc, char **argv)
 		_exit(1);
 	}
 
-	if ((stat(argv[1], &sb))) {
+	if (stat(argv[1], &sb)) {
 		FPRINTF(stderr, "Can't stat() %s: %i\n", argv[1], errno);
 		_exit(1);
 	}
