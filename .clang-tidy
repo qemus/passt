@@ -9,8 +9,11 @@ Checks:
     - "-cppcoreguidelines-init-variables"
 
     #	Dubious value over the compiler's built-in warning.  Would
-    #	increase verbosity.
+    #	increase verbosity.  Same for its broader variant, added in
+    #	clang-tidy 23, also known as cert-exp45-c
     - "-bugprone-assignment-in-if-condition"
+    - "-bugprone-assignment-in-selection-statement"
+    - "-cert-exp45-c"
 
     #	Debatable whether these improve readability, right now it would look
     #	like a mess
@@ -98,6 +101,15 @@ Checks:
     # dumb situations, like not allowing !, && etc. on bool inputs to
     # be treated directly as a bool.
     - "-readability-implicit-bool-conversion"
+
+    # Wants trailing commas in multi-line initialiser lists, and none in
+    # single-line ones.  Not part of our coding style, and enforcing it
+    # would mean churn all over the place for no practical benefit.
+    - "-readability-trailing-comma"
+
+    # Merging nested if statements would often hurt readability, e.g.
+    # where the inner condition has side effects or a separate comment.
+    - "-readability-redundant-nested-if"
 
 WarningsAsErrors: "*"
 HeaderFileExtensions:
