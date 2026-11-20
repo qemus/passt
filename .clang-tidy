@@ -26,8 +26,10 @@ Checks:
     #	TODO: this is Linux-only for the moment, nice to fix eventually
     - "-llvmlibc-restrict-system-libc-headers"
 
-    #	Those are needed for syscalls, epoll_wait flags, etc.
+    #	Those are needed for syscalls, epoll_wait flags, etc.  Moved
+    #	from hicpp to bugprone as clang-tidy 23 dropped the hicpp module
     - "-hicpp-signed-bitwise"
+    - "-bugprone-signed-bitwise"
 
     #	Probably not doable to impement this without plain memcpy(), memset()
     - "-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling"
