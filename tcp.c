@@ -1494,7 +1494,10 @@ static bool tcp_tap_window_update(const struct ctx *c,
 				  struct tcp_tap_conn *conn, unsigned wnd,
 				  const struct timespec *now)
 {
-	wnd = MIN(MAX_WINDOW, wnd << conn->ws_from_tap);
+	/* SEQ_*() only handles sequence differences strictly less than
+	 * MAX_WINDOW, so clamp to MAX_WINDOW - 1.
+	 */
+	wnd = MIN(MAX_WINDOW - 1, wnd << conn->ws_from_tap);
 
 	/* Work-around for bug introduced in peer kernel code, commit
 	 * e2142825c120 ("net: tcp: send zero-window ACK when no memory"): don't
