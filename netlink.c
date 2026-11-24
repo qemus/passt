@@ -522,6 +522,14 @@ int nl_route_set_def(int s, unsigned int ifi, sa_family_t af, const void *gw)
 		req.set.r4.rta_gw.rta_len = rta_len;
 	}
 
+	/* The gateway might not be covered by any assigned prefix, e.g. with
+	 * -g, or in local mode with a user-provided IPv4 address, as we don't
+	 * copy the device route for it in these cases. We answer ARP requests
+	 * and neighbour solicitations for any address other than the guest's,
+	 * so it's reachable anyway: treat it as on-link
+	 */
+	req.rtm.rtm_flags = RTNH_F_ONLINK;
+
 	return nl_do(s, &req, RTM_NEWROUTE, NLM_F_CREATE | NLM_F_EXCL, len);
 }
 
