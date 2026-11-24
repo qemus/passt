@@ -309,7 +309,7 @@ static void tcp_data_to_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 
 	tcp_l2_buf_pad(iov);
 
-	if (++tcp_payload_used > TCP_FRAMES_MEM - 1)
+	if (++tcp_payload_used > TCP_FRAMES_MEM - 2)
 		tcp_payload_flush(c, now);
 }
 
@@ -352,7 +352,7 @@ int tcp_buf_data_from_sock(const struct ctx *c, struct tcp_tap_conn *conn,
 		return -1;
 	}
 
-	if (tcp_payload_used + fill_bufs > TCP_FRAMES_MEM) {
+	if (tcp_payload_used + fill_bufs > TCP_FRAMES_MEM - 1) {
 		tcp_payload_flush(c, now);
 
 		/* Silence Coverity CWE-125 false positive */
