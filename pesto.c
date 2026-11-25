@@ -318,7 +318,7 @@ int main(int argc, char **argv)
 	struct sockaddr_un a = { AF_UNIX, "" };
 	struct configuration conf = { 0 };
 	bool update = false, show = false;
-	int exit_status = EXIT_SUCCESS;
+	uint8_t status = PESTO_STATUS_OK;
 	struct pesto_hello hello;
 	struct sock_fprog prog;
 	int optname, ret, s;
@@ -515,8 +515,6 @@ int main(int argc, char **argv)
 	send_conf(s, &conf);
 
 	if (s_version >= PESTO_VERSION_STATUS) {
-		uint8_t status;
-
 		if (read_u8(s, &status) < 0)
 			die_perror("Couldn't read configuration status");
 
@@ -524,16 +522,13 @@ int main(int argc, char **argv)
 		case PESTO_STATUS_OK:
 			break;
 		case PESTO_STATUS_ROLLBACK:
-			exit_status = EXIT_FAILURE;
 			warn("Failed to apply new rules, old rules restored");
 			break;
 		case PESTO_STATUS_FAILED:
-			exit_status = EXIT_FAILURE;
 			warn(
 "Failed to apply new rules, couldn't restore old ones");
 			break;
 		default:
-			exit_status = EXIT_FAILURE;
 			warn("Unknown configuration status %"PRIu8, status);
 		}
 	}
@@ -542,5 +537,5 @@ noupdate:
 	if (shutdown(s, SHUT_RDWR) < 0 || close(s) < 0)
 		die_perror("Error shutting down control socket");
 
-	exit(exit_status);
+	exit(status == PESTO_STATUS_OK ? EXIT_SUCCESS : EXIT_FAILURE);
 }
