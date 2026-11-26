@@ -1023,6 +1023,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 {
 	const struct flowside *toside;
 	struct mmsghdr mm[UIO_MAXIOV];
+	size_t packet_idx[UIO_MAXIOV + 1];
 	union sockaddr_inany to_sa;
 	struct iovec m[UIO_MAXIOV];
 	struct udphdr uh_storage;
@@ -1033,15 +1034,16 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 	flow_sidx_t tosidx;
 	in_port_t src, dst;
 	uint8_t topif;
+	size_t slot;
 
 	assert(!c->no_udp);
 
 	if (!packet_get(p, idx, &data))
-		return 1;
+		return packet_next(p, idx) - idx;
 
 	uh = IOV_PEEK_HEADER(&data, uh_storage);
 	if (!uh)
-		return 1;
+		return packet_next(p, idx) - idx;
 
 	/* The caller already checks that all the messages have the same source
 	 * and destination, so we can just take those from the first message.
@@ -1057,7 +1059,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 			       pif_name(pif),
 			       inet_ntop(af, saddr, sstr, sizeof(sstr)), src,
 			       inet_ntop(af, daddr, dstr, sizeof(dstr)), dst);
-		return 1;
+		return packet_next(p, idx) - idx;
 	}
 
 	topif = pif_at_sidx(tosidx);
@@ -1068,7 +1070,7 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 		flow_err_ratelimit(uflow, now,
 				   "No support for forwarding UDP from %s to %s",
 				   pif_name(frompif), pif_name(topif));
-		return 1;
+		return packet_next(p, idx) - idx;
 	}
 	toside = flowside_at_sidx(tosidx);
 
@@ -1077,10 +1079,14 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 
 	pif_sockaddr(c, &to_sa, topif, &toside->eaddr, toside->eport);
 
-	for (i = 0, j = 0; i < (int)p->count - idx && j < UIO_MAXIOV; i++) {
+	for (i = 0, j = 0, slot = idx;
+	     slot < p->count && j < UIO_MAXIOV && i < UIO_MAXIOV;
+	     slot = packet_next(p, slot), i++) {
 		const struct udphdr *uh_send;
 
-		if (!packet_get(p, idx + i, &data))
+		packet_idx[count] = slot;
+
+		if (!packet_get(p, slot, &data))
 			return p->count - idx;
 
 		uh_send = IOV_REMOVE_HEADER(&data, uh_storage);
@@ -1129,12 +1135,13 @@ int udp_tap_handler(const struct ctx *c, uint8_t pif,
 
 		count++;
 	}
+	packet_idx[count] = slot;
 
 	count = sendmmsg(s, mm, count, MSG_NOSIGNAL);
 	if (count < 0)
-		return 1;
+		return packet_next(p, idx) - idx;
 
-	return count;
+	return packet_idx[count] - idx;
 }
 
 /**

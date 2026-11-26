@@ -1954,7 +1954,8 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 
 	assert(conn->events & ESTABLISHED);
 
-	for (i = idx, iov_i = 0; i < (int)p->count; i++) {
+	for (i = idx, iov_i = 0; i < (int)p->count;
+	     i = (i == -1) ? 0 : packet_next(p, i)) {
 		uint32_t seq, seq_offset, ack_seq;
 		struct tcphdr th_storage;
 		const struct tcphdr *th;
@@ -1977,7 +1978,7 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 
 		if (th->rst) {
 			tcp_sock_rst(c, conn, now);
-			return 1;
+			return packet_next(p, i) - i;
 		}
 
 		len -= off;
@@ -1998,10 +1999,10 @@ static int tcp_data_from_tap(const struct ctx *c, struct tcp_tap_conn *conn,
 				       &((int){ 1 }), sizeof(int)))
 				flow_trace(conn, "failed to set SO_KEEPALIVE");
 
-			if (p->count == 1) {
+			if (packet_next(p, i) == p->count) {
 				tcp_tap_window_update(c, conn,
 						      ntohs(th->window), now);
-				return 1;
+				return packet_next(p, i) - i;
 			}
 
 			continue;
@@ -2329,13 +2330,13 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 	(void)pif;
 
 	if (!packet_get(p, idx, &data))
-		return 1;
+		return packet_next(p, idx) - idx;
 
 	l4len = iov_tail_size(&data);
 
 	th = IOV_REMOVE_HEADER(&data, th_storage);
 	if (!th)
-		return 1;
+		return packet_next(p, idx) - idx;
 
 	optlen = th->doff * 4UL - sizeof(*th);
 	/* Static checkers might fail to see this: */
@@ -2353,7 +2354,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 					  opts, optlen, now);
 		else
 			tcp_rst_no_conn(c, af, saddr, daddr, flow_lbl, th, l4len);
-		return 1;
+		return packet_next(p, idx) - idx;
 	}
 
 	assert(flow->f.type == FLOW_TCP);
@@ -2364,7 +2365,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 	if (th->rst) {
 		tcp_sock_rst(c, conn, now);
-		return 1;
+		return packet_next(p, idx) - idx;
 	}
 
 	conn->inactive = false;
@@ -2378,7 +2379,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		if (th->syn && th->ack && !th->fin) {
 			tcp_conn_from_sock_finish(c, conn, th, opts, optlen,
 						  now);
-			return 1;
+			return packet_next(p, idx) - idx;
 		}
 
 		goto reset;
@@ -2386,8 +2387,9 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 	/* Establishing connection from tap */
 	if (conn->events & TAP_SYN_RCVD) {
+		/* SYN retry: ignore and keep waiting */
 		if (th->syn && !th->ack && !th->fin)
-			return 1;	/* SYN retry: ignore and keep waiting */
+			return packet_next(p, idx) - idx;
 
 		if (!(conn->events & TAP_SYN_ACK_SENT))
 			goto reset;
@@ -2410,7 +2412,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 
 			conn_event(c, conn, SOCK_FIN_SENT, now);
 
-			return 1;
+			return packet_next(p, idx) - idx;
 		}
 
 		if (!th->ack)
@@ -2419,8 +2421,8 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 		if (tcp_tap_window_update(c, conn, ntohs(th->window), now))
 			tcp_data_from_sock(c, conn, now);
 
-		if (p->count - idx == 1)
-			return 1;
+		if (packet_next(p, idx) == p->count)
+			return packet_next(p, idx) - idx;
 	}
 
 	/* Established connections not accepting data from tap */
@@ -2473,7 +2475,7 @@ int tcp_tap_handler(const struct ctx *c, uint8_t pif, sa_family_t af,
 				conn_event(c, conn, CLOSED, now);
 		}
 
-		return 1;
+		return packet_next(p, idx) - idx;
 	}
 
 	/* Established connections accepting data from tap */

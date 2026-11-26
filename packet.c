@@ -207,3 +207,21 @@ void pool_flush(struct pool *p)
 {
 	p->count = 0;
 }
+
+/**
+ * packet_next() - Index of the packet following the one at @idx
+ * @p:		Packet pool
+ * @idx:	Slot index of the current packet (marker or single iovec)
+ *
+ * A multi-iovec packet is stored as a marker slot (iov_base == NULL) whose
+ * iov_len holds the number of iovec slots that follow it.
+ *
+ * Return: slot index of the next packet
+ */
+size_t packet_next(const struct pool *p, size_t idx)
+{
+	if (p->pkt[idx].iov_base == NULL)
+		return idx + p->pkt[idx].iov_len + 1;
+
+	return idx + 1;
+}

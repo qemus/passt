@@ -700,7 +700,7 @@ static int tap4_handler(struct ctx *c, const struct pool *in,
 
 	i = 0;
 resume:
-	for (seq_count = 0, seq = NULL; i < in->count; i++) {
+	for (seq_count = 0, seq = NULL; i < in->count; i = packet_next(in, i)) {
 		struct iovec trim_iov[UIO_MAXIOV];
 		size_t l3len, hlen, l4len, check;
 		struct ethhdr eh_storage;
@@ -948,7 +948,7 @@ static int tap6_handler(struct ctx *c, const struct pool *in,
 
 	i = 0;
 resume:
-	for (seq_count = 0, seq = NULL; i < in->count; i++) {
+	for (seq_count = 0, seq = NULL; i < in->count; i = packet_next(in, i)) {
 		size_t l4len, plen, check;
 		struct in6_addr *saddr, *daddr;
 		struct ipv6hdr ip6h_storage;

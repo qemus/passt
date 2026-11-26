@@ -41,6 +41,7 @@ bool packet_get_do(const struct pool *p, const size_t idx,
 		   struct iov_tail *data, const char *func, int line);
 bool pool_can_fit(const struct pool *p, struct iov_tail *data);
 void pool_flush(struct pool *p);
+size_t packet_next(const struct pool *p, size_t idx);
 
 #define packet_add(p, data)					\
 	packet_add_do(p, data, __func__, __LINE__)
