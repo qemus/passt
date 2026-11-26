@@ -35,7 +35,7 @@
 
 #define TCP_FRAMES_MEM			128
 #define TCP_FRAMES							   \
-	(c->mode == MODE_PASTA ? 1 : TCP_FRAMES_MEM)
+	(c->mode == MODE_PASTA ? 1 : TCP_FRAMES_MEM - 1)
 
 /* Static buffers */
 
